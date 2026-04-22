@@ -21,3 +21,11 @@ misc/msvs/* eol=crlf
 *.png binary
 *.ttf binary
 *.tza binary
+
+# Local Godot editor build artifacts are committed for this custom CLI build.
+bin/godot.windows.editor.dev.x86_64.console.exe filter=lfs diff=lfs merge=lfs -text
+bin/godot.windows.editor.dev.x86_64.console.pdb filter=lfs diff=lfs merge=lfs -text
+bin/godot.windows.editor.dev.x86_64.exe filter=lfs diff=lfs merge=lfs -text
+bin/godot.windows.editor.dev.x86_64.exp filter=lfs diff=lfs merge=lfs -text
+bin/godot.windows.editor.dev.x86_64.lib filter=lfs diff=lfs merge=lfs -text
+bin/godot.windows.editor.dev.x86_64.pdb filter=lfs diff=lfs merge=lfs -text

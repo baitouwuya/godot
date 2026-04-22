@@ -71,8 +71,6 @@ protected:
 
 	void reload_all_workspace_scripts();
 
-	void list_script_files(const String &p_root_dir, List<String> &r_files);
-
 	void apply_new_signal(Object *obj, String function, PackedStringArray args);
 
 public:
@@ -83,6 +81,8 @@ public:
 
 public:
 	Error initialize();
+
+	void list_script_files(const String &p_root_dir, List<String> &r_files);
 
 	String get_file_path(const String &p_uri);
 	String get_file_uri(const String &p_path) const;

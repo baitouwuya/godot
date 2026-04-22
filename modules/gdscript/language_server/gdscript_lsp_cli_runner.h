@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  gdscript_language_server.h                                            */
+/*  gdscript_lsp_cli_runner.h                                             */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,35 +30,42 @@
 
 #pragma once
 
-#include "gdscript_language_protocol.h"
+#include "core/string/ustring.h"
 
-#include "editor/plugins/editor_plugin.h"
-
-class GDScriptLanguageServer : public EditorPlugin {
-	GDCLASS(GDScriptLanguageServer, EditorPlugin);
-
-	GDScriptLanguageProtocol protocol;
-
-	Thread thread;
-	bool thread_running = false;
-	// There is no notification when the editor is initialized. We need to poll till we attempted to start the server.
-	bool start_attempted = false;
-	bool started = false;
-	bool use_thread = false;
-	String host = "127.0.0.1";
-	int port = 6005;
-	int poll_limit_usec = 100000;
-	static void thread_main(void *p_userdata);
-
-private:
-	void _notification(int p_what);
-
+class GDScriptLSPCLIRunner {
 public:
-	static int port_override;
-	static bool cli_mode;
-	GDScriptLanguageServer();
-	void start();
-	void stop();
-};
+	enum ExitCode {
+		EXIT_OK = 0,
+		EXIT_DIAGNOSTICS_FOUND = 1,
+		EXIT_INVALID_ARGUMENTS = 2,
+		EXIT_INITIALIZATION_FAILED = 3,
+		EXIT_QUERY_FAILED = 4,
+	};
 
-void register_lsp_types();
+	enum DiagnosticsFormat {
+		DIAGNOSTICS_FORMAT_JSONL,
+		DIAGNOSTICS_FORMAT_JSON,
+	};
+
+	enum DiagnosticsSeverity {
+		DIAGNOSTICS_SEVERITY_ERROR,
+		DIAGNOSTICS_SEVERITY_WARNING,
+		DIAGNOSTICS_SEVERITY_ALL,
+	};
+
+	struct Options {
+		String query;
+		bool diagnostics = false;
+		String file;
+		int line = -1;
+		int column = -1;
+		String params_json;
+		bool include_declaration = true;
+		DiagnosticsFormat diagnostics_format = DIAGNOSTICS_FORMAT_JSONL;
+		DiagnosticsSeverity diagnostics_severity = DIAGNOSTICS_SEVERITY_ALL;
+	};
+
+	static bool is_enabled(const Options &p_options);
+	static Error validate_options(const Options &p_options, String &r_error);
+	static int run(const Options &p_options);
+};

@@ -368,6 +368,43 @@ bool GDScriptLanguageProtocol::is_goto_native_symbols_enabled() const {
 	return bool(_EDITOR_GET("network/language_server/show_native_symbols_in_editor"));
 }
 
+int GDScriptLanguageProtocol::create_internal_client() {
+	ERR_FAIL_COND_V_MSG(clients.size() >= LSP_MAX_CLIENTS, LSP_NO_CLIENT, "Max client limits reached");
+
+	Ref<LSPeer> peer = memnew(LSPeer);
+	const int client_id = next_client_id;
+	clients.insert(client_id, peer);
+	latest_client_id = client_id;
+	next_client_id++;
+	return client_id;
+}
+
+int GDScriptLanguageProtocol::get_current_client() const {
+	return latest_client_id;
+}
+
+void GDScriptLanguageProtocol::remove_internal_client(int p_client_id, int p_restore_client_id) {
+	clients.erase(p_client_id);
+	if (latest_client_id == p_client_id) {
+		latest_client_id = clients.has(p_restore_client_id) ? p_restore_client_id : LSP_NO_CLIENT;
+	}
+}
+
+void GDScriptLanguageProtocol::clear_stale_parsers() {
+	LSP_CLIENT;
+	client->clear_stale_parsers();
+}
+
+Error GDScriptLanguageProtocol::initialize_for_current_client() {
+	LSP_CLIENT_V(ERR_UNCONFIGURED);
+
+	Dictionary initialize_params;
+	initialize_params["rootPath"] = ProjectSettings::get_singleton()->get_resource_path();
+	initialize_params["rootUri"] = workspace->get_file_uri("res://");
+	initialize(initialize_params);
+	return is_initialized() ? OK : ERR_UNCONFIGURED;
+}
+
 ExtendGDScriptParser *GDScriptLanguageProtocol::LSPeer::parse_script(const String &p_path) {
 	remove_cached_parser(p_path);
 

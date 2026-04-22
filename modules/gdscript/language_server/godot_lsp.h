@@ -236,6 +236,10 @@ struct ReferenceContext {
 	 * Include the declaration of the current symbol.
 	 */
 	bool includeDeclaration = false;
+
+	_FORCE_INLINE_ void load(const Dictionary &p_params) {
+		includeDeclaration = p_params.get("includeDeclaration", false);
+	}
 };
 
 struct ShowMessageParams {
@@ -259,6 +263,13 @@ struct ShowMessageParams {
 
 struct ReferenceParams : TextDocumentPositionParams {
 	ReferenceContext context;
+
+	_FORCE_INLINE_ void load(const Dictionary &p_params) {
+		TextDocumentPositionParams::load(p_params);
+		if (p_params.has("context")) {
+			context.load(p_params["context"]);
+		}
+	}
 };
 
 struct DocumentLinkParams {

@@ -145,7 +145,9 @@
 #ifdef MODULE_GDSCRIPT_ENABLED
 #include "modules/gdscript/gdscript.h"
 #if defined(TOOLS_ENABLED) && !defined(GDSCRIPT_NO_LSP)
+#define GDSCRIPT_LSP_CLI_ENABLED
 #include "modules/gdscript/language_server/gdscript_language_server.h"
+#include "modules/gdscript/language_server/gdscript_lsp_cli_runner.h"
 #endif // TOOLS_ENABLED && !GDSCRIPT_NO_LSP
 #endif // MODULE_GDSCRIPT_ENABLED
 
@@ -221,6 +223,10 @@ static bool auto_build_solutions = false;
 static String debug_server_uri;
 static bool wait_for_import = false;
 static bool restore_editor_window_layout = true;
+#ifdef GDSCRIPT_LSP_CLI_ENABLED
+static GDScriptLSPCLIRunner::Options gdscript_lsp_cli_options;
+static bool gdscript_lsp_cli_executed = false;
+#endif // GDSCRIPT_LSP_CLI_ENABLED
 #ifndef DISABLE_DEPRECATED
 static int converter_max_kb_file = 4 * 1024; // 4MB
 static int converter_max_line_length = 100000;
@@ -557,9 +563,9 @@ void Main::print_help(const char *p_binary) {
 	print_help_option("--recovery-mode", "Start the editor in recovery mode, which disables features that can typically cause startup crashes, such as tool scripts, editor plugins, GDExtension addons, and others.\n", CLI_OPTION_AVAILABILITY_EDITOR);
 	print_help_option("--debug-server <uri>", "Start the editor debug server (<protocol>://<host/IP>[:port], e.g. tcp://127.0.0.1:6007)\n", CLI_OPTION_AVAILABILITY_EDITOR);
 	print_help_option("--dap-port <port>", "Use the specified port for the GDScript Debug Adapter Protocol. Recommended port range [1024, 49151].\n", CLI_OPTION_AVAILABILITY_EDITOR);
-#if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
+#ifdef GDSCRIPT_LSP_CLI_ENABLED
 	print_help_option("--lsp-port <port>", "Use the specified port for the GDScript Language Server Protocol. Recommended port range [1024, 49151].\n", CLI_OPTION_AVAILABILITY_EDITOR);
-#endif // MODULE_GDSCRIPT_ENABLED && !GDSCRIPT_NO_LSP
+#endif // GDSCRIPT_LSP_CLI_ENABLED
 #endif
 	print_help_option("--quit", "Quit after the first iteration.\n");
 	print_help_option("--quit-after <int>", "Quit after the given number of iterations. Set to 0 to disable.\n");
@@ -686,6 +692,17 @@ void Main::print_help(const char *p_binary) {
 #endif // defined(OVERRIDE_PATH_ENABLED)
 #ifdef TOOLS_ENABLED
 	print_help_option("--import", "Starts the editor, waits for any resources to be imported, and then quits.\n", CLI_OPTION_AVAILABILITY_EDITOR);
+#ifdef GDSCRIPT_LSP_CLI_ENABLED
+	print_help_option("--lsp-query <operation>", "Run a one-shot GDScript LSP query and print the JSON result. Operations: hover, definition, declaration, references, document-symbol, completion, signature-help.\n", CLI_OPTION_AVAILABILITY_EDITOR);
+	print_help_option("--lsp-diagnostics", "Scan all GDScript files in the project and print diagnostics.\n", CLI_OPTION_AVAILABILITY_EDITOR);
+	print_help_option("--file <path>", "File used by --lsp-query. Accepts res://, file:// or local paths.\n", CLI_OPTION_AVAILABILITY_EDITOR);
+	print_help_option("--line <line>", "1-based line used by position-based --lsp-query operations.\n", CLI_OPTION_AVAILABILITY_EDITOR);
+	print_help_option("--column <column>", "1-based column used by position-based --lsp-query operations.\n", CLI_OPTION_AVAILABILITY_EDITOR);
+	print_help_option("--params-json <json>", "Full LSP request params for --lsp-query. Mutually exclusive with --file, --line and --column.\n", CLI_OPTION_AVAILABILITY_EDITOR);
+	print_help_option("--include-declaration <bool>", "Include declarations in --lsp-query references results (default: true).\n", CLI_OPTION_AVAILABILITY_EDITOR);
+	print_help_option("--diagnostics-format <jsonl|json>", "Output format for --lsp-diagnostics (default: jsonl).\n", CLI_OPTION_AVAILABILITY_EDITOR);
+	print_help_option("--diagnostics-severity <error|warning|all>", "Severity filter for --lsp-diagnostics (default: all).\n", CLI_OPTION_AVAILABILITY_EDITOR);
+#endif // GDSCRIPT_LSP_CLI_ENABLED
 	print_help_option("--export-release <preset> <path>", "Export the project in release mode using the given preset and output path. The preset name should match one defined in \"export_presets.cfg\".\n", CLI_OPTION_AVAILABILITY_EDITOR);
 	print_help_option("", "<path> should be absolute or relative to the project directory, and include the filename for the binary (e.g. \"builds/game.exe\").\n");
 	print_help_option("", "The target directory must exist.\n");
@@ -1114,6 +1131,17 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 	// Exit error code used in the `goto error` conditions.
 	// It's returned as the program exit code. ERR_HELP is special cased and handled as success (0).
 	Error exit_err = ERR_INVALID_PARAMETER;
+#ifdef GDSCRIPT_LSP_CLI_ENABLED
+	gdscript_lsp_cli_options = GDScriptLSPCLIRunner::Options();
+	gdscript_lsp_cli_executed = false;
+	bool has_gdscript_lsp_cli_arg = false;
+	for (const String &arg : args) {
+		if (arg == "--lsp-query" || arg == "--lsp-diagnostics") {
+			has_gdscript_lsp_cli_arg = true;
+			break;
+		}
+	}
+#endif // GDSCRIPT_LSP_CLI_ENABLED
 
 	I = args.front();
 	while (I) {
@@ -1631,6 +1659,112 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 			cmdline_tool = true;
 			wait_for_import = true;
 			quit_after = 1;
+#ifdef GDSCRIPT_LSP_CLI_ENABLED
+		} else if (arg == "--lsp-query") {
+			if (N) {
+				gdscript_lsp_cli_options.query = N->get();
+				GDScriptLanguageServer::cli_mode = true;
+				editor = true;
+				cmdline_tool = true;
+				wait_for_import = true;
+				Engine::get_singleton()->_print_header = false;
+				quiet_stdout = true;
+				N = N->next();
+			} else {
+				OS::get_singleton()->print("Missing operation after --lsp-query, aborting.\n");
+				goto error;
+			}
+		} else if (arg == "--lsp-diagnostics") {
+			gdscript_lsp_cli_options.diagnostics = true;
+			GDScriptLanguageServer::cli_mode = true;
+			editor = true;
+			cmdline_tool = true;
+			wait_for_import = true;
+			Engine::get_singleton()->_print_header = false;
+			quiet_stdout = true;
+		} else if (has_gdscript_lsp_cli_arg && arg == "--file") {
+			if (N) {
+				gdscript_lsp_cli_options.file = N->get();
+				N = N->next();
+			} else {
+				OS::get_singleton()->print("Missing path after --file, aborting.\n");
+				goto error;
+			}
+		} else if (has_gdscript_lsp_cli_arg && arg == "--line") {
+			if (N) {
+				gdscript_lsp_cli_options.line = N->get().to_int();
+				N = N->next();
+			} else {
+				OS::get_singleton()->print("Missing line after --line, aborting.\n");
+				goto error;
+			}
+		} else if (has_gdscript_lsp_cli_arg && arg == "--column") {
+			if (N) {
+				gdscript_lsp_cli_options.column = N->get().to_int();
+				N = N->next();
+			} else {
+				OS::get_singleton()->print("Missing column after --column, aborting.\n");
+				goto error;
+			}
+		} else if (has_gdscript_lsp_cli_arg && arg == "--params-json") {
+			if (N) {
+				gdscript_lsp_cli_options.params_json = N->get();
+				N = N->next();
+			} else {
+				OS::get_singleton()->print("Missing JSON object after --params-json, aborting.\n");
+				goto error;
+			}
+		} else if (has_gdscript_lsp_cli_arg && arg == "--include-declaration") {
+			if (N) {
+				String include_declaration = N->get().to_lower();
+				if (include_declaration == "true" || include_declaration == "1" || include_declaration == "yes") {
+					gdscript_lsp_cli_options.include_declaration = true;
+				} else if (include_declaration == "false" || include_declaration == "0" || include_declaration == "no") {
+					gdscript_lsp_cli_options.include_declaration = false;
+				} else {
+					OS::get_singleton()->print("--include-declaration must be true or false, aborting.\n");
+					goto error;
+				}
+				N = N->next();
+			} else {
+				OS::get_singleton()->print("Missing boolean after --include-declaration, aborting.\n");
+				goto error;
+			}
+		} else if (has_gdscript_lsp_cli_arg && arg == "--diagnostics-format") {
+			if (N) {
+				String format = N->get().to_lower();
+				if (format == "jsonl") {
+					gdscript_lsp_cli_options.diagnostics_format = GDScriptLSPCLIRunner::DIAGNOSTICS_FORMAT_JSONL;
+				} else if (format == "json") {
+					gdscript_lsp_cli_options.diagnostics_format = GDScriptLSPCLIRunner::DIAGNOSTICS_FORMAT_JSON;
+				} else {
+					OS::get_singleton()->print("--diagnostics-format must be jsonl or json, aborting.\n");
+					goto error;
+				}
+				N = N->next();
+			} else {
+				OS::get_singleton()->print("Missing format after --diagnostics-format, aborting.\n");
+				goto error;
+			}
+		} else if (has_gdscript_lsp_cli_arg && arg == "--diagnostics-severity") {
+			if (N) {
+				String severity = N->get().to_lower();
+				if (severity == "error") {
+					gdscript_lsp_cli_options.diagnostics_severity = GDScriptLSPCLIRunner::DIAGNOSTICS_SEVERITY_ERROR;
+				} else if (severity == "warning") {
+					gdscript_lsp_cli_options.diagnostics_severity = GDScriptLSPCLIRunner::DIAGNOSTICS_SEVERITY_WARNING;
+				} else if (severity == "all") {
+					gdscript_lsp_cli_options.diagnostics_severity = GDScriptLSPCLIRunner::DIAGNOSTICS_SEVERITY_ALL;
+				} else {
+					OS::get_singleton()->print("--diagnostics-severity must be error, warning or all, aborting.\n");
+					goto error;
+				}
+				N = N->next();
+			} else {
+				OS::get_singleton()->print("Missing severity after --diagnostics-severity, aborting.\n");
+				goto error;
+			}
+#endif // GDSCRIPT_LSP_CLI_ENABLED
 		} else if (arg == "--export-release" || arg == "--export-debug" ||
 				arg == "--export-pack" || arg == "--export-patch") { // Export project
 			// Actually handling is done in start().
@@ -1947,7 +2081,7 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 				OS::get_singleton()->print("Missing <path> argument for --benchmark-file <path>.\n");
 				goto error;
 			}
-#if defined(TOOLS_ENABLED) && defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
+#ifdef GDSCRIPT_LSP_CLI_ENABLED
 		} else if (arg == "--lsp-port") {
 			if (N) {
 				int port_override = N->get().to_int();
@@ -1961,7 +2095,7 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 				OS::get_singleton()->print("Missing <port> argument for --lsp-port <port>.\n");
 				goto error;
 			}
-#endif // TOOLS_ENABLED && MODULE_GDSCRIPT_ENABLED && !GDSCRIPT_NO_LSP
+#endif // GDSCRIPT_LSP_CLI_ENABLED
 #if defined(TOOLS_ENABLED)
 		} else if (arg == "--dap-port") {
 			if (N) {
@@ -2009,6 +2143,16 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 				"Error: Command line arguments implied opening both editor and project manager, which is not possible. Aborting.\n");
 		goto error;
 	}
+
+#ifdef GDSCRIPT_LSP_CLI_ENABLED
+	if (GDScriptLSPCLIRunner::is_enabled(gdscript_lsp_cli_options)) {
+		String validation_error;
+		if (GDScriptLSPCLIRunner::validate_options(gdscript_lsp_cli_options, validation_error) != OK) {
+			OS::get_singleton()->print("Error: %s\n", validation_error.utf8().get_data());
+			goto error;
+		}
+	}
+#endif // GDSCRIPT_LSP_CLI_ENABLED
 #endif
 
 #if defined(DEBUG_ENABLED) || defined(TOOLS_ENABLED)
@@ -5045,6 +5189,26 @@ bool Main::iteration() {
 	if (wait_for_import && EditorFileSystem::get_singleton() && EditorFileSystem::get_singleton()->doing_first_scan()) {
 		exit = false;
 	}
+
+#ifdef GDSCRIPT_LSP_CLI_ENABLED
+	if (GDScriptLSPCLIRunner::is_enabled(gdscript_lsp_cli_options) && !gdscript_lsp_cli_executed) {
+		exit = false;
+		EditorNode *editor_node = EditorNode::get_singleton();
+		EditorFileSystem *editor_file_system = EditorFileSystem::get_singleton();
+		const bool filesystem_ready = !editor_file_system || (!editor_file_system->is_scanning() && !editor_file_system->is_importing());
+		if (editor_node && editor_node->is_editor_ready() && filesystem_ready) {
+			gdscript_lsp_cli_executed = true;
+			int lsp_cli_exit_code = GDScriptLSPCLIRunner::run(gdscript_lsp_cli_options);
+			SceneTree *main_loop_scene_tree = SceneTree::get_singleton();
+			if (main_loop_scene_tree) {
+				main_loop_scene_tree->quit(lsp_cli_exit_code);
+			} else {
+				OS::get_singleton()->set_exit_code(lsp_cli_exit_code);
+			}
+			exit = true;
+		}
+	}
+#endif // GDSCRIPT_LSP_CLI_ENABLED
 #endif
 
 	if (fixed_fps != -1) {

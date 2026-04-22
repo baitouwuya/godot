@@ -36,6 +36,7 @@
 #include "editor/settings/editor_settings.h"
 
 int GDScriptLanguageServer::port_override = -1;
+bool GDScriptLanguageServer::cli_mode = false;
 
 GDScriptLanguageServer::GDScriptLanguageServer() {
 	// TODO: Move to editor_settings.cpp
@@ -94,6 +95,10 @@ void GDScriptLanguageServer::thread_main(void *p_userdata) {
 }
 
 void GDScriptLanguageServer::start() {
+	if (cli_mode) {
+		return;
+	}
+
 	host = String(_EDITOR_GET("network/language_server/remote_host"));
 	port = (GDScriptLanguageServer::port_override > -1) ? GDScriptLanguageServer::port_override : (int)_EDITOR_GET("network/language_server/remote_port");
 	use_thread = (bool)_EDITOR_GET("network/language_server/use_thread");
@@ -110,6 +115,10 @@ void GDScriptLanguageServer::start() {
 }
 
 void GDScriptLanguageServer::stop() {
+	if (!started) {
+		return;
+	}
+
 	if (use_thread) {
 		ERR_FAIL_COND(!thread.is_started());
 		thread_running = false;

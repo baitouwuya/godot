@@ -72,13 +72,13 @@ private:
 		HashMap<String, LSP::TextDocumentItem> managed_files;
 		HashMap<String, ExtendGDScriptParser *> parse_results;
 
+		void clear_stale_parsers();
 		void remove_cached_parser(const String &p_path);
 		ExtendGDScriptParser *parse_script(const String &p_path);
 
 		~LSPeer();
 
 	private:
-		void clear_stale_parsers();
 		// Paths of parsers which we can't cache longterm.
 		// Can be cleared up using `clear_stale_parsers()`.
 		HashSet<String> stale_parsers;
@@ -130,6 +130,12 @@ public:
 
 	bool is_smart_resolve_enabled() const;
 	bool is_goto_native_symbols_enabled() const;
+
+	int create_internal_client();
+	int get_current_client() const;
+	void remove_internal_client(int p_client_id, int p_restore_client_id);
+	void clear_stale_parsers();
+	Error initialize_for_current_client();
 
 	// Text Document Synchronization
 	void lsp_did_open(const Dictionary &p_params);

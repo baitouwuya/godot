@@ -258,19 +258,28 @@ Array GDScriptTextDocument::references(const Dictionary &p_params) {
 	const LSP::DocumentSymbol *symbol = GDScriptLanguageProtocol::get_singleton()->get_workspace()->resolve_symbol(params);
 	if (symbol) {
 		Vector<LSP::Location> usages = GDScriptLanguageProtocol::get_singleton()->get_workspace()->find_all_usages(*symbol);
-		res.resize(usages.size());
-		int declaration_adjustment = 0;
-		for (int i = 0; i < usages.size(); i++) {
-			LSP::Location usage = usages[i];
-			if (!params.context.includeDeclaration && usage.range == symbol->range) {
-				declaration_adjustment++;
-				continue;
+		if (params.context.includeDeclaration && !symbol->uri.is_empty()) {
+			bool has_declaration = false;
+			for (const LSP::Location &usage : usages) {
+				if (usage.uri == symbol->uri && usage.range == symbol->selectionRange) {
+					has_declaration = true;
+					break;
+				}
 			}
-			res[i - declaration_adjustment] = usages[i].to_json();
+			if (!has_declaration) {
+				LSP::Location declaration;
+				declaration.uri = symbol->uri;
+				declaration.range = symbol->selectionRange;
+				res.push_back(declaration.to_json());
+			}
 		}
 
-		if (declaration_adjustment > 0) {
-			res.resize(res.size() - declaration_adjustment);
+		for (int i = 0; i < usages.size(); i++) {
+			LSP::Location usage = usages[i];
+			if (!params.context.includeDeclaration && usage.uri == symbol->uri && usage.range == symbol->selectionRange) {
+				continue;
+			}
+			res.push_back(usages[i].to_json());
 		}
 	}
 

@@ -14,3 +14,10 @@ Append-only record of wiki activity.
 - Created `project-wiki/wiki/components/gdscript-lsp-cli.md`.
 - Filed branch-local CLI usage, implementation notes, validation results, and
   known limits into a single feature page.
+
+## [2026-04-23] ingest | CLI performance recorder custom feature
+
+- Created `project-wiki/wiki/components/cli-performance-recorder.md`.
+- Filed CLI profiling usage, output contract, percentile and slow-frame
+  interpretation, validation notes, and current limits into a single feature
+  page.

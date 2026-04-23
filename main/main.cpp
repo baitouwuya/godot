@@ -30,6 +30,8 @@
 
 #include "main.h"
 
+#include "main/cli_performance_recorder.h"
+
 #include "core/config/project_settings.h"
 #include "core/core_globals.h"
 #include "core/crypto/crypto.h"
@@ -280,6 +282,8 @@ static int frame_delay = 0;
 static int audio_output_latency = 0;
 static bool disable_render_loop = false;
 static int fixed_fps = -1;
+static CLIPerformanceRecorder::Options cli_perf_options;
+static CLIPerformanceRecorder *cli_perf_recorder = nullptr;
 static MovieWriter *movie_writer = nullptr;
 static bool disable_vsync = false;
 static bool print_fps = false;
@@ -678,6 +682,11 @@ void Main::print_help(const char *p_binary) {
 	print_help_option("--fixed-fps <fps>", "Force a fixed number of frames per second. This setting disables real-time synchronization.\n");
 	print_help_option("--delta-smoothing <enable>", "Enable or disable frame delta smoothing [\"enable\", \"disable\"].\n");
 	print_help_option("--print-fps", "Print the frames per second to the stdout.\n");
+	print_help_option("--perf-record", "Record per-frame performance data for CLI project runs and print a JSON summary to stdout on exit.\n");
+	print_help_option("--perf-start-frame <int>", "First 0-based frame to record for --perf-record (default: 0).\n");
+	print_help_option("--perf-end-frame <int>", "Last 0-based frame to record for --perf-record. Required when --perf-record is enabled.\n");
+	print_help_option("--perf-top-frames <int>", "Keep up to <int> slowest frames in the profiling summary (default: 10, 0 disables slowFrames output).\n");
+	print_help_option("--perf-samples-file <path>", "Write per-frame profiling samples as JSONL to <path> while --perf-record is active.\n");
 #ifdef TOOLS_ENABLED
 	print_help_option("--editor-pseudolocalization", "Enable pseudolocalization for the editor and the project manager.\n", CLI_OPTION_AVAILABILITY_EDITOR);
 #endif
@@ -1132,6 +1141,9 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 	// Exit error code used in the `goto error` conditions.
 	// It's returned as the program exit code. ERR_HELP is special cased and handled as success (0).
 	Error exit_err = ERR_INVALID_PARAMETER;
+	cli_perf_options = CLIPerformanceRecorder::Options();
+	String cli_perf_error;
+	String cli_perf_validation_error;
 #ifdef GDSCRIPT_LSP_CLI_ENABLED
 	gdscript_lsp_cli_options = GDScriptLSPCLIRunner::Options();
 	gdscript_lsp_cli_executed = false;
@@ -1978,6 +1990,11 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 				OS::get_singleton()->print("Missing <path> argument for --benchmark-file <path>.\n");
 				goto error;
 			}
+		} else if (CLIPerformanceRecorder::parse_argument(arg, N, cli_perf_options, cli_perf_error)) {
+			if (!cli_perf_error.is_empty()) {
+				OS::get_singleton()->print("Error: %s\n", cli_perf_error.utf8().get_data());
+				goto error;
+			}
 #ifdef GDSCRIPT_LSP_CLI_ENABLED
 		} else if (arg == "--lsp-port") {
 			if (N) {
@@ -2170,6 +2187,11 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 		}
 	}
 #endif
+
+	if (CLIPerformanceRecorder::validate_options(cli_perf_options, editor, project_manager, cmdline_tool, cli_perf_validation_error) != OK) {
+		OS::get_singleton()->print("Error: %s\n", cli_perf_validation_error.utf8().get_data());
+		goto error;
+	}
 
 #if defined(TOOLS_ENABLED) && (defined(WINDOWS_ENABLED) || defined(LINUXBSD_ENABLED))
 	if (test_rd_support) {
@@ -4815,6 +4837,17 @@ int Main::start() {
 	OS::get_singleton()->benchmark_end_measure("Startup", "Main::Start");
 	OS::get_singleton()->benchmark_dump();
 
+	if (cli_perf_options.enabled) {
+		cli_perf_recorder = memnew(CLIPerformanceRecorder(cli_perf_options));
+		String cli_perf_initialize_error;
+		if (cli_perf_recorder->initialize(cli_perf_initialize_error) != OK) {
+			OS::get_singleton()->print("Error: %s\n", cli_perf_initialize_error.utf8().get_data());
+			memdelete(cli_perf_recorder);
+			cli_perf_recorder = nullptr;
+			return EXIT_FAILURE;
+		}
+	}
+
 	return EXIT_SUCCESS;
 }
 
@@ -5045,6 +5078,15 @@ bool Main::iteration() {
 	}
 
 	frames++;
+	if (cli_perf_recorder) {
+		cli_perf_recorder->record_frame(
+				Engine::get_singleton()->get_process_frames(),
+				frame_time,
+				process_ticks,
+				physics_process_ticks,
+				navigation_process_ticks,
+				physics_step);
+	}
 	Engine::get_singleton()->_process_frames++;
 
 	if (frame > 1000000) {
@@ -5284,6 +5326,18 @@ void Main::cleanup(bool p_force) {
 
 	finalize_display();
 
+	OS::get_singleton()->benchmark_end_measure("Shutdown", "Main::Cleanup");
+	OS::get_singleton()->benchmark_dump();
+	_err_flush_stdout();
+	const bool cli_perf_completed = cli_perf_recorder && cli_perf_recorder->is_completed();
+
+	if (cli_perf_recorder) {
+		cli_perf_recorder->print_summary_stdout(cli_perf_completed);
+		cli_perf_recorder->close();
+		memdelete(cli_perf_recorder);
+		cli_perf_recorder = nullptr;
+	}
+
 	if (input) {
 		memdelete(input);
 	}
@@ -5343,9 +5397,5 @@ void Main::cleanup(bool p_force) {
 	}
 
 	unregister_core_types();
-
-	OS::get_singleton()->benchmark_end_measure("Shutdown", "Main::Cleanup");
-	OS::get_singleton()->benchmark_dump();
-
 	OS::get_singleton()->finalize_core();
 }

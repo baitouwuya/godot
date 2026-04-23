@@ -7,6 +7,9 @@ official documentation tree.
 
 - [GDScript LSP CLI](components/gdscript-lsp-cli.md) - One-shot GDScript LSP
   queries and diagnostics for editor-backed automation.
+- [CLI Performance Recorder](components/cli-performance-recorder.md) -
+  Per-frame CLI profiling with percentile summaries, slow-frame snapshots, and
+  optional JSONL sample export.
 
 ## Operations
 

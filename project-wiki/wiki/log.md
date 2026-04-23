@@ -21,3 +21,10 @@ Append-only record of wiki activity.
 - Filed CLI profiling usage, output contract, percentile and slow-frame
   interpretation, validation notes, and current limits into a single feature
   page.
+
+## [2026-04-23] ingest | Custom feature branching workflow
+
+- Created `project-wiki/wiki/operations/custom-feature-branching.md`.
+- Filed the repository rule that each custom feature must live on its own
+  branch first and only merge into `codex/custom-main` after completion and
+  verification.

@@ -13,4 +13,7 @@ official documentation tree.
 
 ## Operations
 
+- [Custom Feature Branching](operations/custom-feature-branching.md) - Workflow
+  rule for developing each custom feature on its own branch before merging into
+  `codex/custom-main`.
 - [Wiki Log](log.md) - Chronological record of wiki updates.

@@ -30,7 +30,13 @@
 
 #pragma once
 
+#include "core/object/ref_counted.h"
+#include "core/templates/list.h"
+#include "core/variant/array.h"
+#include "core/variant/dictionary.h"
 #include "core/string/ustring.h"
+
+class GDScriptWorkspace;
 
 class GDScriptLSPCLIRunner {
 public:
@@ -45,12 +51,20 @@ public:
 	enum DiagnosticsFormat {
 		DIAGNOSTICS_FORMAT_JSONL,
 		DIAGNOSTICS_FORMAT_JSON,
+		DIAGNOSTICS_FORMAT_SUMMARY,
 	};
 
 	enum DiagnosticsSeverity {
 		DIAGNOSTICS_SEVERITY_ERROR,
 		DIAGNOSTICS_SEVERITY_WARNING,
 		DIAGNOSTICS_SEVERITY_ALL,
+	};
+
+	enum DiagnosticsFailOn {
+		DIAGNOSTICS_FAIL_ON_ERROR,
+		DIAGNOSTICS_FAIL_ON_WARNING,
+		DIAGNOSTICS_FAIL_ON_ANY,
+		DIAGNOSTICS_FAIL_ON_NEVER,
 	};
 
 	struct Options {
@@ -63,8 +77,16 @@ public:
 		bool include_declaration = true;
 		DiagnosticsFormat diagnostics_format = DIAGNOSTICS_FORMAT_JSONL;
 		DiagnosticsSeverity diagnostics_severity = DIAGNOSTICS_SEVERITY_ALL;
+		DiagnosticsFailOn diagnostics_fail_on = DIAGNOSTICS_FAIL_ON_ANY;
 	};
 
+	static bool has_entrypoint_argument(const List<String> &p_args);
+	static bool parse_argument(const String &p_arg, List<String>::Element *&r_next, bool p_has_entrypoint_argument, Options &r_options, String &r_error);
+	static void apply_startup_options(const Options &p_options, bool &r_editor, bool &r_cmdline_tool, bool &r_wait_for_import, bool &r_quiet_stdout, bool &r_recovery_mode);
+	static String normalize_file_path(const String &p_file);
+	static Error build_query_params(const Options &p_options, const Ref<GDScriptWorkspace> &p_workspace, Dictionary &r_params, String &r_error);
+	static Dictionary summarize_diagnostics(const Array &p_diagnostics);
+	static bool should_fail_for_severity(int p_severity, DiagnosticsFailOn p_fail_on);
 	static bool is_enabled(const Options &p_options);
 	static Error validate_options(const Options &p_options, String &r_error);
 	static int run(const Options &p_options);

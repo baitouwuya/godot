@@ -700,8 +700,9 @@ void Main::print_help(const char *p_binary) {
 	print_help_option("--column <column>", "1-based column used by position-based --lsp-query operations.\n", CLI_OPTION_AVAILABILITY_EDITOR);
 	print_help_option("--params-json <json>", "Full LSP request params for --lsp-query. Mutually exclusive with --file, --line and --column.\n", CLI_OPTION_AVAILABILITY_EDITOR);
 	print_help_option("--include-declaration <bool>", "Include declarations in --lsp-query references results (default: true).\n", CLI_OPTION_AVAILABILITY_EDITOR);
-	print_help_option("--diagnostics-format <jsonl|json>", "Output format for --lsp-diagnostics (default: jsonl).\n", CLI_OPTION_AVAILABILITY_EDITOR);
+	print_help_option("--diagnostics-format <jsonl|json|summary>", "Output format for --lsp-diagnostics (default: jsonl).\n", CLI_OPTION_AVAILABILITY_EDITOR);
 	print_help_option("--diagnostics-severity <error|warning|all>", "Severity filter for --lsp-diagnostics (default: all).\n", CLI_OPTION_AVAILABILITY_EDITOR);
+	print_help_option("--diagnostics-fail-on <error|warning|any|never>", "Exit code policy for --lsp-diagnostics (default: any).\n", CLI_OPTION_AVAILABILITY_EDITOR);
 #endif // GDSCRIPT_LSP_CLI_ENABLED
 	print_help_option("--export-release <preset> <path>", "Export the project in release mode using the given preset and output path. The preset name should match one defined in \"export_presets.cfg\".\n", CLI_OPTION_AVAILABILITY_EDITOR);
 	print_help_option("", "<path> should be absolute or relative to the project directory, and include the filename for the binary (e.g. \"builds/game.exe\").\n");
@@ -1134,13 +1135,8 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 #ifdef GDSCRIPT_LSP_CLI_ENABLED
 	gdscript_lsp_cli_options = GDScriptLSPCLIRunner::Options();
 	gdscript_lsp_cli_executed = false;
-	bool has_gdscript_lsp_cli_arg = false;
-	for (const String &arg : args) {
-		if (arg == "--lsp-query" || arg == "--lsp-diagnostics") {
-			has_gdscript_lsp_cli_arg = true;
-			break;
-		}
-	}
+	const bool has_gdscript_lsp_cli_arg = GDScriptLSPCLIRunner::has_entrypoint_argument(args);
+	String gdscript_lsp_cli_error;
 #endif // GDSCRIPT_LSP_CLI_ENABLED
 
 	I = args.front();
@@ -1660,108 +1656,9 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 			wait_for_import = true;
 			quit_after = 1;
 #ifdef GDSCRIPT_LSP_CLI_ENABLED
-		} else if (arg == "--lsp-query") {
-			if (N) {
-				gdscript_lsp_cli_options.query = N->get();
-				GDScriptLanguageServer::cli_mode = true;
-				editor = true;
-				cmdline_tool = true;
-				wait_for_import = true;
-				Engine::get_singleton()->_print_header = false;
-				quiet_stdout = true;
-				N = N->next();
-			} else {
-				OS::get_singleton()->print("Missing operation after --lsp-query, aborting.\n");
-				goto error;
-			}
-		} else if (arg == "--lsp-diagnostics") {
-			gdscript_lsp_cli_options.diagnostics = true;
-			GDScriptLanguageServer::cli_mode = true;
-			editor = true;
-			cmdline_tool = true;
-			wait_for_import = true;
-			Engine::get_singleton()->_print_header = false;
-			quiet_stdout = true;
-		} else if (has_gdscript_lsp_cli_arg && arg == "--file") {
-			if (N) {
-				gdscript_lsp_cli_options.file = N->get();
-				N = N->next();
-			} else {
-				OS::get_singleton()->print("Missing path after --file, aborting.\n");
-				goto error;
-			}
-		} else if (has_gdscript_lsp_cli_arg && arg == "--line") {
-			if (N) {
-				gdscript_lsp_cli_options.line = N->get().to_int();
-				N = N->next();
-			} else {
-				OS::get_singleton()->print("Missing line after --line, aborting.\n");
-				goto error;
-			}
-		} else if (has_gdscript_lsp_cli_arg && arg == "--column") {
-			if (N) {
-				gdscript_lsp_cli_options.column = N->get().to_int();
-				N = N->next();
-			} else {
-				OS::get_singleton()->print("Missing column after --column, aborting.\n");
-				goto error;
-			}
-		} else if (has_gdscript_lsp_cli_arg && arg == "--params-json") {
-			if (N) {
-				gdscript_lsp_cli_options.params_json = N->get();
-				N = N->next();
-			} else {
-				OS::get_singleton()->print("Missing JSON object after --params-json, aborting.\n");
-				goto error;
-			}
-		} else if (has_gdscript_lsp_cli_arg && arg == "--include-declaration") {
-			if (N) {
-				String include_declaration = N->get().to_lower();
-				if (include_declaration == "true" || include_declaration == "1" || include_declaration == "yes") {
-					gdscript_lsp_cli_options.include_declaration = true;
-				} else if (include_declaration == "false" || include_declaration == "0" || include_declaration == "no") {
-					gdscript_lsp_cli_options.include_declaration = false;
-				} else {
-					OS::get_singleton()->print("--include-declaration must be true or false, aborting.\n");
-					goto error;
-				}
-				N = N->next();
-			} else {
-				OS::get_singleton()->print("Missing boolean after --include-declaration, aborting.\n");
-				goto error;
-			}
-		} else if (has_gdscript_lsp_cli_arg && arg == "--diagnostics-format") {
-			if (N) {
-				String format = N->get().to_lower();
-				if (format == "jsonl") {
-					gdscript_lsp_cli_options.diagnostics_format = GDScriptLSPCLIRunner::DIAGNOSTICS_FORMAT_JSONL;
-				} else if (format == "json") {
-					gdscript_lsp_cli_options.diagnostics_format = GDScriptLSPCLIRunner::DIAGNOSTICS_FORMAT_JSON;
-				} else {
-					OS::get_singleton()->print("--diagnostics-format must be jsonl or json, aborting.\n");
-					goto error;
-				}
-				N = N->next();
-			} else {
-				OS::get_singleton()->print("Missing format after --diagnostics-format, aborting.\n");
-				goto error;
-			}
-		} else if (has_gdscript_lsp_cli_arg && arg == "--diagnostics-severity") {
-			if (N) {
-				String severity = N->get().to_lower();
-				if (severity == "error") {
-					gdscript_lsp_cli_options.diagnostics_severity = GDScriptLSPCLIRunner::DIAGNOSTICS_SEVERITY_ERROR;
-				} else if (severity == "warning") {
-					gdscript_lsp_cli_options.diagnostics_severity = GDScriptLSPCLIRunner::DIAGNOSTICS_SEVERITY_WARNING;
-				} else if (severity == "all") {
-					gdscript_lsp_cli_options.diagnostics_severity = GDScriptLSPCLIRunner::DIAGNOSTICS_SEVERITY_ALL;
-				} else {
-					OS::get_singleton()->print("--diagnostics-severity must be error, warning or all, aborting.\n");
-					goto error;
-				}
-				N = N->next();
-			} else {
-				OS::get_singleton()->print("Missing severity after --diagnostics-severity, aborting.\n");
+		} else if (GDScriptLSPCLIRunner::parse_argument(arg, N, has_gdscript_lsp_cli_arg, gdscript_lsp_cli_options, gdscript_lsp_cli_error)) {
+			if (!gdscript_lsp_cli_error.is_empty()) {
+				OS::get_singleton()->print("Error: %s\n", gdscript_lsp_cli_error.utf8().get_data());
 				goto error;
 			}
 #endif // GDSCRIPT_LSP_CLI_ENABLED
@@ -2138,6 +2035,14 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 	}
 
 #ifdef TOOLS_ENABLED
+#ifdef GDSCRIPT_LSP_CLI_ENABLED
+	GDScriptLanguageServer::cli_mode = GDScriptLSPCLIRunner::is_enabled(gdscript_lsp_cli_options);
+	GDScriptLSPCLIRunner::apply_startup_options(gdscript_lsp_cli_options, editor, cmdline_tool, wait_for_import, quiet_stdout, recovery_mode);
+	if (GDScriptLanguageServer::cli_mode) {
+		Engine::get_singleton()->_print_header = false;
+	}
+#endif // GDSCRIPT_LSP_CLI_ENABLED
+
 	if (editor && project_manager) {
 		OS::get_singleton()->print(
 				"Error: Command line arguments implied opening both editor and project manager, which is not possible. Aborting.\n");
@@ -2291,6 +2196,15 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 #endif
 
 #ifdef TOOLS_ENABLED
+	if (recovery_mode) {
+		if (project_manager || !editor) {
+			OS::get_singleton()->print("Error: Recovery mode can only be used in the editor. Aborting.\n");
+			goto error;
+		}
+
+		Engine::get_singleton()->set_recovery_mode_hint(true);
+	}
+
 	if (editor) {
 		Engine::get_singleton()->set_editor_hint(true);
 		Engine::get_singleton()->set_extension_reloading_enabled(true);
@@ -2307,15 +2221,6 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 
 	if (project_manager) {
 		Engine::get_singleton()->set_project_manager_hint(true);
-	}
-
-	if (recovery_mode) {
-		if (project_manager || !editor) {
-			OS::get_singleton()->print("Error: Recovery mode can only be used in the editor. Aborting.\n");
-			goto error;
-		}
-
-		Engine::get_singleton()->set_recovery_mode_hint(true);
 	}
 #endif
 

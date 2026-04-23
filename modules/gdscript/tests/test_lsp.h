@@ -36,9 +36,12 @@
 
 #ifdef MODULE_JSONRPC_ENABLED
 
+#include <initializer_list>
+
 #include "tests/test_macros.h"
 
 #include "../language_server/gdscript_extend_parser.h"
+#include "../language_server/gdscript_lsp_cli_runner.h"
 #include "../language_server/gdscript_language_protocol.h"
 #include "../language_server/gdscript_workspace.h"
 #include "../language_server/godot_lsp.h"
@@ -337,6 +340,33 @@ void test_position_roundtrip(LSP::Position p_lsp, GodotPosition p_gd, const Pack
 	CHECK_EQ(p_lsp, actual_lsp);
 }
 
+struct ParsedCLIOptionsResult {
+	GDScriptLSPCLIRunner::Options options;
+	String error;
+};
+
+ParsedCLIOptionsResult parse_cli_options(const std::initializer_list<const char *> &p_args) {
+	List<String> args;
+	for (const char *arg : p_args) {
+		args.push_back(String(arg));
+	}
+
+	ParsedCLIOptionsResult result;
+	const bool has_entrypoint_argument = GDScriptLSPCLIRunner::has_entrypoint_argument(args);
+	for (List<String>::Element *E = args.front(); E;) {
+		List<String>::Element *N = E->next();
+		String error;
+		GDScriptLSPCLIRunner::parse_argument(E->get(), N, has_entrypoint_argument, result.options, error);
+		if (!error.is_empty()) {
+			result.error = error;
+			break;
+		}
+		E = N;
+	}
+
+	return result;
+}
+
 // Note:
 // * Cursor is BETWEEN chars
 //	 * `va|r` -> cursor between `a`&`r`
@@ -539,6 +569,156 @@ func f():
 		memdelete(proto);
 		memdelete(efs);
 		finish_language();
+	}
+
+	TEST_CASE("[cli_runner][options]") {
+		SUBCASE("Parses diagnostics summary and fail-on options") {
+			ParsedCLIOptionsResult parsed = parse_cli_options({
+					"--lsp-diagnostics",
+					"--diagnostics-format",
+					"summary",
+					"--diagnostics-severity",
+					"all",
+					"--diagnostics-fail-on",
+					"warning",
+			});
+			REQUIRE(parsed.error.is_empty());
+			CHECK(parsed.options.diagnostics);
+			CHECK_EQ(parsed.options.diagnostics_format, GDScriptLSPCLIRunner::DIAGNOSTICS_FORMAT_SUMMARY);
+			CHECK_EQ(parsed.options.diagnostics_severity, GDScriptLSPCLIRunner::DIAGNOSTICS_SEVERITY_ALL);
+			CHECK_EQ(parsed.options.diagnostics_fail_on, GDScriptLSPCLIRunner::DIAGNOSTICS_FAIL_ON_WARNING);
+
+			String validation_error;
+			CHECK_EQ(GDScriptLSPCLIRunner::validate_options(parsed.options, validation_error), OK);
+			CHECK(validation_error.is_empty());
+		}
+
+		SUBCASE("Rejects diagnostics format outside diagnostics mode") {
+			ParsedCLIOptionsResult parsed = parse_cli_options({
+					"--lsp-query",
+					"hover",
+					"--file",
+					"res://lsp/local_variables.gd",
+					"--line",
+					"2",
+					"--column",
+					"1",
+					"--diagnostics-format",
+					"summary",
+			});
+			REQUIRE(parsed.error.is_empty());
+
+			String validation_error;
+			CHECK_EQ(GDScriptLSPCLIRunner::validate_options(parsed.options, validation_error), ERR_INVALID_PARAMETER);
+			CHECK_EQ(validation_error, String("--diagnostics-format is only valid with --lsp-diagnostics."));
+		}
+
+		SUBCASE("Rejects include declaration outside references queries") {
+			ParsedCLIOptionsResult parsed = parse_cli_options({
+					"--lsp-query",
+					"hover",
+					"--file",
+					"res://lsp/local_variables.gd",
+					"--line",
+					"2",
+					"--column",
+					"1",
+					"--include-declaration",
+					"false",
+			});
+			REQUIRE(parsed.error.is_empty());
+
+			String validation_error;
+			CHECK_EQ(GDScriptLSPCLIRunner::validate_options(parsed.options, validation_error), ERR_INVALID_PARAMETER);
+			CHECK_EQ(validation_error, String("--include-declaration is only valid with --lsp-query references."));
+		}
+	}
+
+	TEST_CASE("[cli_runner][query_params]") {
+		EditorFileSystem *efs = memnew(EditorFileSystem);
+		GDScriptLanguageProtocol *proto = initialize(root);
+		REQUIRE(proto);
+		Ref<GDScriptWorkspace> workspace = GDScriptLanguageProtocol::get_singleton()->get_workspace();
+
+		SUBCASE("Normalizes project relative files and injects references context") {
+			GDScriptLSPCLIRunner::Options options;
+			options.query = "references";
+			options.file = "lsp/local_variables.gd";
+			options.line = 2;
+			options.column = 1;
+			options.include_declaration = false;
+
+			CHECK_EQ(GDScriptLSPCLIRunner::normalize_file_path(options.file), String("res://lsp/local_variables.gd"));
+
+			Dictionary params;
+			String error;
+			CHECK_EQ(GDScriptLSPCLIRunner::build_query_params(options, workspace, params, error), OK);
+			CHECK(error.is_empty());
+
+			Dictionary text_document = params["textDocument"];
+			CHECK_EQ(String(text_document["uri"]), workspace->get_file_uri("res://lsp/local_variables.gd"));
+
+			Dictionary context = params["context"];
+			CHECK_EQ(bool(context["includeDeclaration"]), false);
+		}
+
+		SUBCASE("Preserves explicit context from params json") {
+			GDScriptLSPCLIRunner::Options options;
+			options.query = "references";
+			options.params_json = "{\"textDocument\":{\"uri\":\"res://lsp/local_variables.gd\"},\"position\":{\"line\":1,\"character\":0},\"context\":{\"includeDeclaration\":true}}";
+			options.include_declaration = false;
+
+			Dictionary params;
+			String error;
+			CHECK_EQ(GDScriptLSPCLIRunner::build_query_params(options, workspace, params, error), OK);
+			CHECK(error.is_empty());
+
+			Dictionary context = params["context"];
+			CHECK_EQ(bool(context["includeDeclaration"]), true);
+		}
+
+		memdelete(proto);
+		memdelete(efs);
+		finish_language();
+	}
+
+	TEST_CASE("[cli_runner][diagnostics_summary]") {
+		Array diagnostics;
+		{
+			Dictionary diagnostic;
+			diagnostic["severityName"] = "warning";
+			diagnostic["path"] = "res://main.gd";
+			diagnostics.push_back(diagnostic);
+		}
+		{
+			Dictionary diagnostic;
+			diagnostic["severityName"] = "warning";
+			diagnostic["path"] = "res://main.gd";
+			diagnostics.push_back(diagnostic);
+		}
+		{
+			Dictionary diagnostic;
+			diagnostic["severityName"] = "error";
+			diagnostic["path"] = "res://tests/run_all_tests.gd";
+			diagnostics.push_back(diagnostic);
+		}
+
+		Dictionary summary = GDScriptLSPCLIRunner::summarize_diagnostics(diagnostics);
+		CHECK_EQ(int(summary["total"]), 3);
+
+		Dictionary by_severity = summary["bySeverity"];
+		CHECK_EQ(int(by_severity["warning"]), 2);
+		CHECK_EQ(int(by_severity["error"]), 1);
+
+		Dictionary by_file = summary["byFile"];
+		CHECK_EQ(int(by_file["res://main.gd"]), 2);
+		CHECK_EQ(int(by_file["res://tests/run_all_tests.gd"]), 1);
+
+		CHECK(GDScriptLSPCLIRunner::should_fail_for_severity(LSP::DiagnosticSeverity::Error, GDScriptLSPCLIRunner::DIAGNOSTICS_FAIL_ON_ERROR));
+		CHECK(!GDScriptLSPCLIRunner::should_fail_for_severity(LSP::DiagnosticSeverity::Warning, GDScriptLSPCLIRunner::DIAGNOSTICS_FAIL_ON_ERROR));
+		CHECK(GDScriptLSPCLIRunner::should_fail_for_severity(LSP::DiagnosticSeverity::Warning, GDScriptLSPCLIRunner::DIAGNOSTICS_FAIL_ON_WARNING));
+		CHECK(GDScriptLSPCLIRunner::should_fail_for_severity(LSP::DiagnosticSeverity::Hint, GDScriptLSPCLIRunner::DIAGNOSTICS_FAIL_ON_ANY));
+		CHECK(!GDScriptLSPCLIRunner::should_fail_for_severity(LSP::DiagnosticSeverity::Error, GDScriptLSPCLIRunner::DIAGNOSTICS_FAIL_ON_NEVER));
 	}
 
 	TEST_CASE("BBCode to markdown conversion") {

@@ -35,10 +35,21 @@
 #include "gdscript_workspace.h"
 #include "godot_lsp.h"
 
-#include "core/config/project_settings.h"
 #include "core/config/engine.h"
+#include "core/config/project_settings.h"
 #include "core/io/json.h"
 #include "core/os/os.h"
+
+static bool _consume_argument_value(const String &p_arg, List<String>::Element *&r_next, String &r_value, String &r_error) {
+	if (!r_next) {
+		r_error = "Missing value after " + p_arg + ".";
+		return false;
+	}
+
+	r_value = r_next->get();
+	r_next = r_next->next();
+	return true;
+}
 
 static bool _is_position_query(const String &p_query) {
 	return p_query == "hover" ||
@@ -91,6 +102,20 @@ static bool _severity_matches(int p_severity, GDScriptLSPCLIRunner::DiagnosticsS
 	return true;
 }
 
+static bool _parse_bool_string(const String &p_value, bool &r_value) {
+	String normalized = p_value.to_lower();
+	if (normalized == "true" || normalized == "1" || normalized == "yes") {
+		r_value = true;
+		return true;
+	}
+	if (normalized == "false" || normalized == "0" || normalized == "no") {
+		r_value = false;
+		return true;
+	}
+
+	return false;
+}
+
 static bool _parse_json_dictionary(const String &p_json, Dictionary &r_params, String &r_error) {
 	Ref<JSON> json;
 	json.instantiate();
@@ -138,11 +163,7 @@ static String _file_to_uri(const Ref<GDScriptWorkspace> &p_workspace, const Stri
 		return p_file;
 	}
 
-	if (p_file.is_relative_path() && !p_file.is_resource_file()) {
-		return p_workspace->get_file_uri("res://" + p_file);
-	}
-
-	return p_workspace->get_file_uri(p_file);
+	return p_workspace->get_file_uri(GDScriptLSPCLIRunner::normalize_file_path(p_file));
 }
 
 static Variant _run_query(const GDScriptLSPCLIRunner::Options &p_options, String &r_error) {
@@ -151,17 +172,8 @@ static Variant _run_query(const GDScriptLSPCLIRunner::Options &p_options, String
 	Ref<GDScriptTextDocument> text_document = protocol->get_text_document();
 
 	Dictionary params;
-	if (!p_options.params_json.is_empty()) {
-		if (!_parse_json_dictionary(p_options.params_json, params, r_error)) {
-			return Variant();
-		}
-	} else {
-		const String uri = _file_to_uri(workspace, p_options.file);
-		if (p_options.query == "document-symbol") {
-			params = _make_document_symbol_params(uri);
-		} else {
-			params = _make_text_document_params(uri, p_options.line, p_options.column);
-		}
+	if (GDScriptLSPCLIRunner::build_query_params(p_options, workspace, params, r_error) != OK) {
+		return Variant();
 	}
 
 	if (p_options.query == "hover") {
@@ -206,7 +218,7 @@ static int _run_diagnostics(const GDScriptLSPCLIRunner::Options &p_options) {
 	paths.sort();
 
 	Array diagnostics;
-	bool found_diagnostic = false;
+	bool should_fail = false;
 
 	for (const String &path : paths) {
 		ExtendGDScriptParser *parser = protocol->get_parse_result(path);
@@ -219,7 +231,7 @@ static int _run_diagnostics(const GDScriptLSPCLIRunner::Options &p_options) {
 				continue;
 			}
 
-			found_diagnostic = true;
+			should_fail = should_fail || GDScriptLSPCLIRunner::should_fail_for_severity(diagnostic.severity, p_options.diagnostics_fail_on);
 
 			Dictionary diagnostic_json = _make_diagnostic_json(workspace, path, diagnostic);
 			if (p_options.diagnostics_format == GDScriptLSPCLIRunner::DIAGNOSTICS_FORMAT_JSONL) {
@@ -228,16 +240,230 @@ static int _run_diagnostics(const GDScriptLSPCLIRunner::Options &p_options) {
 				diagnostics.push_back(diagnostic_json);
 			}
 		}
-
 	}
 
 	protocol->clear_stale_parsers();
 
 	if (p_options.diagnostics_format == GDScriptLSPCLIRunner::DIAGNOSTICS_FORMAT_JSON) {
 		_print_json_stdout(diagnostics);
+	} else if (p_options.diagnostics_format == GDScriptLSPCLIRunner::DIAGNOSTICS_FORMAT_SUMMARY) {
+		_print_json_stdout(GDScriptLSPCLIRunner::summarize_diagnostics(diagnostics));
 	}
 
-	return found_diagnostic ? GDScriptLSPCLIRunner::EXIT_DIAGNOSTICS_FOUND : GDScriptLSPCLIRunner::EXIT_OK;
+	return should_fail ? GDScriptLSPCLIRunner::EXIT_DIAGNOSTICS_FOUND : GDScriptLSPCLIRunner::EXIT_OK;
+}
+
+bool GDScriptLSPCLIRunner::has_entrypoint_argument(const List<String> &p_args) {
+	for (const String &arg : p_args) {
+		if (arg == "--lsp-query" || arg == "--lsp-diagnostics") {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+bool GDScriptLSPCLIRunner::parse_argument(const String &p_arg, List<String>::Element *&r_next, bool p_has_entrypoint_argument, Options &r_options, String &r_error) {
+	String value;
+	r_error = String();
+
+	if (p_arg == "--lsp-query") {
+		if (!_consume_argument_value(p_arg, r_next, value, r_error)) {
+			return true;
+		}
+		r_options.query = value;
+		return true;
+	}
+
+	if (p_arg == "--lsp-diagnostics") {
+		r_options.diagnostics = true;
+		return true;
+	}
+
+	if (!p_has_entrypoint_argument) {
+		return false;
+	}
+
+	if (p_arg == "--file") {
+		if (!_consume_argument_value(p_arg, r_next, r_options.file, r_error)) {
+			return true;
+		}
+		return true;
+	}
+
+	if (p_arg == "--line") {
+		if (!_consume_argument_value(p_arg, r_next, value, r_error)) {
+			return true;
+		}
+		r_options.line = value.to_int();
+		return true;
+	}
+
+	if (p_arg == "--column") {
+		if (!_consume_argument_value(p_arg, r_next, value, r_error)) {
+			return true;
+		}
+		r_options.column = value.to_int();
+		return true;
+	}
+
+	if (p_arg == "--params-json") {
+		if (!_consume_argument_value(p_arg, r_next, r_options.params_json, r_error)) {
+			return true;
+		}
+		return true;
+	}
+
+	if (p_arg == "--include-declaration") {
+		if (!_consume_argument_value(p_arg, r_next, value, r_error)) {
+			return true;
+		}
+
+		if (!_parse_bool_string(value, r_options.include_declaration)) {
+			r_error = "--include-declaration must be true or false.";
+		}
+		return true;
+	}
+
+	if (p_arg == "--diagnostics-format") {
+		if (!_consume_argument_value(p_arg, r_next, value, r_error)) {
+			return true;
+		}
+
+		value = value.to_lower();
+		if (value == "jsonl") {
+			r_options.diagnostics_format = DIAGNOSTICS_FORMAT_JSONL;
+		} else if (value == "json") {
+			r_options.diagnostics_format = DIAGNOSTICS_FORMAT_JSON;
+		} else if (value == "summary") {
+			r_options.diagnostics_format = DIAGNOSTICS_FORMAT_SUMMARY;
+		} else {
+			r_error = "--diagnostics-format must be jsonl, json or summary.";
+		}
+		return true;
+	}
+
+	if (p_arg == "--diagnostics-severity") {
+		if (!_consume_argument_value(p_arg, r_next, value, r_error)) {
+			return true;
+		}
+
+		value = value.to_lower();
+		if (value == "error") {
+			r_options.diagnostics_severity = DIAGNOSTICS_SEVERITY_ERROR;
+		} else if (value == "warning") {
+			r_options.diagnostics_severity = DIAGNOSTICS_SEVERITY_WARNING;
+		} else if (value == "all") {
+			r_options.diagnostics_severity = DIAGNOSTICS_SEVERITY_ALL;
+		} else {
+			r_error = "--diagnostics-severity must be error, warning or all.";
+		}
+		return true;
+	}
+
+	if (p_arg == "--diagnostics-fail-on") {
+		if (!_consume_argument_value(p_arg, r_next, value, r_error)) {
+			return true;
+		}
+
+		value = value.to_lower();
+		if (value == "error") {
+			r_options.diagnostics_fail_on = DIAGNOSTICS_FAIL_ON_ERROR;
+		} else if (value == "warning") {
+			r_options.diagnostics_fail_on = DIAGNOSTICS_FAIL_ON_WARNING;
+		} else if (value == "any") {
+			r_options.diagnostics_fail_on = DIAGNOSTICS_FAIL_ON_ANY;
+		} else if (value == "never") {
+			r_options.diagnostics_fail_on = DIAGNOSTICS_FAIL_ON_NEVER;
+		} else {
+			r_error = "--diagnostics-fail-on must be error, warning, any or never.";
+		}
+		return true;
+	}
+
+	return false;
+}
+
+void GDScriptLSPCLIRunner::apply_startup_options(const Options &p_options, bool &r_editor, bool &r_cmdline_tool, bool &r_wait_for_import, bool &r_quiet_stdout, bool &r_recovery_mode) {
+	if (!is_enabled(p_options)) {
+		return;
+	}
+
+	r_editor = true;
+	r_cmdline_tool = true;
+	r_wait_for_import = true;
+	r_quiet_stdout = true;
+	r_recovery_mode = true;
+}
+
+String GDScriptLSPCLIRunner::normalize_file_path(const String &p_file) {
+	if (p_file.begins_with("file://")) {
+		return p_file;
+	}
+
+	if (p_file.is_relative_path() && !p_file.is_resource_file()) {
+		return "res://" + p_file;
+	}
+
+	return p_file;
+}
+
+Error GDScriptLSPCLIRunner::build_query_params(const Options &p_options, const Ref<GDScriptWorkspace> &p_workspace, Dictionary &r_params, String &r_error) {
+	if (!p_options.params_json.is_empty()) {
+		if (!_parse_json_dictionary(p_options.params_json, r_params, r_error)) {
+			return ERR_INVALID_PARAMETER;
+		}
+	} else {
+		const String uri = _file_to_uri(p_workspace, p_options.file);
+		if (p_options.query == "document-symbol") {
+			r_params = _make_document_symbol_params(uri);
+		} else {
+			r_params = _make_text_document_params(uri, p_options.line, p_options.column);
+		}
+	}
+
+	if (p_options.query == "references" && !r_params.has("context")) {
+		Dictionary context;
+		context["includeDeclaration"] = p_options.include_declaration;
+		r_params["context"] = context;
+	}
+
+	return OK;
+}
+
+Dictionary GDScriptLSPCLIRunner::summarize_diagnostics(const Array &p_diagnostics) {
+	Dictionary by_severity;
+	Dictionary by_file;
+
+	for (const Variant &item : p_diagnostics) {
+		Dictionary diagnostic = item;
+		String severity_name = diagnostic.get("severityName", "unknown");
+		by_severity[severity_name] = int(by_severity.get(severity_name, 0)) + 1;
+
+		String path = diagnostic.get("path", diagnostic.get("uri", ""));
+		by_file[path] = int(by_file.get(path, 0)) + 1;
+	}
+
+	Dictionary summary;
+	summary["total"] = p_diagnostics.size();
+	summary["bySeverity"] = by_severity;
+	summary["byFile"] = by_file;
+	return summary;
+}
+
+bool GDScriptLSPCLIRunner::should_fail_for_severity(int p_severity, DiagnosticsFailOn p_fail_on) {
+	switch (p_fail_on) {
+		case DIAGNOSTICS_FAIL_ON_ERROR:
+			return p_severity == LSP::DiagnosticSeverity::Error;
+		case DIAGNOSTICS_FAIL_ON_WARNING:
+			return p_severity == LSP::DiagnosticSeverity::Error || p_severity == LSP::DiagnosticSeverity::Warning;
+		case DIAGNOSTICS_FAIL_ON_ANY:
+			return true;
+		case DIAGNOSTICS_FAIL_ON_NEVER:
+			return false;
+	}
+
+	return false;
 }
 
 bool GDScriptLSPCLIRunner::is_enabled(const Options &p_options) {
@@ -252,6 +478,21 @@ Error GDScriptLSPCLIRunner::validate_options(const Options &p_options, String &r
 	if (!p_options.query.is_empty() && p_options.diagnostics) {
 		r_error = "--lsp-query and --lsp-diagnostics are mutually exclusive.";
 		return ERR_INVALID_PARAMETER;
+	}
+
+	if (!p_options.diagnostics) {
+		if (p_options.diagnostics_format != DIAGNOSTICS_FORMAT_JSONL) {
+			r_error = "--diagnostics-format is only valid with --lsp-diagnostics.";
+			return ERR_INVALID_PARAMETER;
+		}
+		if (p_options.diagnostics_severity != DIAGNOSTICS_SEVERITY_ALL) {
+			r_error = "--diagnostics-severity is only valid with --lsp-diagnostics.";
+			return ERR_INVALID_PARAMETER;
+		}
+		if (p_options.diagnostics_fail_on != DIAGNOSTICS_FAIL_ON_ANY) {
+			r_error = "--diagnostics-fail-on is only valid with --lsp-diagnostics.";
+			return ERR_INVALID_PARAMETER;
+		}
 	}
 
 	if (!p_options.query.is_empty()) {
@@ -280,6 +521,11 @@ Error GDScriptLSPCLIRunner::validate_options(const Options &p_options, String &r
 				r_error = "--line and --column are only valid for position-based --lsp-query operations.";
 				return ERR_INVALID_PARAMETER;
 			}
+		}
+
+		if (p_options.query != "references" && !p_options.include_declaration) {
+			r_error = "--include-declaration is only valid with --lsp-query references.";
+			return ERR_INVALID_PARAMETER;
 		}
 	}
 

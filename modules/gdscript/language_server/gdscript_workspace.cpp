@@ -373,7 +373,12 @@ Error GDScriptWorkspace::initialize() {
 	}
 
 	EditorNode *editor_node = EditorNode::get_singleton();
-	editor_node->connect("script_add_function_request", callable_mp(this, &GDScriptWorkspace::apply_new_signal));
+	if (editor_node) {
+		const Callable add_signal_callable = callable_mp(this, &GDScriptWorkspace::apply_new_signal);
+		if (!editor_node->is_connected("script_add_function_request", add_signal_callable)) {
+			editor_node->connect("script_add_function_request", add_signal_callable);
+		}
+	}
 
 	return OK;
 }

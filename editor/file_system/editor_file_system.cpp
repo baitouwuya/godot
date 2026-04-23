@@ -30,6 +30,7 @@
 
 #include "editor_file_system.h"
 
+#include "core/config/engine.h"
 #include "core/config/project_settings.h"
 #include "core/extension/gdextension_manager.h"
 #include "core/io/dir_access.h"
@@ -340,7 +341,9 @@ void EditorFileSystem::_first_scan_filesystem() {
 	ProjectSettingsEditor::get_singleton()->init_autoloads();
 
 	ep.step(TTR("Initializing plugins..."), 4, true);
-	EditorNode::get_singleton()->init_plugins();
+	if (!Engine::get_singleton()->is_recovery_mode_hint()) {
+		EditorNode::get_singleton()->init_plugins();
+	}
 
 	ep.step(TTR("Starting file scan..."), 5, true);
 }

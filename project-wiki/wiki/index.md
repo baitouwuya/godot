@@ -10,6 +10,9 @@ official documentation tree.
 - [CLI Performance Recorder](components/cli-performance-recorder.md) -
   Per-frame CLI profiling with percentile summaries, slow-frame snapshots, and
   optional JSONL sample export.
+- [Runtime AI Agent Control Mode](components/runtime-ai-agent-control.md) -
+  Local TCP JSONL runtime control for input, batches, screenshots, scene tree,
+  and socket-returned performance probes.
 
 ## Operations
 

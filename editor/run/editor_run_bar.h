@@ -87,6 +87,14 @@ class EditorRunBar : public MarginContainer {
 	MenuButton *write_movie_button = nullptr;
 	bool movie_maker_enabled = false;
 
+	enum AIAgentControlMenuItem {
+		AI_AGENT_CONTROL_TOGGLE,
+		AI_AGENT_CONTROL_OPEN_SETTINGS,
+	};
+	PanelContainer *ai_agent_control_panel = nullptr;
+	MenuButton *ai_agent_control_button = nullptr;
+	int ai_agent_control_override = -1;
+
 	RunMode current_mode = RunMode::STOPPED;
 	String run_custom_filename;
 	String run_current_filename;
@@ -96,6 +104,8 @@ class EditorRunBar : public MarginContainer {
 
 	void _movie_maker_item_pressed(int p_id);
 	void _write_movie_toggled(bool p_enabled);
+	void _ai_agent_control_item_pressed(int p_id);
+	void _ai_agent_control_toggled(bool p_enabled);
 	void _quick_run_selected(const String &p_file_path, int p_menu_item = RunXRModeMenuItem::INVALID);
 
 	void _play_current_pressed(int p_menu_item = RunXRModeMenuItem::INVALID);
@@ -135,6 +145,9 @@ public:
 
 	void set_movie_maker_enabled(bool p_enabled);
 	bool is_movie_maker_enabled() const;
+	void set_ai_agent_control_enabled(bool p_enabled);
+	bool is_ai_agent_control_enabled() const;
+	bool is_ai_agent_control_effective_enabled() const;
 
 	void update_profiler_autostart_indicator();
 

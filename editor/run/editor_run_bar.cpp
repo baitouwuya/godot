@@ -107,6 +107,14 @@ void EditorRunBar::_notification(int p_what) {
 			}
 
 			write_movie_button->set_button_icon(get_editor_theme_icon(SNAME("MainMovieWrite")));
+			if (is_ai_agent_control_effective_enabled()) {
+				ai_agent_control_button->set_theme_type_variation("RunBarButtonMovieMakerEnabled");
+				ai_agent_control_panel->add_theme_style_override(SceneStringName(panel), get_theme_stylebox(SNAME("MovieWriterButtonPressed"), EditorStringName(EditorStyles)));
+			} else {
+				ai_agent_control_button->set_theme_type_variation("RunBarButtonMovieMakerDisabled");
+				ai_agent_control_panel->add_theme_style_override(SceneStringName(panel), get_theme_stylebox(SNAME("MovieWriterButtonNormal"), EditorStringName(EditorStyles)));
+			}
+			ai_agent_control_button->set_button_icon(get_editor_theme_icon(SNAME("InputEventAction")));
 
 		} break;
 	}
@@ -182,6 +190,31 @@ void EditorRunBar::_write_movie_toggled(bool p_enabled) {
 	} else {
 		add_theme_style_override(SceneStringName(panel), get_theme_stylebox(SNAME("LaunchPadNormal"), EditorStringName(EditorStyles)));
 		write_movie_panel->add_theme_style_override(SceneStringName(panel), get_theme_stylebox(SNAME("MovieWriterButtonNormal"), EditorStringName(EditorStyles)));
+	}
+}
+
+void EditorRunBar::_ai_agent_control_item_pressed(int p_id) {
+	switch (p_id) {
+		case AI_AGENT_CONTROL_TOGGLE: {
+			bool new_enabled = !is_ai_agent_control_effective_enabled();
+			set_ai_agent_control_enabled(new_enabled);
+			ai_agent_control_button->get_popup()->set_item_checked(0, new_enabled);
+			ai_agent_control_button->set_pressed(new_enabled);
+			_ai_agent_control_toggled(new_enabled);
+			break;
+		}
+		case AI_AGENT_CONTROL_OPEN_SETTINGS:
+			ProjectSettingsEditor::get_singleton()->popup_project_settings(true);
+			ProjectSettingsEditor::get_singleton()->set_general_page("editor/ai_agent_control");
+			break;
+	}
+}
+
+void EditorRunBar::_ai_agent_control_toggled(bool p_enabled) {
+	if (p_enabled) {
+		ai_agent_control_panel->add_theme_style_override(SceneStringName(panel), get_theme_stylebox(SNAME("MovieWriterButtonPressed"), EditorStringName(EditorStyles)));
+	} else {
+		ai_agent_control_panel->add_theme_style_override(SceneStringName(panel), get_theme_stylebox(SNAME("MovieWriterButtonNormal"), EditorStringName(EditorStyles)));
 	}
 }
 
@@ -337,6 +370,15 @@ void EditorRunBar::_run_scene(const String &p_scene_path, const Vector<String> &
 
 	Vector<String> args = p_run_args;
 	EditorNode::get_singleton()->call_run_scene(run_filename, args);
+	if (is_ai_agent_control_effective_enabled()) {
+		args.push_back("--ai-agent-control");
+		args.push_back("--ai-agent-port");
+		args.push_back(itos((int)GLOBAL_GET("editor/ai_agent_control/port")));
+		args.push_back("--ai-agent-max-ops");
+		args.push_back(itos((int)GLOBAL_GET("editor/ai_agent_control/max_batch_ops")));
+		args.push_back("--ai-agent-max-line-bytes");
+		args.push_back(itos((int)GLOBAL_GET("editor/ai_agent_control/max_line_bytes")));
+	}
 
 	// Use the existing URI, in case it is overridden by the CLI.
 	String uri = EditorDebuggerNode::get_singleton()->get_server_uri();
@@ -504,6 +546,25 @@ void EditorRunBar::set_movie_maker_enabled(bool p_enabled) {
 
 bool EditorRunBar::is_movie_maker_enabled() const {
 	return movie_maker_enabled;
+}
+
+void EditorRunBar::set_ai_agent_control_enabled(bool p_enabled) {
+	ai_agent_control_override = p_enabled ? 1 : 0;
+	const bool effective_enabled = is_ai_agent_control_effective_enabled();
+	ai_agent_control_button->get_popup()->set_item_checked(0, effective_enabled);
+	ai_agent_control_button->set_pressed(effective_enabled);
+	EditorSettings::get_singleton()->set_project_metadata("debug_options", "ai_agent_control_enabled_override", ai_agent_control_override);
+}
+
+bool EditorRunBar::is_ai_agent_control_enabled() const {
+	return ai_agent_control_override == 1;
+}
+
+bool EditorRunBar::is_ai_agent_control_effective_enabled() const {
+	if (ai_agent_control_override >= 0) {
+		return ai_agent_control_override == 1;
+	}
+	return (bool)GLOBAL_GET("editor/ai_agent_control/enabled");
 }
 
 void EditorRunBar::update_profiler_autostart_indicator() {
@@ -707,4 +768,24 @@ EditorRunBar::EditorRunBar() {
 	write_movie_button->set_tooltip_text(TTRC("Enable Movie Maker mode.\nThe project will run at stable FPS and the visual and audio output will be recorded to a video file."));
 	write_movie_button->set_accessibility_name(TTRC("Enable Movie Maker Mode"));
 	write_movie_button->set_flat(false);
+
+	ai_agent_control_panel = memnew(PanelContainer);
+	main_hbox->add_child(ai_agent_control_panel);
+
+	ai_agent_control_button = memnew(MenuButton);
+	PopupMenu *ai_agent_control_popup = ai_agent_control_button->get_popup();
+	ai_agent_control_popup->add_check_item(TTRC("Enable AI Agent Control Mode"), AI_AGENT_CONTROL_TOGGLE);
+	ai_agent_control_popup->add_item(TTRC("Open AI Agent Control Settings..."), AI_AGENT_CONTROL_OPEN_SETTINGS);
+	ai_agent_control_popup->connect(SceneStringName(id_pressed), callable_mp(this, &EditorRunBar::_ai_agent_control_item_pressed));
+
+	ai_agent_control_panel->add_child(ai_agent_control_button);
+	ai_agent_control_button->set_theme_type_variation("RunBarButtonMovieMakerDisabled");
+	ai_agent_control_button->set_focus_mode(Control::FOCUS_ACCESSIBILITY);
+	ai_agent_control_button->set_tooltip_text(TTRC("Enable Runtime AI Agent Control mode.\nThe running project will listen on localhost for JSONL input, screenshots, scene tree, and runtime performance commands."));
+	ai_agent_control_button->set_accessibility_name(TTRC("Enable AI Agent Control Mode"));
+	ai_agent_control_button->set_flat(false);
+	ai_agent_control_override = EditorSettings::get_singleton()->get_project_metadata("debug_options", "ai_agent_control_enabled_override", -1);
+	const bool ai_agent_control_effective_enabled = is_ai_agent_control_effective_enabled();
+	ai_agent_control_button->get_popup()->set_item_checked(0, ai_agent_control_effective_enabled);
+	ai_agent_control_button->set_pressed(ai_agent_control_effective_enabled);
 }

@@ -535,7 +535,7 @@ void CLIPerformanceRecorder::record_frame(uint64_t p_frame_index, uint64_t p_fra
 		return;
 	}
 
-	if (p_frame_index < (uint64_t)options.start_frame || p_frame_index > (uint64_t)options.end_frame) {
+	if (p_frame_index < (uint64_t)options.start_frame || (options.end_frame >= 0 && p_frame_index > (uint64_t)options.end_frame)) {
 		return;
 	}
 
@@ -591,9 +591,12 @@ void CLIPerformanceRecorder::record_frame(uint64_t p_frame_index, uint64_t p_fra
 Dictionary CLIPerformanceRecorder::build_summary(bool p_completed) const {
 	Dictionary recording;
 	recording["startFrame"] = options.start_frame;
-	recording["endFrame"] = options.end_frame;
+	recording["endFrame"] = summary_end_frame_override >= 0 ? summary_end_frame_override : options.end_frame;
 	recording["capturedFrames"] = (int64_t)captured_frames;
 	recording["completed"] = p_completed;
+	if (!options.recording_name.is_empty()) {
+		recording["name"] = options.recording_name;
+	}
 
 	Dictionary summary;
 	summary["recording"] = recording;
@@ -612,6 +615,14 @@ void CLIPerformanceRecorder::print_summary_stdout(bool p_completed) const {
 	OS::get_singleton()->set_stdout_enabled(true);
 	OS::get_singleton()->print("%s\n", JSON::stringify(build_summary(p_completed)).utf8().get_data());
 	OS::get_singleton()->set_stdout_enabled(stdout_was_enabled);
+}
+
+void CLIPerformanceRecorder::set_recording_name(const String &p_name) {
+	options.recording_name = p_name;
+}
+
+void CLIPerformanceRecorder::set_summary_end_frame(int64_t p_frame) {
+	summary_end_frame_override = p_frame;
 }
 
 bool CLIPerformanceRecorder::is_completed() const {

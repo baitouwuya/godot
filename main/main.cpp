@@ -30,6 +30,7 @@
 
 #include "main.h"
 
+#include "main/cli_ai_input_server.h"
 #include "main/cli_performance_recorder.h"
 
 #include "core/config/project_settings.h"
@@ -282,6 +283,8 @@ static int frame_delay = 0;
 static int audio_output_latency = 0;
 static bool disable_render_loop = false;
 static int fixed_fps = -1;
+static CLIAIInputServer::Options cli_ai_agent_options;
+static CLIAIInputServer *cli_ai_agent_server = nullptr;
 static CLIPerformanceRecorder::Options cli_perf_options;
 static CLIPerformanceRecorder *cli_perf_recorder = nullptr;
 static MovieWriter *movie_writer = nullptr;
@@ -687,6 +690,10 @@ void Main::print_help(const char *p_binary) {
 	print_help_option("--perf-end-frame <int>", "Last 0-based frame to record for --perf-record. Required when --perf-record is enabled.\n");
 	print_help_option("--perf-top-frames <int>", "Keep up to <int> slowest frames in the profiling summary (default: 10, 0 disables slowFrames output).\n");
 	print_help_option("--perf-samples-file <path>", "Write per-frame profiling samples as JSONL to <path> while --perf-record is active.\n");
+	print_help_option("--ai-agent-control", "Enable local Runtime AI Agent Control Mode for CLI project runs.\n");
+	print_help_option("--ai-agent-port <int>", "TCP port for Runtime AI Agent Control Mode (default: 7010).\n");
+	print_help_option("--ai-agent-max-ops <int>", "Maximum operation count accepted in one AI agent batch (default: 1024).\n");
+	print_help_option("--ai-agent-max-line-bytes <int>", "Maximum JSONL request line size for AI agent control (default: 1048576).\n");
 #ifdef TOOLS_ENABLED
 	print_help_option("--editor-pseudolocalization", "Enable pseudolocalization for the editor and the project manager.\n", CLI_OPTION_AVAILABILITY_EDITOR);
 #endif
@@ -1141,6 +1148,9 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 	// Exit error code used in the `goto error` conditions.
 	// It's returned as the program exit code. ERR_HELP is special cased and handled as success (0).
 	Error exit_err = ERR_INVALID_PARAMETER;
+	cli_ai_agent_options = CLIAIInputServer::Options();
+	String cli_ai_agent_error;
+	String cli_ai_agent_validation_error;
 	cli_perf_options = CLIPerformanceRecorder::Options();
 	String cli_perf_error;
 	String cli_perf_validation_error;
@@ -1990,6 +2000,11 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 				OS::get_singleton()->print("Missing <path> argument for --benchmark-file <path>.\n");
 				goto error;
 			}
+		} else if (CLIAIInputServer::parse_argument(arg, N, cli_ai_agent_options, cli_ai_agent_error)) {
+			if (!cli_ai_agent_error.is_empty()) {
+				OS::get_singleton()->print("Error: %s\n", cli_ai_agent_error.utf8().get_data());
+				goto error;
+			}
 		} else if (CLIPerformanceRecorder::parse_argument(arg, N, cli_perf_options, cli_perf_error)) {
 			if (!cli_perf_error.is_empty()) {
 				OS::get_singleton()->print("Error: %s\n", cli_perf_error.utf8().get_data());
@@ -2097,6 +2112,8 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 	}
 #endif // defined(DEBUG_ENABLED) || defined (TOOLS_ENABLED)
 
+	CLIAIInputServer::register_project_settings();
+
 	OS::get_singleton()->_in_editor = editor;
 	if (globals->setup(project_path, main_pack, false, editor) == OK) {
 #ifdef TOOLS_ENABLED
@@ -2187,6 +2204,12 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 		}
 	}
 #endif
+
+	CLIAIInputServer::apply_project_settings(cli_ai_agent_options);
+	if (CLIAIInputServer::validate_options(cli_ai_agent_options, editor, project_manager, cmdline_tool, cli_ai_agent_validation_error) != OK) {
+		OS::get_singleton()->print("Error: %s\n", cli_ai_agent_validation_error.utf8().get_data());
+		goto error;
+	}
 
 	if (CLIPerformanceRecorder::validate_options(cli_perf_options, editor, project_manager, cmdline_tool, cli_perf_validation_error) != OK) {
 		OS::get_singleton()->print("Error: %s\n", cli_perf_validation_error.utf8().get_data());
@@ -4848,6 +4871,17 @@ int Main::start() {
 		}
 	}
 
+	if (CLIAIInputServer::is_enabled(cli_ai_agent_options)) {
+		cli_ai_agent_server = memnew(CLIAIInputServer(cli_ai_agent_options));
+		String cli_ai_agent_initialize_error;
+		if (cli_ai_agent_server->initialize(cli_ai_agent_initialize_error) != OK) {
+			OS::get_singleton()->print("Error: %s\n", cli_ai_agent_initialize_error.utf8().get_data());
+			memdelete(cli_ai_agent_server);
+			cli_ai_agent_server = nullptr;
+			return EXIT_FAILURE;
+		}
+	}
+
 	return EXIT_SUCCESS;
 }
 
@@ -4921,6 +4955,10 @@ bool Main::iteration() {
 	}
 
 	bool exit = false;
+
+	if (cli_ai_agent_server) {
+		cli_ai_agent_server->poll_commands();
+	}
 
 	// process all our active interfaces
 #ifndef XR_DISABLED
@@ -5087,6 +5125,15 @@ bool Main::iteration() {
 				navigation_process_ticks,
 				physics_step);
 	}
+	if (cli_ai_agent_server) {
+		cli_ai_agent_server->record_frame(
+				Engine::get_singleton()->get_process_frames(),
+				frame_time,
+				process_ticks,
+				physics_process_ticks,
+				navigation_process_ticks,
+				physics_step);
+	}
 	Engine::get_singleton()->_process_frames++;
 
 	if (frame > 1000000) {
@@ -5219,6 +5266,12 @@ void Main::cleanup(bool p_force) {
 		input->flush_frame_parsed_events();
 	}
 #endif
+
+	if (cli_ai_agent_server) {
+		cli_ai_agent_server->shutdown();
+		memdelete(cli_ai_agent_server);
+		cli_ai_agent_server = nullptr;
+	}
 
 	GDExtensionManager::get_singleton()->shutdown();
 

@@ -46,6 +46,7 @@ public:
 		int end_frame = -1;
 		int top_frames = 10;
 		String samples_file;
+		String recording_name;
 		// Internal parse bookkeeping keeps validation strict even when the caller
 		// passes the same values as the defaults.
 		bool start_frame_set = false;
@@ -108,6 +109,8 @@ public:
 	void record_frame(uint64_t p_frame_index, uint64_t p_frame_time_usec, uint64_t p_process_time_usec, uint64_t p_physics_process_time_usec, uint64_t p_navigation_process_time_usec, double p_physics_frame_time_sec);
 	Dictionary build_summary(bool p_completed) const;
 	void print_summary_stdout(bool p_completed) const;
+	void set_recording_name(const String &p_name);
+	void set_summary_end_frame(int64_t p_frame);
 
 	uint64_t get_captured_frames() const { return captured_frames; }
 	uint64_t get_last_sampled_frame() const { return last_sampled_frame; }
@@ -164,4 +167,5 @@ private:
 	uint64_t captured_frames = 0;
 	uint64_t last_sampled_frame = 0;
 	bool has_sampled_frame = false;
+	int64_t summary_end_frame_override = -1;
 };

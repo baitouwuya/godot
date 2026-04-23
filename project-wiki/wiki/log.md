@@ -28,3 +28,10 @@ Append-only record of wiki activity.
 - Filed the repository rule that each custom feature must live on its own
   branch first and only merge into `codex/custom-main` after completion and
   verification.
+
+## [2026-04-23] ingest | Runtime AI agent control custom feature
+
+- Created `project-wiki/wiki/components/runtime-ai-agent-control.md`.
+- Filed progressive usage, settings, JSONL protocol, batch behavior, advanced
+  input, runtime performance probes, troubleshooting, validation, and known
+  limits for the runtime AI control bridge.

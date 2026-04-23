@@ -1,68 +1,60 @@
-# Custom Feature Branching
+# 自定义功能分支流程
 
-Branch-local workflow for custom Godot development in this repository.
+本页面记录这个 Godot 仓库的自定义功能开发流程。
 
-## Summary
+## 摘要
 
-Each custom feature must be developed on its own branch first.
+每个自定义功能必须先在自己的功能分支上开发。
 
-Only after the feature is complete and verified should it be merged into the
-custom mainline branch `codex/custom-main`.
+只有在功能完成并通过验证后，才合并回自定义主干分支 `codex/custom-main`。
 
-## Workflow
+## 工作流
 
-Use this sequence for every new custom feature:
+每个新的自定义功能都按这个顺序处理：
 
-1. Start from `codex/custom-main`.
-2. Create a dedicated feature branch.
-3. Implement and verify the feature on that branch.
-4. Commit and push the feature branch.
-5. Merge the finished feature branch back into `codex/custom-main`.
-6. Push `codex/custom-main`.
+1. 从 `codex/custom-main` 开始。
+2. 创建专用功能分支。
+3. 在功能分支上实现并验证。
+4. 提交并推送功能分支。
+5. 将完成的功能分支合并回 `codex/custom-main`。
+6. 推送 `codex/custom-main`。
 
-Preferred branch naming:
+推荐分支命名：
 
 - `codex/<feature-slug>`
 
-Examples:
+示例：
 
 - `codex/lsp-cli`
 - `codex/cli-perf-recorder-v2`
 
-## Daily Rules
+## 日常规则
 
-- Do not develop multiple custom features directly on `codex/custom-main`.
-- Keep one durable feature per feature branch.
-- If a feature needs follow-up work that is still part of the same deliverable,
-  continue on the same feature branch until that deliverable is complete.
-- If the work is a new custom capability, start a new feature branch from the
-  latest `codex/custom-main`.
+- 不要直接在 `codex/custom-main` 上混合开发多个自定义功能。
+- 每个功能分支只承载一个可长期维护的功能。
+- 如果后续工作仍属于同一个交付目标，继续在同一个功能分支上完成。
+- 如果是新的自定义能力，从最新的 `codex/custom-main` 创建新功能分支。
 
-## Merge Rules
+## 合并规则
 
-- Merge into `codex/custom-main` only after build, test, and target project
-  validation are done for that feature.
-- Prefer a clean fast-forward merge when the branch history allows it.
-- Push the feature branch before merging so the standalone branch remains a
-  durable record of that custom feature.
+- 只有在该功能的构建、测试、目标项目验证完成后，才合并到 `codex/custom-main`。
+- 如果分支历史允许，优先使用干净的 fast-forward 合并。
+- 合并前先推送功能分支，让独立分支保留为该自定义功能的长期记录。
 
-## Checklist
+## 检查清单
 
-Before merging a custom feature into `codex/custom-main`, confirm:
+合并自定义功能到 `codex/custom-main` 前，确认：
 
-- code changes are committed on the feature branch
-- required build and test checks passed
-- the target Godot project scenarios were manually validated when needed
-- branch-local wiki docs were updated if the feature changed CLI, workflow, or
-  maintenance expectations
+- 代码改动已经提交到功能分支。
+- 必需的构建和测试已经通过。
+- 需要时已经在目标 Godot 项目场景中手动验证。
+- 如果功能改变了 CLI、工作流或维护预期，分支内 wiki 文档已经更新。
 
-## Known Limit
+## 已知限制
 
-This workflow keeps feature history clean, but it still depends on disciplined
-branch scoping. If unrelated work is mixed into one feature branch, the merge
-will still carry that coupling into `codex/custom-main`.
+这个流程能让功能历史更清晰，但仍依赖严格的分支边界。如果不相关工作混进同一个功能分支，合并时仍会把这种耦合带入 `codex/custom-main`。
 
-## Related
+## 相关链接
 
-- [../index.md](../index.md)
-- [../log.md](../log.md)
+- [项目 Wiki 索引](../index.md)
+- [Wiki 日志](../log.md)

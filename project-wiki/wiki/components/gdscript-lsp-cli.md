@@ -1,25 +1,23 @@
 # GDScript LSP CLI
 
-Branch-local custom feature for this Godot 4.6 repository. This page is the
-single durable reference for the custom one-shot GDScript LSP CLI and is kept
-outside the official `doc/` tree on purpose.
+这是 Godot 4.6 自定义分支内的功能说明。页面作为一次性 GDScript LSP CLI 的长期参考，故意放在官方 `doc/` 文档树之外。
 
-## Summary
+## 摘要
 
-This feature adds an editor-backed command-line path for:
+这个功能提供基于 editor 能力的一次性命令行入口，用于：
 
-- one-shot GDScript LSP queries with JSON output
-- whole-project GDScript diagnostics
-- fast diagnostics summaries for automation
-- scriptable diagnostics exit policies
+- 输出 JSON 的 GDScript LSP 单次查询。
+- 全项目 GDScript 诊断。
+- 适合自动化读取的快速诊断摘要。
+- 可脚本化控制的诊断退出码策略。
 
-The default startup path favors low side effects over full editor fidelity.
+默认启动路径优先降低项目副作用，而不是追求完整 editor 环境一致性。
 
-## Quick Start
+## 快速开始
 
-If you only need to use the feature, start here.
+只需要使用功能时，从这里开始。
 
-Run a symbol query:
+运行符号查询：
 
 ```powershell
 .\bin\godot.windows.editor.dev.x86_64.console.exe `
@@ -29,7 +27,7 @@ Run a symbol query:
   --file main.gd
 ```
 
-Run whole-project diagnostics and always return success after execution:
+运行全项目诊断，并在执行完成后始终返回成功：
 
 ```powershell
 .\bin\godot.windows.editor.dev.x86_64.console.exe `
@@ -40,7 +38,7 @@ Run whole-project diagnostics and always return success after execution:
   --diagnostics-fail-on never
 ```
 
-Fail when warnings or errors exist:
+存在 warning 或 error 时返回失败：
 
 ```powershell
 .\bin\godot.windows.editor.dev.x86_64.console.exe `
@@ -51,27 +49,27 @@ Fail when warnings or errors exist:
   --diagnostics-fail-on warning
 ```
 
-## Common Tasks
+## 常用任务
 
-Use these patterns most often:
+最常用这些模式：
 
-- quick health check
+- 快速健康检查
   `--lsp-diagnostics --diagnostics-format summary --diagnostics-fail-on never`
-- CI or agent gate
+- CI 或 agent 门禁
   `--lsp-diagnostics --diagnostics-format summary --diagnostics-fail-on warning`
-- project-relative file query
+- 项目相对路径文件查询
   `--lsp-query document-symbol --file scripts/player.gd`
-- full custom request body
+- 完整自定义请求体
   `--lsp-query references --params-json "<json>"`
 
-## CLI Surface
+## CLI 接口
 
-### Entry points
+### 入口参数
 
 - `--lsp-query <operation>`
 - `--lsp-diagnostics`
 
-### Query operations
+### 查询操作
 
 - `hover`
 - `definition`
@@ -81,34 +79,34 @@ Use these patterns most often:
 - `completion`
 - `signature-help`
 
-### Query arguments
+### 查询参数
 
 - `--file <path>`
-  Accepts `res://`, `file://`, or project-relative paths such as `main.gd`.
+  接受 `res://`、`file://` 或 `main.gd` 这类项目相对路径。
 - `--line <line>`
-  One-based line for position-based operations.
+  基于 1 的行号，用于位置相关操作。
 - `--column <column>`
-  One-based column for position-based operations.
+  基于 1 的列号，用于位置相关操作。
 - `--params-json <json>`
-  Full LSP params object.
+  完整 LSP params 对象。
 - `--include-declaration <bool>`
-  Valid for `references` only.
+  只对 `references` 有效。
 
-### Diagnostics arguments
+### 诊断参数
 
 - `--diagnostics-format <jsonl|json|summary>`
 - `--diagnostics-severity <error|warning|all>`
 - `--diagnostics-fail-on <error|warning|any|never>`
 
-### Diagnostics summary shape
+### 诊断摘要结构
 
-`summary` emits one JSON object with:
+`summary` 输出一个 JSON 对象，包含：
 
 - `total`
 - `bySeverity`
 - `byFile`
 
-Example:
+示例：
 
 ```json
 {
@@ -122,28 +120,26 @@ Example:
 }
 ```
 
-### Exit behavior
+### 退出行为
 
-- query success: exit `0`
-- diagnostics success without fail condition: exit `0`
-- diagnostics success with fail condition met: exit `1`
-- invalid CLI arguments: exit `1`
+- 查询成功：退出码 `0`。
+- 诊断成功且未触发失败条件：退出码 `0`。
+- 诊断成功但触发失败条件：退出码 `1`。
+- CLI 参数非法：退出码 `1`。
 
-## Design Notes
+## 设计说明
 
-Read this section only if you need to maintain or extend the feature.
+只有在需要维护或扩展功能时，才需要读这一节。
 
-### Why the startup path is minimal
+### 为什么默认使用最小启动路径
 
-The CLI defaults to a minimal editor startup built on recovery-mode semantics.
-That reduces project editor plugin side effects during automation runs.
+CLI 默认使用基于 recovery-mode 语义的最小 editor 启动路径。这样能减少自动化运行时项目 editor plugin 的副作用。
 
-### Why the implementation reuses existing code
+### 为什么复用现有实现
 
-The feature intentionally reuses the existing GDScript LSP stack instead of
-building a parallel CLI-only implementation.
+该功能有意复用现有 GDScript LSP 栈，而不是再实现一套 CLI 专用 LSP 逻辑。
 
-Primary runtime path:
+主要运行路径：
 
 - [main/main.cpp](../../../main/main.cpp)
 - [modules/gdscript/language_server/gdscript_lsp_cli_runner.h](../../../modules/gdscript/language_server/gdscript_lsp_cli_runner.h)
@@ -151,22 +147,22 @@ Primary runtime path:
 - [modules/gdscript/language_server/gdscript_workspace.cpp](../../../modules/gdscript/language_server/gdscript_workspace.cpp)
 - [editor/file_system/editor_file_system.cpp](../../../editor/file_system/editor_file_system.cpp)
 
-### Main behavior changes
+### 主要行为变化
 
-- CLI-specific argument parsing moved out of `main` and into the runner
-- project-relative `--file` values normalize to `res://...`
-- `references` requests can inject `includeDeclaration`
-- diagnostics can emit a summary object
-- diagnostics exit codes are controlled by `--diagnostics-fail-on`
-- first-scan plugin initialization is skipped under recovery-mode startup
+- CLI 专用参数解析从 `main` 下沉到 runner。
+- 项目相对 `--file` 会规范化为 `res://...`。
+- `references` 请求可以注入 `includeDeclaration`。
+- 诊断可以输出 summary 对象。
+- 诊断退出码由 `--diagnostics-fail-on` 控制。
+- recovery-mode 启动下跳过首次扫描阶段的插件初始化。
 
-## Validation
+## 验证
 
-Read this section when you need confidence, not just usage.
+需要确认功能可信度时阅读这一节。
 
-### Build and unit checks
+### 构建和单元检查
 
-Validated on this branch with:
+本分支使用以下命令验证：
 
 ```powershell
 scons platform=windows target=editor dev_build=yes module_mono_enabled=no tests=yes d3d12=no -j2
@@ -179,50 +175,46 @@ scons platform=windows target=editor dev_build=yes module_mono_enabled=no tests=
   --test-case="*[cli_runner]*"
 ```
 
-Observed result:
+观察结果：
 
 - `3 passed`
 - `0 failed`
 
-### Real-project smoke tests
+### 真实项目冒烟测试
 
-Validated sequentially against:
+依次验证过：
 
 - `E:\Godot Projects\view3d\project`
 - `E:\Godot Projects\rush-pet`
 - `E:\Godot Projects\mysterious-museum`
 
-Observed stable outcomes:
+稳定观察到：
 
-- diagnostics summary works
-- diagnostics fail-on exit behavior works
-- project-relative file queries work
-- output stays machine-friendly on these projects
+- 诊断 summary 可用。
+- diagnostics fail-on 退出码行为可用。
+- 项目相对路径文件查询可用。
+- 这些项目上的输出保持机器友好。
 
-## Known Limit
+## 已知限制
 
-`E:\Godot Projects\PluginTest` still exposes an editor-side edge case.
+`E:\Godot Projects\PluginTest` 仍暴露一个 editor 侧边界问题。
 
-Current observed behavior:
+当前观察到的行为：
 
-- diagnostics summary JSON may still be printed
-- query JSON may still be printed
-- stderr can still include `Parse Error: Busy` from
-  `res://addons/tripo-godot/editor/*.tscn`
-- process exit code can still become `1` because of those editor resource
-  loading failures
+- 诊断 summary JSON 仍可能成功打印。
+- 查询 JSON 仍可能成功打印。
+- stderr 仍可能出现来自 `res://addons/tripo-godot/editor/*.tscn` 的 `Parse Error: Busy`。
+- 由于这些 editor 资源加载失败，进程退出码仍可能变为 `1`。
 
-This means the minimal startup path is good enough for several real projects,
-but it does not yet isolate every plugin-heavy editor resource path.
+这说明最小启动路径已经足够支持多个真实项目，但还没有完全隔离所有插件较重的 editor 资源路径。
 
-## Next Improvement Targets
+## 后续优化目标
 
-- trace which editor-side resource load path still reaches
-  `addons/tripo-godot/editor/*.tscn` in `PluginTest`
-- keep the current minimal startup as the default path
-- add any future full-editor mode only as an explicit opt-in
+- 追踪 `PluginTest` 中哪条 editor 资源加载路径仍会触达 `addons/tripo-godot/editor/*.tscn`。
+- 保持当前最小启动路径作为默认行为。
+- 如果未来需要 full-editor 模式，只作为显式 opt-in 增加。
 
-## Related
+## 相关链接
 
-- [../index.md](../index.md)
-- [../log.md](../log.md)
+- [项目 Wiki 索引](../index.md)
+- [Wiki 日志](../log.md)

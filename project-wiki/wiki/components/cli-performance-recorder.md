@@ -1,22 +1,18 @@
-# CLI Performance Recorder
+# CLI 性能录制器
 
-Branch-local custom feature for this Godot 4.6 repository. This page is the
-single durable reference for the CLI performance recorder and stays outside the
-official `doc/` tree on purpose.
+这是 Godot 4.6 自定义分支内的功能说明。页面作为 CLI 性能录制器的长期参考，故意放在官方 `doc/` 文档树之外。
 
-## Summary
+## 摘要
 
-This feature adds a CLI-only profiling path for project runs that enter the
-main loop.
+这个功能为会进入主循环的 CLI 项目运行增加性能录制路径。
 
-It records per-frame timing plus numeric `Performance` monitors, then prints a
-machine-readable JSON summary as the last line on stdout.
+它记录逐帧时序和 numeric `Performance` monitors，并在 stdout 最后一行打印机器可解析的 JSON summary。
 
-## Quick Start
+## 快速开始
 
-If you only need to use the feature, start here.
+只需要使用功能时，从这里开始。
 
-Basic summary for a project run:
+项目运行的基础摘要：
 
 ```powershell
 .\bin\godot.windows.editor.dev.x86_64.console.exe `
@@ -27,7 +23,7 @@ Basic summary for a project run:
   --perf-end-frame 29
 ```
 
-Keep the worst frames in the summary:
+在摘要中保留最慢帧：
 
 ```powershell
 .\bin\godot.windows.editor.dev.x86_64.console.exe `
@@ -39,7 +35,7 @@ Keep the worst frames in the summary:
   --perf-top-frames 5
 ```
 
-Also export per-frame JSONL samples:
+同时导出逐帧 JSONL 样本：
 
 ```powershell
 .\bin\godot.windows.editor.dev.x86_64.console.exe `
@@ -52,40 +48,39 @@ Also export per-frame JSONL samples:
   --perf-samples-file "E:\GitHub\godot\.omx\rushpet_perf_samples.jsonl"
 ```
 
-## Common Tasks
+## 常用任务
 
-Use these patterns most often:
+最常用这些模式：
 
-- quick health snapshot
+- 快速健康快照
   `--perf-record --perf-end-frame 59`
-- spike hunting
+- 尖峰排查
   `--perf-record --perf-end-frame 119 --perf-top-frames 10`
-- summary plus raw samples
+- 摘要加原始样本
   `--perf-record --perf-end-frame 119 --perf-samples-file <path>`
-- benchmark coexistence
+- 与 benchmark 共存
   `--benchmark --perf-record --perf-end-frame <n>`
 
-## CLI Surface
+## CLI 接口
 
-### Flags
+### 参数
 
 - `--perf-record`
 - `--perf-start-frame <int>`
-  Default `0`.
+  默认 `0`。
 - `--perf-end-frame <int>`
-  Required when recording is enabled.
+  启用录制时必填。
 - `--perf-top-frames <int>`
-  Default `10`. `0` disables `slowFrames`.
+  默认 `10`。`0` 表示不输出 `slowFrames`。
 - `--perf-samples-file <path>`
-  Opt-in JSONL export for per-frame samples.
+  显式开启逐帧样本 JSONL 导出。
 
-### Mode limits
+### 模式限制
 
-- supported: CLI project runs that enter the main loop
-- not supported: editor, project manager, LSP CLI, import/export, or other
-  one-shot command-line tools
+- 支持：会进入主循环的 CLI 项目运行。
+- 不支持：editor、project manager、LSP CLI、import/export 或其他一次性 command-line tools。
 
-### Top-level summary shape
+### 顶层 summary 结构
 
 - `recording`
 - `frameMetrics`
@@ -93,11 +88,11 @@ Use these patterns most often:
 - `customMonitorMetrics`
 - `budgetSummary`
 - `slowFrames`
-  Present unless `--perf-top-frames 0`.
+  除非使用 `--perf-top-frames 0`，否则会出现。
 
-### Per-metric fields
+### 单个指标字段
 
-Each metric summary includes:
+每个指标摘要包含：
 
 - `count`
 - `min`
@@ -112,9 +107,9 @@ Each metric summary includes:
 - `p95`
 - `p99`
 
-### Frame metrics
+### 帧指标
 
-The fixed per-frame metrics are:
+固定逐帧指标包括：
 
 - `frame_time_usec`
 - `process_time_usec`
@@ -123,34 +118,34 @@ The fixed per-frame metrics are:
 - `physics_frame_time_sec`
 - `fps`
 
-### Budget summary
+### 帧预算摘要
 
-`budgetSummary` tracks frame-time overruns against fixed thresholds:
+`budgetSummary` 用固定阈值统计帧时间超预算情况：
 
 - `over16_667ms`
 - `over33_333ms`
 - `over50_000ms`
 
-Each entry includes:
+每项包含：
 
 - `thresholdMs`
 - `overCount`
 - `overRatio`
 
-### Slow frames
+### 慢帧
 
-`slowFrames` is sorted from slowest to faster by `frame_time_usec`.
+`slowFrames` 按 `frame_time_usec` 从最慢到较快排序。
 
-Each item includes:
+每项包含：
 
 - `frame`
 - `frameMetrics`
 - `builtinMonitors`
 - `customMonitors`
 
-### JSONL sample shape
+### JSONL 样本结构
 
-`--perf-samples-file` writes one JSON object per sampled frame with:
+`--perf-samples-file` 为每个采样帧写入一个 JSON 对象，包含：
 
 - `frame`
 - `frameMetrics`
@@ -158,53 +153,51 @@ Each item includes:
 - `customMonitors`
 - `recorded`
 
-## Reading the Results
+## 结果解读
 
-Read this section when the summary is not enough by itself.
+当 summary 本身不足以解释问题时阅读这一节。
 
-### What the percentiles add
+### 分位数提供什么信息
 
-- `mean` tells you average cost
-- `p50` tells you the typical frame
-- `p95` and `p99` tell you whether spikes dominate the experience
+- `mean` 表示平均成本。
+- `p50` 表示典型帧。
+- `p95` 和 `p99` 表示是否存在影响体验的尖峰帧。
 
-### What `slowFrames` adds
+### `slowFrames` 提供什么信息
 
-`slowFrames` is the fastest way to inspect the worst moments without opening a
-full trace.
+`slowFrames` 是不打开完整 trace 时最快查看最差时刻的方式。
 
-Use it when:
+适用场景：
 
-- `mean` looks fine but play feels uneven
-- `p95` or `p99` is much worse than `p50`
-- you need to compare built-in monitor values at spike frames
+- `mean` 看起来正常，但游玩体感不稳定。
+- `p95` 或 `p99` 明显差于 `p50`。
+- 需要比较尖峰帧上的内建 monitor 值。
 
-### What `budgetSummary` adds
+### `budgetSummary` 提供什么信息
 
-The fixed thresholds map to practical frame budgets:
+固定阈值对应常见帧预算：
 
-- `16.667ms` is roughly 60 FPS
-- `33.333ms` is roughly 30 FPS
-- `50.000ms` is roughly 20 FPS
+- `16.667ms` 约等于 60 FPS。
+- `33.333ms` 约等于 30 FPS。
+- `50.000ms` 约等于 20 FPS。
 
-Use `overRatio` as the fastest coarse signal for whether frame pacing is
-consistently missing a target budget.
+用 `overRatio` 快速判断帧节奏是否持续超出目标预算。
 
-### When to use the samples file
+### 何时使用 samples 文件
 
-Use `--perf-samples-file` when the summary shows a problem but you still need:
+当 summary 已经显示问题，但还需要进一步分析时，使用 `--perf-samples-file`：
 
-- full frame-by-frame correlation
-- external plotting
-- custom offline analysis
+- 完整逐帧关联。
+- 外部绘图。
+- 自定义离线分析。
 
-## Validation
+## 验证
 
-Read this section when you need confidence, not just usage.
+需要确认功能可信度时阅读这一节。
 
-### Build and unit checks
+### 构建和单元检查
 
-Validated on this branch with:
+本分支使用以下命令验证：
 
 ```powershell
 scons platform=windows target=editor dev_build=yes module_mono_enabled=no tests=yes d3d12=no -j2
@@ -216,38 +209,34 @@ scons platform=windows target=editor dev_build=yes module_mono_enabled=no tests=
   --test-suite="[Main][CLIPerformanceRecorder]"
 ```
 
-Observed result:
+观察结果：
 
 - `7 passed`
 - `0 failed`
 
-### Manual smoke checks
+### 手动冒烟检查
 
-Validated with:
+已用以下项目验证：
 
 - `E:\Godot Projects\rush-pet`
-  `--headless`, `--benchmark`, `--perf-samples-file`, early exit before
-  `end-frame`, `completed=false`
+  `--headless`、`--benchmark`、`--perf-samples-file`、早于 `end-frame` 退出、`completed=false`
 - `E:\Godot Projects\mysterious-museum`
-  non-`headless`, `completed=true`, `slowFrames` populated, stdout last line
-  remained JSON
+  非 `headless`、`completed=true`、`slowFrames` 有内容、stdout 最后一行保持 JSON
 
-Observed stable outcomes:
+稳定观察到：
 
-- summary JSON is emitted on stdout
-- `budgetSummary` and `slowFrames` are present
-- JSONL sample export line count matches captured frames
-- `--benchmark` output still appears before the summary JSON
+- stdout 会输出 summary JSON。
+- `budgetSummary` 和 `slowFrames` 存在。
+- JSONL 样本导出行数匹配捕获帧数。
+- `--benchmark` 输出仍在 summary JSON 之前。
 
-## Known Limits
+## 已知限制
 
-- The summary is strong for detection and coarse localization, but it is still
-  not a full trace viewer.
-- `customMonitorMetrics` only includes numeric custom monitors.
-- Project warnings or leak reports may still appear on stderr after the stdout
-  summary, so machine parsers should read stdout only.
+- 摘要适合发现问题和粗定位，但不是完整的性能轨迹查看器。
+- `customMonitorMetrics` 只包含 numeric custom monitors。
+- 项目 warning 或 leak report 仍可能在 stdout summary 后出现在 stderr，因此机器解析应只读取 stdout。
 
-## Related
+## 相关链接
 
-- [../index.md](../index.md)
-- [../log.md](../log.md)
+- [项目 Wiki 索引](../index.md)
+- [Wiki 日志](../log.md)

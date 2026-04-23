@@ -1,37 +1,35 @@
-# Project Wiki Log
+# 项目 Wiki 日志
 
-Append-only record of wiki activity.
+wiki 活动的追加式记录。
 
-## [2026-04-23] bootstrap | Create standalone project wiki
+## [2026-04-23] bootstrap | 创建独立项目 wiki
 
-- Created `project-wiki/raw/README.md`.
-- Created `project-wiki/wiki/AGENTS.md`.
-- Created `project-wiki/wiki/index.md`.
-- Created `project-wiki/wiki/log.md`.
+- 创建 `project-wiki/raw/README.md`。
+- 创建 `project-wiki/wiki/AGENTS.md`。
+- 创建 `project-wiki/wiki/index.md`。
+- 创建 `project-wiki/wiki/log.md`。
 
-## [2026-04-23] ingest | GDScript LSP CLI custom feature
+## [2026-04-23] ingest | GDScript LSP CLI 自定义功能
 
-- Created `project-wiki/wiki/components/gdscript-lsp-cli.md`.
-- Filed branch-local CLI usage, implementation notes, validation results, and
-  known limits into a single feature page.
+- 创建 `project-wiki/wiki/components/gdscript-lsp-cli.md`。
+- 将分支内 CLI 用法、实现说明、验证结果和已知限制整理到单个功能页面。
 
-## [2026-04-23] ingest | CLI performance recorder custom feature
+## [2026-04-23] ingest | CLI 性能录制器自定义功能
 
-- Created `project-wiki/wiki/components/cli-performance-recorder.md`.
-- Filed CLI profiling usage, output contract, percentile and slow-frame
-  interpretation, validation notes, and current limits into a single feature
-  page.
+- 创建 `project-wiki/wiki/components/cli-performance-recorder.md`。
+- 将 CLI 性能录制用法、输出契约、分位数和慢帧解读、验证说明、当前限制整理到单个功能页面。
 
-## [2026-04-23] ingest | Custom feature branching workflow
+## [2026-04-23] ingest | 自定义功能分支流程
 
-- Created `project-wiki/wiki/operations/custom-feature-branching.md`.
-- Filed the repository rule that each custom feature must live on its own
-  branch first and only merge into `codex/custom-main` after completion and
-  verification.
+- 创建 `project-wiki/wiki/operations/custom-feature-branching.md`。
+- 记录仓库规则：每个自定义功能先在独立分支开发，完成和验证后再合并到 `codex/custom-main`。
 
-## [2026-04-23] ingest | Runtime AI agent control custom feature
+## [2026-04-23] ingest | Runtime AI agent control 自定义功能
 
-- Created `project-wiki/wiki/components/runtime-ai-agent-control.md`.
-- Filed progressive usage, settings, JSONL protocol, batch behavior, advanced
-  input, runtime performance probes, troubleshooting, validation, and known
-  limits for the runtime AI control bridge.
+- 创建 `project-wiki/wiki/components/runtime-ai-agent-control.md`。
+- 记录运行时 AI 控制桥的渐进式用法、设置、JSONL 协议、batch、高级输入、运行时性能探针、排障、验证和已知限制。
+
+## [2026-04-23] docs | 将 wiki 内容中文化
+
+- 将 wiki 索引、日志、规则页、功能页和流程页改为中文。
+- 保留 CLI flag、JSON key、命令示例、文件路径等机器接口原文，避免破坏可复制命令。

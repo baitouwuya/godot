@@ -1,25 +1,23 @@
-# Project Wiki Schema
+# 项目 Wiki 规则
 
-This `AGENTS.md` governs the `project-wiki/wiki/` subtree.
+这个 `AGENTS.md` 约束 `project-wiki/wiki/` 子目录。
 
-## Purpose
+## 目的
 
-Maintain branch-local customization knowledge without mixing it into Godot's
-official `doc/` tree.
+维护本仓库自定义功能的分支内知识，不混入 Godot 官方 `doc/` 文档树。
 
-## Core rules
+## 核心规则
 
-- Keep durable synthesis in `wiki/`.
-- Treat `../raw/` as the place for immutable source material if source bundles
-  need to be archived later.
-- Prefer one stable page per durable custom feature instead of splitting a
-  small feature into many near-duplicate notes.
-- Update `index.md` and `log.md` whenever the wiki changes materially.
-- Use relative Markdown links inside the wiki.
+- 可长期复用的整理内容放在 `wiki/`。
+- 如果以后需要归档原始资料，`../raw/` 用来保存不可变来源材料。
+- 每个稳定的自定义功能优先维护一个独立页面，避免拆成多个近似重复笔记。
+- wiki 有实质更新时，同时更新 `index.md` 和 `log.md`。
+- wiki 内部链接使用相对 Markdown 链接。
+- 面向使用者的 wiki 内容默认使用中文；保留 CLI flag、JSON key、文件路径等英文原文。
 
-## Page shape
+## 页面结构
 
-- Put the shortest useful summary near the top.
-- Reveal operational usage before implementation details.
-- Put debugging, testing, and known limits after the user-facing sections.
-- End durable pages with `## Related`.
+- 顶部放最短可用摘要。
+- 先披露操作用法，再披露实现细节。
+- 调试、测试、已知限制放在面向用户的章节之后。
+- 稳定页面以 `## 相关链接` 结尾。

@@ -1,23 +1,16 @@
 # Runtime AI Agent Control Mode
 
-Branch-local custom feature for this Godot 4.6 repository. This page is the
-single durable reference for runtime AI agent control and stays outside the
-official `doc/` tree on purpose.
+这是 Godot 4.6 自定义分支内的功能说明。页面作为运行时 AI agent 控制模式的长期参考，故意放在官方 `doc/` 文档树之外。
 
-## Summary
+## 摘要
 
-Runtime AI Agent Control Mode is a default-off local TCP bridge for project
-runs. When enabled, an external AI agent can send JSONL commands to inject
-input, run multi-step batches with frame waits, capture screenshots, inspect a
-bounded scene tree, and start or stop runtime performance recording.
+Runtime AI Agent Control Mode 是默认关闭的本机 TCP 控制桥，面向普通项目运行。开启后，外部 AI agent 可以通过 JSONL 命令注入输入、执行带帧等待的连续 batch、截图、读取受限场景树，并在运行过程中开启或停止性能录制。
 
-The feature is intentionally local-first: it binds to `127.0.0.1`, has no v1
-remote auth surface, and reuses Godot's existing input and CLI performance
-recorder paths instead of exposing the remote debugger as a public API.
+这个功能刻意保持本机优先：只绑定 `127.0.0.1`，v1 不提供远程鉴权入口，并复用 Godot 现有输入管线和 CLI 性能录制器，而不是把 remote debugger 当成公开 API。
 
-## Quick Start
+## 快速开始
 
-Enable from CLI for a normal project run:
+在普通项目运行中通过 CLI 启用：
 
 ```powershell
 .\bin\godot.windows.editor.dev.x86_64.console.exe `
@@ -26,7 +19,7 @@ Enable from CLI for a normal project run:
   --ai-agent-port 7011
 ```
 
-Send one JSON request per line to the local TCP port:
+向本机 TCP 端口发送一行一个 JSON 请求：
 
 ```json
 {"id":1,"cmd":"ping"}
@@ -34,35 +27,31 @@ Send one JSON request per line to the local TCP port:
 {"id":3,"cmd":"get_screenshot","name":"after_click"}
 ```
 
-Every response includes `ok` and `frame`. Successful responses include
-`result`; failures include `error.code` and `error.message`.
+每个响应都包含 `ok` 和 `frame`。成功响应包含 `result`；失败响应包含 `error.code` 和 `error.message`。
 
-## Settings
+## 设置
 
-Project Settings live under `editor/ai_agent_control/*`:
+项目设置位于 `editor/ai_agent_control/*`：
 
-- `enabled`: project-level default switch.
-- `port`: local TCP port, default `7010`.
-- `max_batch_ops`: maximum operations in one batch, default `1024`.
-- `max_line_bytes`: maximum JSONL request size, default `1048576`.
-- `default_perf_top_frames`: default runtime perf slow-frame count.
-- `default_scene_tree_max_depth`: default scene tree depth.
-- `screenshot_directory`: PNG output directory; empty uses the OS temp path.
+- `enabled`：项目级默认开关。
+- `port`：本地 TCP 端口，默认 `7010`。
+- `max_batch_ops`：单个 batch 的最大操作数，默认 `1024`。
+- `max_line_bytes`：单行 JSONL 请求最大字节数，默认 `1048576`。
+- `default_perf_top_frames`：运行时性能录制默认保留的慢帧数量。
+- `default_scene_tree_max_depth`：默认场景树深度。
+- `screenshot_directory`：PNG 输出目录；为空时使用系统临时目录。
 
-Priority is:
+优先级为：
 
 ```text
-explicit CLI arguments > Project Settings > built-in defaults
+显式 CLI 参数 > 项目设置 > 内建默认值
 ```
 
-The editor Run Bar also has an AI Agent Control Mode toggle. The toggle is saved
-as editor project metadata and does not rewrite Project Settings. If no toggle
-override exists, it follows `editor/ai_agent_control/enabled`; once clicked, the
-Run Bar state becomes the explicit launch override for that project.
+编辑器运行栏也有 AI Agent Control Mode 开关。该开关保存为 editor project metadata，不会直接改写项目设置。如果没有手动切换过，它跟随 `editor/ai_agent_control/enabled`；一旦点击过，运行栏状态就成为该项目的显式运行覆盖项。
 
-## Protocol
+## 协议
 
-Basic commands:
+基础命令：
 
 ```json
 {"id":1,"cmd":"get_status"}
@@ -74,13 +63,11 @@ Basic commands:
 {"id":7,"cmd":"get_scene_tree","maxDepth":16}
 ```
 
-Only one active client is accepted. A second connection receives `busy` and is
-closed. Oversized lines return `line_too_large`; invalid JSON returns
-`invalid_json`; unknown commands return `unknown_command`.
+同一时间只接受一个 active client。第二个连接会收到 `busy` 并被关闭。超大行返回 `line_too_large`；非法 JSON 返回 `invalid_json`；未知命令返回 `unknown_command`。
 
 ## Batch
 
-Use `batch` when an agent needs deterministic multi-frame behavior:
+当 agent 需要确定性的多帧行为时使用 `batch`：
 
 ```json
 {
@@ -99,27 +86,22 @@ Use `batch` when an agent needs deterministic multi-frame behavior:
 }
 ```
 
-`checkpoint` emits an intermediate response and then continues. `onError=stop`
-releases AI-held actions and mouse buttons before ending the batch.
-`onError=continue` records errors and keeps processing later operations.
+`checkpoint` 会发送中间响应，然后继续执行。`onError=stop` 会在结束 batch 前释放 AI 持有的 action 和 mouse button。`onError=continue` 会记录错误并继续处理后续操作。
 
-## Advanced Input
+## 高级输入
 
-High-level commands expand into existing Godot input events:
+高级命令会展开成现有 Godot input event：
 
-- `click`: move, press, wait, release.
-- `double_click`: two clicks with a frame gap; the second press is marked as a
-  double click.
-- `hold`: move, press, wait, release.
-- `drag`: move to start, press, per-frame motion interpolation, release.
+- `click`：移动、按下、等待、释放。
+- `double_click`：两次点击，中间带帧间隔；第二次 press 标记为 double click。
+- `hold`：移动、按下、等待、释放。
+- `drag`：移动到起点、按下、逐帧插值移动、释放。
 
-Mouse button commands maintain an AI-owned button mask, so drag motion carries
-the correct pressed-button state.
+鼠标按钮命令维护 AI 自己的 button mask，因此拖动期间的 motion event 会携带正确的按键状态。
 
-## Runtime Perf
+## 运行时性能录制
 
-Runtime perf commands use the same summary contract as the CLI performance
-recorder but return through the socket instead of stdout:
+运行时性能命令复用 CLI 性能录制器的 summary 契约，但通过 socket 返回，不写 stdout：
 
 ```json
 {"id":10,"cmd":"perf_start","name":"probe","topFrames":10}
@@ -127,45 +109,40 @@ recorder but return through the socket instead of stdout:
 {"id":12,"cmd":"perf_stop"}
 ```
 
-Use summary output for quick problem discovery. Add `samplesFile` to
-`perf_start` when a follow-up analysis needs per-frame JSONL samples.
+用 summary 快速发现问题。如果后续分析需要逐帧 JSONL 样本，在 `perf_start` 中加入 `samplesFile`。
 
-CLI `--perf-record` remains independent and still prints its summary as the last
-stdout line on process exit.
+CLI `--perf-record` 仍然独立工作，并在进程退出时把 summary 打印为 stdout 最后一行。
 
-## Troubleshooting
+## 排障
 
-- `busy`: another TCP client or batch is active.
-- `unknown_action`: the requested `InputMap` action does not exist.
-- `screenshot_unavailable`: the run has no readable root viewport texture.
-- `perf_not_active`: `perf_stop` was sent before `perf_start`.
-- `line_too_large`: increase `editor/ai_agent_control/max_line_bytes` or split
-  the request.
+- `busy`：另一个 TCP client 或 batch 正在运行。
+- `unknown_action`：请求的 `InputMap` action 不存在。
+- `screenshot_unavailable`：当前运行没有可读取的 root viewport texture。
+- `perf_not_active`：在 `perf_start` 前发送了 `perf_stop`。
+- `line_too_large`：增大 `editor/ai_agent_control/max_line_bytes`，或拆分请求。
+- `Get balance request failed! Authentication failed`：这类余额或凭据错误来自项目脚本、插件或外部 API 调用，不是本地 AI 控制桥产生的错误；v1 控制桥没有 token 鉴权，也不会请求外部余额。
 
-## Validation
+## 验证
 
-Automated coverage lives in `tests/main/test_cli_ai_input_server.h` and focuses
-on parser, validation, mouse button parsing, advanced input expansion, and
-runtime reuse of the CLI performance recorder.
+自动化覆盖位于 `tests/main/test_cli_ai_input_server.h`，重点覆盖 parser、参数校验、mouse button 解析、高级输入展开，以及运行时复用 CLI 性能录制器。
 
-Manual validation should cover:
+手动验证应覆盖：
 
-- non-headless 3D project input and screenshots
-- headless action/key/batch/perf behavior
-- `--quit-after` coexistence
-- `--perf-record` coexistence with AI runtime perf
-- editor Run Bar toggle argument forwarding
+- 非 headless 3D 项目的输入和截图。
+- headless 下的 action、key、batch、perf 行为。
+- 与 `--quit-after` 共存。
+- CLI `--perf-record` 与 AI runtime perf 共存。
+- editor Run Bar toggle 参数转发。
 
-## Known Limits
+## 已知限制
 
-- v1 binds only to `127.0.0.1`.
-- v1 has no token authentication.
-- v1 does not expose arbitrary node properties, method calls, script execution,
-  or object mutation.
-- v1 has no batch cancel, pause, resume, or job query command.
-- Screenshot responses return PNG file paths, not base64 payloads.
+- v1 只绑定 `127.0.0.1`。
+- v1 没有 token authentication。
+- v1 不暴露任意节点属性读取、方法调用、脚本执行或对象修改。
+- v1 没有 batch cancel、pause、resume 或 job query 命令。
+- 截图响应返回 PNG 文件路径，不返回 base64 payload。
 
-## Related
+## 相关链接
 
-- [CLI Performance Recorder](cli-performance-recorder.md)
-- [Custom Feature Branching](../operations/custom-feature-branching.md)
+- [CLI 性能录制器](cli-performance-recorder.md)
+- [自定义功能分支流程](../operations/custom-feature-branching.md)

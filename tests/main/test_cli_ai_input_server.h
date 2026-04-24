@@ -38,6 +38,7 @@
 #endif
 
 #include "core/object/class_db.h"
+#include "core/object/message_queue.h"
 #include "core/object/object.h"
 #include "core/io/json.h"
 #include "scene/3d/camera_3d.h"
@@ -96,6 +97,54 @@ public:
 		if (loading_panel) {
 			loading_panel->show();
 		}
+	}
+};
+
+class CLIAIInputGameplayProbe : public Node {
+	GDCLASS(CLIAIInputGameplayProbe, Node);
+
+protected:
+	static void _bind_methods() {}
+
+public:
+	int mouse_motion_event_count = 0;
+	Vector2 last_mouse_screen_relative;
+	float move_right_strength = 0.0f;
+	bool saw_aim_pressed = false;
+	bool saw_aim_just_pressed = false;
+	bool saw_aim_just_released = false;
+	bool saw_shoot_pressed = false;
+	bool saw_move_right_pressed = false;
+	bool saw_jump_just_pressed = false;
+
+	virtual void input(const Ref<InputEvent> &p_event) override {
+		Ref<InputEventMouseMotion> mm = p_event;
+		if (mm.is_valid()) {
+			mouse_motion_event_count++;
+			last_mouse_screen_relative = mm->get_relative_screen_position();
+		}
+	}
+
+	void sample_actions() {
+		move_right_strength = Input::get_singleton()->get_action_strength("move_right");
+		saw_aim_pressed = Input::get_singleton()->is_action_pressed("aim");
+		saw_aim_just_pressed = Input::get_singleton()->is_action_just_pressed("aim");
+		saw_aim_just_released = Input::get_singleton()->is_action_just_released("aim");
+		saw_shoot_pressed = Input::get_singleton()->is_action_pressed("shoot");
+		saw_move_right_pressed = Input::get_singleton()->is_action_pressed("move_right");
+		saw_jump_just_pressed = Input::get_singleton()->is_action_just_pressed("jump");
+	}
+
+	void clear_samples() {
+		mouse_motion_event_count = 0;
+		last_mouse_screen_relative = Vector2();
+		move_right_strength = 0.0f;
+		saw_aim_pressed = false;
+		saw_aim_just_pressed = false;
+		saw_aim_just_released = false;
+		saw_shoot_pressed = false;
+		saw_move_right_pressed = false;
+		saw_jump_just_pressed = false;
 	}
 };
 
@@ -175,6 +224,7 @@ struct TestSceneContext {
 	ProgressBar *progress_bar = nullptr;
 	Control *menu_root = nullptr;
 	Control *loading_panel = nullptr;
+	CLIAIInputGameplayProbe *gameplay_probe = nullptr;
 	StaticBody3D *node_3d = nullptr;
 	Node3D *helper_node_3d = nullptr;
 	StaticBody3D *offscreen_node_3d = nullptr;
@@ -246,6 +296,39 @@ struct TestSceneContext {
 		progress_bar->set_size(Vector2(160, 20));
 		progress_bar->set_value(5.0);
 		menu_root->add_child(progress_bar);
+
+		if (!InputMap::get_singleton()->has_action("move_right")) {
+			InputMap::get_singleton()->add_action("move_right");
+		}
+		Ref<InputEventKey> move_right_key = InputEventKey::create_reference(Key::D, true);
+		InputMap::get_singleton()->action_add_event("move_right", move_right_key);
+
+		if (!InputMap::get_singleton()->has_action("jump")) {
+			InputMap::get_singleton()->add_action("jump");
+		}
+		Ref<InputEventKey> jump_key = InputEventKey::create_reference(Key::SPACE, true);
+		InputMap::get_singleton()->action_add_event("jump", jump_key);
+
+		if (!InputMap::get_singleton()->has_action("aim")) {
+			InputMap::get_singleton()->add_action("aim");
+		}
+		Ref<InputEventMouseButton> aim_button;
+		aim_button.instantiate();
+		aim_button->set_button_index(MouseButton::RIGHT);
+		InputMap::get_singleton()->action_add_event("aim", aim_button);
+
+		if (!InputMap::get_singleton()->has_action("shoot")) {
+			InputMap::get_singleton()->add_action("shoot");
+		}
+		Ref<InputEventMouseButton> shoot_button;
+		shoot_button.instantiate();
+		shoot_button->set_button_index(MouseButton::LEFT);
+		InputMap::get_singleton()->action_add_event("shoot", shoot_button);
+
+		gameplay_probe = memnew(CLIAIInputGameplayProbe);
+		gameplay_probe->set_name("GameplayProbe");
+		fixture_root->add_child(gameplay_probe);
+		gameplay_probe->set_process_input(true);
 
 		camera = memnew(Camera3D);
 		camera->set_name("TestCamera");
@@ -865,6 +948,64 @@ TEST_SUITE("[Main][CLIAIInputServer][SceneTree]") {
 		CHECK((bool)server.test_sent_response(0)["ok"]);
 		CHECK_FALSE(Input::get_singleton()->is_action_pressed("ui_right"));
 		CHECK_EQ(Input::get_singleton()->get_action_strength("ui_right"), doctest::Approx(0.0f));
+	}
+
+	TEST_CASE("[SceneTree] Key and mouse commands preserve gameplay input semantics") {
+		TestSceneContext scene;
+		CLIAIInputServer server{ CLIAIInputServer::Options() };
+
+		scene.gameplay_probe->clear_samples();
+		server.test_clear_sent_responses();
+
+		server.test_process_line("{\"id\":41,\"cmd\":\"key\",\"keycode\":\"D\",\"pressed\":true}");
+		scene.gameplay_probe->sample_actions();
+		CHECK(scene.gameplay_probe->saw_move_right_pressed);
+		CHECK_EQ(scene.gameplay_probe->move_right_strength, doctest::Approx(1.0f));
+
+		server.test_process_line("{\"id\":42,\"cmd\":\"key\",\"keycode\":\"D\",\"pressed\":false}");
+		scene.gameplay_probe->sample_actions();
+		CHECK_FALSE(scene.gameplay_probe->saw_move_right_pressed);
+		CHECK_EQ(scene.gameplay_probe->move_right_strength, doctest::Approx(0.0f));
+
+		scene.gameplay_probe->clear_samples();
+		server.test_process_line("{\"id\":43,\"cmd\":\"key\",\"keycode\":\"Space\",\"pressed\":true}");
+		scene.gameplay_probe->sample_actions();
+		CHECK(scene.gameplay_probe->saw_jump_just_pressed);
+		server.test_process_line("{\"id\":44,\"cmd\":\"key\",\"keycode\":\"Space\",\"pressed\":false}");
+
+		scene.gameplay_probe->clear_samples();
+		server.test_process_line("{\"id\":45,\"cmd\":\"mouse_button\",\"button\":\"right\",\"pressed\":true,\"x\":100,\"y\":100}");
+		scene.gameplay_probe->sample_actions();
+		CHECK(scene.gameplay_probe->saw_aim_pressed);
+		CHECK(scene.gameplay_probe->saw_aim_just_pressed);
+		CHECK_FALSE(scene.gameplay_probe->saw_shoot_pressed);
+
+		server.test_process_line("{\"id\":46,\"cmd\":\"mouse_button\",\"button\":\"right\",\"pressed\":false,\"x\":100,\"y\":100}");
+		scene.gameplay_probe->sample_actions();
+		CHECK_FALSE(scene.gameplay_probe->saw_aim_pressed);
+		CHECK(scene.gameplay_probe->saw_aim_just_released);
+
+		server.test_process_line("{\"id\":47,\"cmd\":\"mouse_button\",\"button\":\"left\",\"pressed\":true,\"x\":100,\"y\":100}");
+		scene.gameplay_probe->sample_actions();
+		CHECK(scene.gameplay_probe->saw_shoot_pressed);
+
+		server.test_process_line("{\"id\":48,\"cmd\":\"mouse_button\",\"button\":\"left\",\"pressed\":false,\"x\":100,\"y\":100}");
+		scene.gameplay_probe->sample_actions();
+		CHECK_FALSE(scene.gameplay_probe->saw_shoot_pressed);
+
+		scene.gameplay_probe->clear_samples();
+		server.test_process_line("{\"id\":49,\"cmd\":\"mouse_motion\",\"x\":140,\"y\":160}");
+		CHECK_EQ(scene.gameplay_probe->mouse_motion_event_count, 1);
+		CHECK_EQ(scene.gameplay_probe->last_mouse_screen_relative, Vector2(40, 60));
+
+		server.test_process_line("{\"id\":50,\"cmd\":\"mouse_motion\",\"relativeX\":5,\"relativeY\":-3}");
+		CHECK_EQ(scene.gameplay_probe->mouse_motion_event_count, 2);
+		CHECK_EQ(scene.gameplay_probe->last_mouse_screen_relative, Vector2(5, -3));
+
+		REQUIRE_EQ(server.test_sent_response_count(), 10);
+		for (int i = 0; i < server.test_sent_response_count(); i++) {
+			CHECK((bool)server.test_sent_response(i)["ok"]);
+		}
 	}
 
 	TEST_CASE("[SceneTree] Wait primitives and batch debug helpers expose state") {

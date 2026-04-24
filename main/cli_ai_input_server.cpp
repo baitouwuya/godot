@@ -519,7 +519,11 @@ bool CLIAIInputServer::_dispatch_root_input(const Ref<InputEvent> &p_event, bool
 	if (InputEventFromWindow *window_event = Object::cast_to<InputEventFromWindow>(*p_event)) {
 		window_event->set_window_id(root->get_window_id());
 	}
-	root->push_input(p_event, p_local_coords);
+	if (p_local_coords) {
+		Input::get_singleton()->parse_input_event(p_event);
+	} else {
+		root->push_input(p_event, false);
+	}
 	return true;
 }
 

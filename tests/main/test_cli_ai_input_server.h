@@ -65,6 +65,10 @@ protected:
 public:
 	int button_pressed_count = 0;
 	int line_edit_focus_entered_count = 0;
+	int button_gui_input_count = 0;
+	int panel_visibility_changed_count = 0;
+	Control *menu_root = nullptr;
+	Control *loading_panel = nullptr;
 
 	void on_button_pressed() {
 		button_pressed_count++;
@@ -72,6 +76,26 @@ public:
 
 	void on_line_edit_focus_entered() {
 		line_edit_focus_entered_count++;
+	}
+
+	void on_button_gui_input(const Ref<InputEvent> &p_event) {
+		if (p_event.is_valid()) {
+			button_gui_input_count++;
+		}
+	}
+
+	void on_panel_visibility_changed() {
+		panel_visibility_changed_count++;
+	}
+
+	void on_play_button_pressed() {
+		button_pressed_count++;
+		if (menu_root) {
+			menu_root->hide();
+		}
+		if (loading_panel) {
+			loading_panel->show();
+		}
 	}
 };
 
@@ -115,6 +139,11 @@ static Dictionary find_snapshot_by_name(const Array &p_nodes, const String &p_na
 	return Dictionary();
 }
 
+static Vector2 rect_center_from_snapshot(const Dictionary &p_snapshot) {
+	Dictionary rect = p_snapshot["screenRect"];
+	return Vector2((double)rect["x"] + ((double)rect["width"] * 0.5), (double)rect["y"] + ((double)rect["height"] * 0.5));
+}
+
 static Dictionary find_event_response_payload(const Vector<Dictionary> &p_events, const String &p_session_dir, const String &p_event_name) {
 	const Dictionary event = TestCustomFeatureTraceHelpers::find_event(p_events, CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, p_event_name);
 	if (event.is_empty()) {
@@ -144,6 +173,8 @@ struct TestSceneContext {
 	Button *button = nullptr;
 	LineEdit *line_edit = nullptr;
 	ProgressBar *progress_bar = nullptr;
+	Control *menu_root = nullptr;
+	Control *loading_panel = nullptr;
 	StaticBody3D *node_3d = nullptr;
 	Node3D *helper_node_3d = nullptr;
 	StaticBody3D *offscreen_node_3d = nullptr;
@@ -156,9 +187,22 @@ struct TestSceneContext {
 	Node3D *subviewport_helper_node_3d = nullptr;
 	StaticBody3D *subviewport_offscreen_node_3d = nullptr;
 	CLIAIInputSignalProbe *signal_probe = nullptr;
+	Window::ContentScaleMode saved_content_scale_mode = Window::CONTENT_SCALE_MODE_DISABLED;
+	Window::ContentScaleAspect saved_content_scale_aspect = Window::CONTENT_SCALE_ASPECT_IGNORE;
+	real_t saved_content_scale_factor = 1.0;
+	Size2i saved_root_size;
 
 	TestSceneContext() {
 		Window *root = SceneTree::get_singleton()->get_root();
+		saved_content_scale_mode = root->get_content_scale_mode();
+		saved_content_scale_aspect = root->get_content_scale_aspect();
+		saved_content_scale_factor = root->get_content_scale_factor();
+		saved_root_size = root->get_size();
+		root->set_content_scale_mode(Window::CONTENT_SCALE_MODE_CANVAS_ITEMS);
+		root->set_content_scale_aspect(Window::CONTENT_SCALE_ASPECT_EXPAND);
+		root->set_content_scale_factor(1.0);
+		root->set_size(Size2i(1920, 1080));
+
 		signal_probe = memnew(CLIAIInputSignalProbe);
 		fixture_root = memnew(Node);
 		fixture_root->set_name("AITestFixtureRoot");
@@ -171,15 +215,29 @@ struct TestSceneContext {
 		button->set_size(Vector2(140, 36));
 		button->add_to_group("menu");
 		button->add_to_group("pick");
-		fixture_root->add_child(button);
-		button->connect("pressed", callable_mp(signal_probe, &CLIAIInputSignalProbe::on_button_pressed));
+		menu_root = memnew(Control);
+		menu_root->set_name("MenuRoot");
+		menu_root->set_size(Vector2(320, 240));
+		fixture_root->add_child(menu_root);
+		menu_root->add_child(button);
+		loading_panel = memnew(Control);
+		loading_panel->set_name("LoadingPanel");
+		loading_panel->set_position(Vector2(32, 200));
+		loading_panel->set_size(Vector2(180, 32));
+		loading_panel->set_visible(false);
+		fixture_root->add_child(loading_panel);
+		loading_panel->connect("visibility_changed", callable_mp(signal_probe, &CLIAIInputSignalProbe::on_panel_visibility_changed));
+		signal_probe->menu_root = menu_root;
+		signal_probe->loading_panel = loading_panel;
+		button->connect("pressed", callable_mp(signal_probe, &CLIAIInputSignalProbe::on_play_button_pressed));
+		button->connect("gui_input", callable_mp(signal_probe, &CLIAIInputSignalProbe::on_button_gui_input));
 
 		line_edit = memnew(LineEdit);
 		line_edit->set_name("NameInput");
 		line_edit->set_position(Vector2(32, 144));
 		line_edit->set_size(Vector2(180, 36));
 		line_edit->add_to_group("pick");
-		fixture_root->add_child(line_edit);
+		menu_root->add_child(line_edit);
 		line_edit->connect("focus_entered", callable_mp(signal_probe, &CLIAIInputSignalProbe::on_line_edit_focus_entered));
 
 		progress_bar = memnew(ProgressBar);
@@ -187,7 +245,7 @@ struct TestSceneContext {
 		progress_bar->set_position(Vector2(32, 96));
 		progress_bar->set_size(Vector2(160, 20));
 		progress_bar->set_value(5.0);
-		fixture_root->add_child(progress_bar);
+		menu_root->add_child(progress_bar);
 
 		camera = memnew(Camera3D);
 		camera->set_name("TestCamera");
@@ -253,12 +311,20 @@ struct TestSceneContext {
 	}
 
 	~TestSceneContext() {
+		Window *root = SceneTree::get_singleton() ? SceneTree::get_singleton()->get_root() : nullptr;
+		if (root) {
+			root->set_content_scale_mode(saved_content_scale_mode);
+			root->set_content_scale_aspect(saved_content_scale_aspect);
+			root->set_content_scale_factor(saved_content_scale_factor);
+			root->set_size(saved_root_size);
+		}
 		if (fixture_root && fixture_root->get_parent()) {
 			fixture_root->get_parent()->remove_child(fixture_root);
 		}
 		memdelete(fixture_root);
 		memdelete(signal_probe);
 	}
+
 };
 
 struct RouterSceneContext {
@@ -680,6 +746,125 @@ TEST_SUITE("[Main][CLIAIInputServer][SceneTree]") {
 		REQUIRE_EQ(server.test_sent_response_count(), 1);
 		CHECK((bool)server.test_sent_response(0)["ok"]);
 		CHECK(server.test_sent_response(0).has("sceneDigest"));
+	}
+
+	TEST_CASE("[SceneTree] Fullscreen-style GUI inputs trigger focused buttons through real events") {
+		TestSceneContext scene;
+		CLIAIInputServer server{ CLIAIInputServer::Options() };
+
+		Dictionary snapshot_request;
+		snapshot_request["cmd"] = "get_node_snapshot";
+		Dictionary selector;
+		selector["name"] = "PlayButton";
+		snapshot_request["selector"] = selector;
+		const Dictionary snapshot_response = server.test_cmd_get_node_snapshot(snapshot_request);
+		REQUIRE((bool)snapshot_response["ok"]);
+		const Dictionary button_snapshot = ((Dictionary)snapshot_response["result"])["node"];
+		const Vector2 click_position = rect_center_from_snapshot(button_snapshot);
+
+		server.test_clear_sent_responses();
+		server.test_process_line("{\"id\":29,\"cmd\":\"focus_target\",\"selector\":{\"name\":\"PlayButton\"}}");
+		drain_server_batch(server);
+		REQUIRE_EQ(server.test_sent_response_count(), 1);
+		CHECK((bool)server.test_sent_response(0)["ok"]);
+		CHECK(scene.button->has_focus());
+
+		scene.signal_probe->button_pressed_count = 0;
+		scene.signal_probe->button_gui_input_count = 0;
+		scene.signal_probe->panel_visibility_changed_count = 0;
+		scene.menu_root->show();
+		scene.loading_panel->hide();
+		server.test_clear_sent_responses();
+		server.test_process_line(vformat("{\"id\":30,\"cmd\":\"mouse_motion\",\"x\":%.6f,\"y\":%.6f}", click_position.x, click_position.y));
+		server.test_process_line(vformat("{\"id\":31,\"cmd\":\"mouse_button\",\"button\":\"left\",\"pressed\":true,\"x\":%.6f,\"y\":%.6f}", click_position.x, click_position.y));
+		server.test_process_line(vformat("{\"id\":32,\"cmd\":\"mouse_button\",\"button\":\"left\",\"pressed\":false,\"x\":%.6f,\"y\":%.6f}", click_position.x, click_position.y));
+		CHECK_EQ(scene.signal_probe->button_pressed_count, 1);
+		CHECK_FALSE(scene.menu_root->is_visible_in_tree());
+		CHECK(scene.loading_panel->is_visible_in_tree());
+		CHECK(scene.signal_probe->panel_visibility_changed_count >= 1);
+		REQUIRE_EQ(server.test_sent_response_count(), 3);
+		CHECK((bool)server.test_sent_response(0)["ok"]);
+		CHECK((bool)server.test_sent_response(1)["ok"]);
+		CHECK((bool)server.test_sent_response(2)["ok"]);
+
+		server.test_clear_sent_responses();
+		scene.signal_probe->button_pressed_count = 0;
+		scene.signal_probe->button_gui_input_count = 0;
+		scene.signal_probe->panel_visibility_changed_count = 0;
+		scene.menu_root->show();
+		scene.loading_panel->hide();
+		server.test_process_line("{\"id\":330,\"cmd\":\"focus_target\",\"selector\":{\"name\":\"PlayButton\"}}");
+		drain_server_batch(server);
+		server.test_clear_sent_responses();
+		server.test_process_line("{\"id\":33,\"cmd\":\"key\",\"keycode\":\"Enter\",\"pressed\":true}");
+		server.test_process_line("{\"id\":34,\"cmd\":\"key\",\"keycode\":\"Enter\",\"pressed\":false}");
+		REQUIRE_EQ(server.test_sent_response_count(), 2);
+		CHECK((bool)server.test_sent_response(0)["ok"]);
+		CHECK((bool)server.test_sent_response(1)["ok"]);
+		CHECK_EQ(scene.signal_probe->button_pressed_count, 1);
+		CHECK(scene.signal_probe->button_gui_input_count >= 1);
+		CHECK_FALSE(scene.menu_root->is_visible_in_tree());
+		CHECK(scene.loading_panel->is_visible_in_tree());
+		CHECK(scene.signal_probe->panel_visibility_changed_count >= 1);
+
+		server.test_clear_sent_responses();
+		scene.signal_probe->button_pressed_count = 0;
+		scene.signal_probe->button_gui_input_count = 0;
+		scene.signal_probe->panel_visibility_changed_count = 0;
+		scene.menu_root->show();
+		scene.loading_panel->hide();
+		server.test_process_line("{\"id\":350,\"cmd\":\"focus_target\",\"selector\":{\"name\":\"PlayButton\"}}");
+		drain_server_batch(server);
+		server.test_clear_sent_responses();
+		server.test_process_line("{\"id\":35,\"cmd\":\"key\",\"keycode\":\"Space\",\"pressed\":true}");
+		server.test_process_line("{\"id\":36,\"cmd\":\"key\",\"keycode\":\"Space\",\"pressed\":false}");
+		REQUIRE_EQ(server.test_sent_response_count(), 2);
+		CHECK((bool)server.test_sent_response(0)["ok"]);
+		CHECK((bool)server.test_sent_response(1)["ok"]);
+		CHECK_EQ(scene.signal_probe->button_pressed_count, 1);
+		CHECK(scene.signal_probe->button_gui_input_count >= 1);
+		CHECK_FALSE(scene.menu_root->is_visible_in_tree());
+		CHECK(scene.loading_panel->is_visible_in_tree());
+		CHECK(scene.signal_probe->panel_visibility_changed_count >= 1);
+
+		scene.signal_probe->button_pressed_count = 0;
+		scene.signal_probe->button_gui_input_count = 0;
+		scene.signal_probe->panel_visibility_changed_count = 0;
+		scene.menu_root->show();
+		scene.loading_panel->hide();
+		server.test_clear_sent_responses();
+		server.test_process_line("{\"id\":370,\"cmd\":\"focus_target\",\"selector\":{\"name\":\"PlayButton\"}}");
+		drain_server_batch(server);
+		server.test_clear_sent_responses();
+		server.test_process_line("{\"id\":37,\"cmd\":\"action\",\"action\":\"ui_accept\",\"pressed\":true}");
+		server.test_process_line("{\"id\":38,\"cmd\":\"action\",\"action\":\"ui_accept\",\"pressed\":false}");
+		CHECK_EQ(scene.signal_probe->button_pressed_count, 1);
+		CHECK(scene.signal_probe->button_gui_input_count >= 1);
+		CHECK_FALSE(scene.menu_root->is_visible_in_tree());
+		CHECK(scene.loading_panel->is_visible_in_tree());
+		CHECK(scene.signal_probe->panel_visibility_changed_count >= 1);
+		CHECK_FALSE(Input::get_singleton()->is_action_pressed("ui_accept"));
+		REQUIRE_EQ(server.test_sent_response_count(), 2);
+		CHECK((bool)server.test_sent_response(0)["ok"]);
+		CHECK((bool)server.test_sent_response(1)["ok"]);
+	}
+
+	TEST_CASE("[SceneTree] Action commands preserve gameplay-style Input state while dispatching GUI events") {
+		CLIAIInputServer server{ CLIAIInputServer::Options() };
+
+		server.test_clear_sent_responses();
+		server.test_process_line("{\"id\":39,\"cmd\":\"action\",\"action\":\"ui_right\",\"pressed\":true,\"strength\":1.0}");
+		REQUIRE_EQ(server.test_sent_response_count(), 1);
+		CHECK((bool)server.test_sent_response(0)["ok"]);
+		CHECK(Input::get_singleton()->is_action_pressed("ui_right"));
+		CHECK_EQ(Input::get_singleton()->get_action_strength("ui_right"), doctest::Approx(1.0f));
+
+		server.test_clear_sent_responses();
+		server.test_process_line("{\"id\":40,\"cmd\":\"action\",\"action\":\"ui_right\",\"pressed\":false,\"strength\":0.0}");
+		REQUIRE_EQ(server.test_sent_response_count(), 1);
+		CHECK((bool)server.test_sent_response(0)["ok"]);
+		CHECK_FALSE(Input::get_singleton()->is_action_pressed("ui_right"));
+		CHECK_EQ(Input::get_singleton()->get_action_strength("ui_right"), doctest::Approx(0.0f));
 	}
 
 	TEST_CASE("[SceneTree] Wait primitives and batch debug helpers expose state") {

@@ -353,6 +353,7 @@ private:
 	void _inject_text_input(const String &p_text);
 	bool _dispatch_root_input(const Ref<InputEvent> &p_event, bool p_local_coords = true) const;
 	bool _dispatch_root_text_input(const String &p_text) const;
+	bool _get_root_window_mouse_coordinates(const Vector2 &p_position, Vector2 &r_local_position, Vector2 &r_global_position) const;
 	void _release_held_inputs();
 	void _abort_runtime_perf(bool p_send_event);
 	static int64_t _key_hold_id(Key p_key, bool p_shift, bool p_ctrl, bool p_alt, bool p_meta);

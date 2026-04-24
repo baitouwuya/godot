@@ -516,7 +516,6 @@ bool CLIAIInputServer::_dispatch_root_input(const Ref<InputEvent> &p_event, bool
 	}
 
 	Window *root = scene_tree->get_root();
-	p_event->set_device(InputEvent::DEVICE_ID_INTERNAL);
 	if (InputEventFromWindow *window_event = Object::cast_to<InputEventFromWindow>(*p_event)) {
 		window_event->set_window_id(root->get_window_id());
 	}
@@ -530,6 +529,24 @@ bool CLIAIInputServer::_dispatch_root_text_input(const String &p_text) const {
 		return false;
 	}
 	scene_tree->get_root()->push_text_input(p_text);
+	return true;
+}
+
+bool CLIAIInputServer::_get_root_window_mouse_coordinates(const Vector2 &p_position, Vector2 &r_local_position, Vector2 &r_global_position) const {
+	SceneTree *scene_tree = _get_runtime_scene_tree();
+	if (!scene_tree || !scene_tree->get_root()) {
+		return false;
+	}
+
+	Window *root = scene_tree->get_root();
+	r_local_position = p_position;
+	r_global_position = p_position;
+	if (!root) {
+		return false;
+	}
+
+	const Transform2D canvas_inverse = root->get_global_canvas_transform().affine_inverse();
+	r_global_position = canvas_inverse.xform(p_position);
 	return true;
 }
 
@@ -2991,6 +3008,17 @@ Dictionary CLIAIInputServer::_cmd_action(const Dictionary &p_request) {
 		held_actions.erase(action);
 	}
 
+	Ref<InputEventAction> event;
+	event.instantiate();
+	event->set_action(action);
+	event->set_pressed(pressed);
+	event->set_strength((float)strength);
+	event->set_device(InputEvent::DEVICE_ID_EMULATION);
+	Ref<InputEvent> base_event = event;
+	if (!_dispatch_root_input(base_event, true)) {
+		return _make_error_response(id, has_id, "scene_tree_unavailable", "SceneTree root viewport is unavailable.");
+	}
+
 	Dictionary result;
 	result["action"] = String(action);
 	result["pressed"] = pressed;
@@ -3115,15 +3143,21 @@ void CLIAIInputServer::_inject_mouse_button(MouseButton p_button, const Vector2 
 		}
 	}
 
-	last_mouse_position = p_position;
-	Input::get_singleton()->set_mouse_position(p_position);
+	Vector2 local_position = p_position;
+	Vector2 global_position = p_position;
+	if (!_get_root_window_mouse_coordinates(p_position, local_position, global_position)) {
+		return;
+	}
+
+	last_mouse_position = local_position;
+	Input::get_singleton()->set_mouse_position(local_position);
 
 	Ref<InputEventMouseButton> event;
 	event.instantiate();
 	event->set_button_index(p_button);
 	event->set_pressed(p_pressed);
-	event->set_position(p_position);
-	event->set_global_position(p_position);
+	event->set_position(local_position);
+	event->set_global_position(global_position);
 	event->set_button_mask(ai_mouse_button_mask);
 	event->set_double_click(p_double_click);
 	Ref<InputEvent> base_event = event;
@@ -3131,15 +3165,23 @@ void CLIAIInputServer::_inject_mouse_button(MouseButton p_button, const Vector2 
 }
 
 void CLIAIInputServer::_inject_mouse_motion(const Vector2 &p_position, const Vector2 &p_relative) {
-	last_mouse_position = p_position;
-	Input::get_singleton()->set_mouse_position(p_position);
+	Vector2 local_position = p_position;
+	Vector2 global_position = p_position;
+	if (!_get_root_window_mouse_coordinates(p_position, local_position, global_position)) {
+		return;
+	}
+
+	last_mouse_position = local_position;
+	Input::get_singleton()->set_mouse_position(local_position);
 
 	Ref<InputEventMouseMotion> event;
 	event.instantiate();
-	event->set_position(p_position);
-	event->set_global_position(p_position);
+	event->set_position(local_position);
+	event->set_global_position(global_position);
 	event->set_relative(p_relative);
 	event->set_relative_screen_position(p_relative);
+	event->set_velocity(p_relative);
+	event->set_screen_velocity(p_relative);
 	event->set_button_mask(ai_mouse_button_mask);
 	Ref<InputEvent> base_event = event;
 	_dispatch_root_input(base_event, true);

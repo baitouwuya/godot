@@ -33,3 +33,8 @@ wiki 活动的追加式记录。
 
 - 将 wiki 索引、日志、规则页、功能页和流程页改为中文。
 - 保留 CLI flag、JSON key、命令示例、文件路径等机器接口原文，避免破坏可复制命令。
+
+## [2026-04-24] ingest | 最新日志 CLI 自定义功能
+
+- 创建 `project-wiki/wiki/components/latest-log-cli.md`。
+- 记录 `--latest-log`、`--latest-log-lines`、默认尾部压缩输出、路径解析和轮转日志选择规则。

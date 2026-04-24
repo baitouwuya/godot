@@ -31,6 +31,7 @@
 #include "main.h"
 
 #include "main/cli_ai_input_server.h"
+#include "main/cli_latest_log_runner.h"
 #include "main/cli_performance_recorder.h"
 
 #include "core/config/project_settings.h"
@@ -285,6 +286,7 @@ static bool disable_render_loop = false;
 static int fixed_fps = -1;
 static CLIAIInputServer::Options cli_ai_agent_options;
 static CLIAIInputServer *cli_ai_agent_server = nullptr;
+static CLILatestLogRunner::Options cli_latest_log_options;
 static CLIPerformanceRecorder::Options cli_perf_options;
 static CLIPerformanceRecorder *cli_perf_recorder = nullptr;
 static MovieWriter *movie_writer = nullptr;
@@ -628,6 +630,8 @@ void Main::print_help(const char *p_binary) {
 	print_help_option("--headless", "Enable headless mode (--display-driver headless --audio-driver Dummy). Useful for servers and with --script.\n");
 	print_help_option("--log-file <file>", "Write output/error log to the specified path instead of the default location defined by the project.\n");
 	print_help_option("", "<file> path should be absolute or relative to the project directory.\n");
+	print_help_option("--latest-log", "Print the latest project log path and a compact tail of its content.\n");
+	print_help_option("--latest-log-lines <int>", "Number of trailing log lines to print with --latest-log (default: 200, use 0 for the whole file).\n");
 	print_help_option("--write-movie <file>", "Write a video to the specified path (usually with .avi or .png extension).\n");
 	print_help_option("", "--fixed-fps is forced when enabled, but it can be used to change movie FPS.\n");
 	print_help_option("", "--disable-vsync can speed up movie writing but makes interaction more difficult.\n");
@@ -1151,6 +1155,9 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 	cli_ai_agent_options = CLIAIInputServer::Options();
 	String cli_ai_agent_error;
 	String cli_ai_agent_validation_error;
+	cli_latest_log_options = CLILatestLogRunner::Options();
+	String cli_latest_log_error;
+	String cli_latest_log_validation_error;
 	cli_perf_options = CLIPerformanceRecorder::Options();
 	String cli_perf_error;
 	String cli_perf_validation_error;
@@ -2000,6 +2007,14 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 				OS::get_singleton()->print("Missing <path> argument for --benchmark-file <path>.\n");
 				goto error;
 			}
+		} else if (CLILatestLogRunner::parse_argument(arg, N, cli_latest_log_options, cli_latest_log_error)) {
+			if (!cli_latest_log_error.is_empty()) {
+				OS::get_singleton()->print("Error: %s\n", cli_latest_log_error.utf8().get_data());
+				goto error;
+			}
+			if (cli_latest_log_options.enabled) {
+				cmdline_tool = true;
+			}
 		} else if (CLIAIInputServer::parse_argument(arg, N, cli_ai_agent_options, cli_ai_agent_error)) {
 			if (!cli_ai_agent_error.is_empty()) {
 				OS::get_singleton()->print("Error: %s\n", cli_ai_agent_error.utf8().get_data());
@@ -2208,6 +2223,11 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 	CLIAIInputServer::apply_project_settings(cli_ai_agent_options);
 	if (CLIAIInputServer::validate_options(cli_ai_agent_options, editor, project_manager, cmdline_tool, cli_ai_agent_validation_error) != OK) {
 		OS::get_singleton()->print("Error: %s\n", cli_ai_agent_validation_error.utf8().get_data());
+		goto error;
+	}
+
+	if (CLILatestLogRunner::validate_options(cli_latest_log_options, found_project, editor, project_manager, cli_latest_log_validation_error) != OK) {
+		OS::get_singleton()->print("Error: %s\n", cli_latest_log_validation_error.utf8().get_data());
 		goto error;
 	}
 
@@ -4292,6 +4312,10 @@ int Main::start() {
 #endif // DISABLE_DEPRECATED
 
 #endif // TOOLS_ENABLED
+
+	if (CLILatestLogRunner::is_enabled(cli_latest_log_options)) {
+		return CLILatestLogRunner::run(cli_latest_log_options, log_file);
+	}
 
 #if defined(OVERRIDE_PATH_ENABLED)
 	bool disable_override = GLOBAL_GET("application/config/disable_project_settings_override");

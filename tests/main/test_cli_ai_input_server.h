@@ -37,10 +37,14 @@
 #include "editor/run/editor_run_bar.h"
 #endif
 
+#include "core/object/class_db.h"
+#include "core/object/object.h"
 #include "core/io/json.h"
 #include "scene/3d/camera_3d.h"
+#include "scene/3d/physics/static_body_3d.h"
 #include "scene/3d/node_3d.h"
 #include "scene/gui/button.h"
+#include "scene/gui/line_edit.h"
 #include "scene/gui/progress_bar.h"
 #include "scene/gui/subviewport_container.h"
 #include "scene/main/scene_tree.h"
@@ -51,6 +55,25 @@
 #include "tests/test_utils.h"
 
 #include "thirdparty/doctest/doctest.h"
+
+class CLIAIInputSignalProbe : public Object {
+	GDCLASS(CLIAIInputSignalProbe, Object);
+
+protected:
+	static void _bind_methods() {}
+
+public:
+	int button_pressed_count = 0;
+	int line_edit_focus_entered_count = 0;
+
+	void on_button_pressed() {
+		button_pressed_count++;
+	}
+
+	void on_line_edit_focus_entered() {
+		line_edit_focus_entered_count++;
+	}
+};
 
 namespace TestCLIAIInputServer {
 
@@ -92,20 +115,51 @@ static Dictionary find_snapshot_by_name(const Array &p_nodes, const String &p_na
 	return Dictionary();
 }
 
+static Dictionary find_event_response_payload(const Vector<Dictionary> &p_events, const String &p_session_dir, const String &p_event_name) {
+	const Dictionary event = TestCustomFeatureTraceHelpers::find_event(p_events, CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, p_event_name);
+	if (event.is_empty()) {
+		return Dictionary();
+	}
+	const Dictionary payloads = event["payloads"];
+	if (!payloads.has("response")) {
+		return Dictionary();
+	}
+	const Variant parsed = JSON::parse_string(TestCustomFeatureTraceHelpers::read_payload_text(p_session_dir, payloads["response"]));
+	return parsed.get_type() == Variant::DICTIONARY ? (Dictionary)parsed : Dictionary();
+}
+
+static void drain_server_batch(CLIAIInputServer &p_server) {
+	int guard = 0;
+	while ((p_server.is_batch_active() || p_server.test_has_pending_waits()) && guard++ < 32) {
+		p_server.test_process_batch();
+		if (p_server.test_has_pending_waits()) {
+			p_server.test_force_all_pending_waits_to_now();
+			p_server.test_process_pending_waits();
+		}
+	}
+}
+
 struct TestSceneContext {
 	Node *fixture_root = nullptr;
 	Button *button = nullptr;
+	LineEdit *line_edit = nullptr;
 	ProgressBar *progress_bar = nullptr;
-	Node3D *node_3d = nullptr;
+	StaticBody3D *node_3d = nullptr;
+	Node3D *helper_node_3d = nullptr;
+	StaticBody3D *offscreen_node_3d = nullptr;
 	Camera3D *camera = nullptr;
 	Node *plain_node = nullptr;
 	SubViewportContainer *subviewport_container = nullptr;
 	SubViewport *subviewport = nullptr;
 	Camera3D *subviewport_camera = nullptr;
-	Node3D *subviewport_node_3d = nullptr;
+	StaticBody3D *subviewport_node_3d = nullptr;
+	Node3D *subviewport_helper_node_3d = nullptr;
+	StaticBody3D *subviewport_offscreen_node_3d = nullptr;
+	CLIAIInputSignalProbe *signal_probe = nullptr;
 
 	TestSceneContext() {
 		Window *root = SceneTree::get_singleton()->get_root();
+		signal_probe = memnew(CLIAIInputSignalProbe);
 		fixture_root = memnew(Node);
 		fixture_root->set_name("AITestFixtureRoot");
 		root->add_child(fixture_root);
@@ -118,6 +172,15 @@ struct TestSceneContext {
 		button->add_to_group("menu");
 		button->add_to_group("pick");
 		fixture_root->add_child(button);
+		button->connect("pressed", callable_mp(signal_probe, &CLIAIInputSignalProbe::on_button_pressed));
+
+		line_edit = memnew(LineEdit);
+		line_edit->set_name("NameInput");
+		line_edit->set_position(Vector2(32, 144));
+		line_edit->set_size(Vector2(180, 36));
+		line_edit->add_to_group("pick");
+		fixture_root->add_child(line_edit);
+		line_edit->connect("focus_entered", callable_mp(signal_probe, &CLIAIInputSignalProbe::on_line_edit_focus_entered));
 
 		progress_bar = memnew(ProgressBar);
 		progress_bar->set_name("SpeedBar");
@@ -131,11 +194,23 @@ struct TestSceneContext {
 		fixture_root->add_child(camera);
 		camera->make_current();
 
-		node_3d = memnew(Node3D);
+		node_3d = memnew(StaticBody3D);
 		node_3d->set_name("CubeTarget");
 		node_3d->set_position(Vector3(0, 0, -5));
 		node_3d->add_to_group("world");
 		fixture_root->add_child(node_3d);
+
+		helper_node_3d = memnew(Node3D);
+		helper_node_3d->set_name("@Helper3D");
+		helper_node_3d->set_position(Vector3(0.1f, 0.0f, -5.0f));
+		helper_node_3d->add_to_group("world");
+		fixture_root->add_child(helper_node_3d);
+
+		offscreen_node_3d = memnew(StaticBody3D);
+		offscreen_node_3d->set_name("OffscreenCube");
+		offscreen_node_3d->set_position(Vector3(200.0f, 0.0f, -5.0f));
+		offscreen_node_3d->add_to_group("world");
+		fixture_root->add_child(offscreen_node_3d);
 
 		plain_node = memnew(Node);
 		plain_node->set_name("PlainNode");
@@ -158,11 +233,23 @@ struct TestSceneContext {
 		subviewport->add_child(subviewport_camera);
 		subviewport_camera->make_current();
 
-		subviewport_node_3d = memnew(Node3D);
+		subviewport_node_3d = memnew(StaticBody3D);
 		subviewport_node_3d->set_name("SubViewportCube");
 		subviewport_node_3d->set_position(Vector3(0, 0, -4));
 		subviewport_node_3d->add_to_group("subview");
 		subviewport->add_child(subviewport_node_3d);
+
+		subviewport_helper_node_3d = memnew(Node3D);
+		subviewport_helper_node_3d->set_name("@SubViewportHelper");
+		subviewport_helper_node_3d->set_position(Vector3(0.1f, 0.0f, -4.0f));
+		subviewport_helper_node_3d->add_to_group("subview");
+		subviewport->add_child(subviewport_helper_node_3d);
+
+		subviewport_offscreen_node_3d = memnew(StaticBody3D);
+		subviewport_offscreen_node_3d->set_name("SubViewportOffscreen");
+		subviewport_offscreen_node_3d->set_position(Vector3(200.0f, 0.0f, -4.0f));
+		subviewport_offscreen_node_3d->add_to_group("subview");
+		subviewport->add_child(subviewport_offscreen_node_3d);
 	}
 
 	~TestSceneContext() {
@@ -170,6 +257,53 @@ struct TestSceneContext {
 			fixture_root->get_parent()->remove_child(fixture_root);
 		}
 		memdelete(fixture_root);
+		memdelete(signal_probe);
+	}
+};
+
+struct RouterSceneContext {
+	Node *router_root = nullptr;
+	Node *menu_scene = nullptr;
+	Node *level_scene = nullptr;
+
+	RouterSceneContext() {
+		SceneTree *tree = SceneTree::get_singleton();
+		Window *root = tree->get_root();
+		router_root = memnew(Node);
+		router_root->set_name("RouterRoot");
+		router_root->set_scene_file_path("res://router_root.tscn");
+		root->add_child(router_root);
+		tree->set_current_scene(router_root);
+
+		menu_scene = memnew(Node);
+		menu_scene->set_name("Menu");
+		menu_scene->set_scene_file_path("res://menu.tscn");
+		router_root->add_child(menu_scene);
+	}
+
+	~RouterSceneContext() {
+		SceneTree *tree = SceneTree::get_singleton();
+		if (tree && tree->get_current_scene() == router_root) {
+			tree->set_current_scene(nullptr);
+		}
+		if (router_root && router_root->get_parent()) {
+			router_root->get_parent()->remove_child(router_root);
+		}
+		memdelete(router_root);
+	}
+
+	void switch_to_level() {
+		if (menu_scene && menu_scene->get_parent()) {
+			router_root->remove_child(menu_scene);
+			memdelete(menu_scene);
+			menu_scene = nullptr;
+		}
+		if (!level_scene) {
+			level_scene = memnew(Node3D);
+			level_scene->set_name("Level");
+			level_scene->set_scene_file_path("res://level.tscn");
+			router_root->add_child(level_scene);
+		}
 	}
 };
 
@@ -508,6 +642,46 @@ TEST_SUITE("[Main][CLIAIInputServer][SceneTree]") {
 		CHECK_EQ(String(((Dictionary)expanded[0])["cmd"]), String("mouse_motion"));
 	}
 
+	TEST_CASE("[SceneTree] Direct target actions drive real GUI focus and text input") {
+		TestSceneContext scene;
+		CLIAIInputServer server{ CLIAIInputServer::Options() };
+
+		server.test_clear_sent_responses();
+		server.test_process_line("{\"id\":1,\"cmd\":\"click_target\",\"selector\":{\"name\":\"PlayButton\"}}");
+		drain_server_batch(server);
+		CHECK_EQ(scene.signal_probe->button_pressed_count, 1);
+		REQUIRE_EQ(server.test_sent_response_count(), 1);
+		CHECK((bool)server.test_sent_response(0)["ok"]);
+		CHECK(server.test_sent_response(0).has("sceneDigest"));
+
+		server.test_clear_sent_responses();
+		server.test_process_line("{\"id\":2,\"cmd\":\"focus_target\",\"selector\":{\"name\":\"NameInput\"}}");
+		drain_server_batch(server);
+		REQUIRE_EQ(server.test_sent_response_count(), 1);
+		CHECK((bool)server.test_sent_response(0)["ok"]);
+		CHECK(scene.line_edit->has_focus());
+		CHECK(scene.signal_probe->line_edit_focus_entered_count >= 1);
+
+		scene.line_edit->release_focus();
+		scene.line_edit->set_focus_mode(Control::FOCUS_NONE);
+		server.test_clear_sent_responses();
+		server.test_process_line("{\"id\":22,\"cmd\":\"focus_target\",\"selector\":{\"name\":\"NameInput\"}}");
+		drain_server_batch(server);
+		REQUIRE_EQ(server.test_sent_response_count(), 1);
+		CHECK_FALSE((bool)server.test_sent_response(0)["ok"]);
+		CHECK_EQ(String(((Dictionary)server.test_sent_response(0)["error"])["code"]), String("target_not_focusable"));
+		CHECK_FALSE(scene.line_edit->has_focus());
+		scene.line_edit->set_focus_mode(Control::FOCUS_ALL);
+
+		server.test_clear_sent_responses();
+		server.test_process_line("{\"id\":3,\"cmd\":\"type_text\",\"selector\":{\"name\":\"NameInput\"},\"text\":\"hello\"}");
+		drain_server_batch(server);
+		CHECK_EQ(scene.line_edit->get_text(), String("hello"));
+		REQUIRE_EQ(server.test_sent_response_count(), 1);
+		CHECK((bool)server.test_sent_response(0)["ok"]);
+		CHECK(server.test_sent_response(0).has("sceneDigest"));
+	}
+
 	TEST_CASE("[SceneTree] Wait primitives and batch debug helpers expose state") {
 		TestSceneContext scene;
 		CLIAIInputServer server{ CLIAIInputServer::Options() };
@@ -549,16 +723,6 @@ TEST_SUITE("[Main][CLIAIInputServer][SceneTree]") {
 		CHECK_EQ(String(((Dictionary)timeout_error_bundle["error"])["code"]), String("timeout"));
 		CHECK(timeout_error_bundle.has("sceneDigest"));
 
-		Dictionary scene_wait_request;
-		scene_wait_request["cmd"] = "wait_scene_changed";
-		scene_wait_request["fromScenePath"] = "/root/UnrelatedScene";
-		deferred = false;
-		wait_response = server.test_cmd_wait_scene_changed(scene_wait_request, true, deferred);
-		CHECK(wait_response.is_empty());
-		CHECK(deferred);
-		server.test_process_pending_waits();
-		CHECK(server.test_batch_results_count() >= 2);
-
 		server.test_add_checkpoint("after_click");
 		const Dictionary batch_status = server.test_batch_status();
 		CHECK((bool)batch_status["active"]);
@@ -594,6 +758,14 @@ TEST_SUITE("[Main][CLIAIInputServer][SceneTree]") {
 		CHECK_FALSE((bool)invalid_wait_response["ok"]);
 		CHECK_EQ(String(((Dictionary)invalid_wait_response["error"])["code"]), String("invalid_wait"));
 
+		Dictionary invalid_scene_wait_request;
+		invalid_scene_wait_request["cmd"] = "wait_scene_changed";
+		invalid_scene_wait_request["fromScenePath"] = "/root/DoesNotExist";
+		deferred = false;
+		const Dictionary invalid_scene_wait_response = server.test_cmd_wait_scene_changed(invalid_scene_wait_request, false, deferred);
+		CHECK_FALSE((bool)invalid_scene_wait_response["ok"]);
+		CHECK_EQ(String(((Dictionary)invalid_scene_wait_response["error"])["code"]), String("invalid_wait"));
+
 		Dictionary numeric_wait_request;
 		numeric_wait_request["cmd"] = "wait_property";
 		Dictionary numeric_selector;
@@ -624,6 +796,71 @@ TEST_SUITE("[Main][CLIAIInputServer][SceneTree]") {
 		const bool second_image_ok = server.test_get_root_image(second_image);
 		CHECK_EQ(first_image_ok, second_image_ok);
 		CHECK_EQ(server.test_root_image_fetch_count(), 1);
+	}
+
+	TEST_CASE("[SceneTree] get_interactables and nearest target ignore helper or offscreen 3D nodes") {
+		TestSceneContext scene;
+		CLIAIInputServer server{ CLIAIInputServer::Options() };
+
+		Dictionary interactables_request;
+		interactables_request["cmd"] = "get_interactables";
+		Dictionary interactables_response = server.test_cmd_get_interactables(interactables_request);
+		REQUIRE((bool)interactables_response["ok"]);
+		const Array interactables = ((Dictionary)interactables_response["result"])["nodes"];
+		CHECK_FALSE(find_snapshot_by_name(interactables, "CubeTarget").is_empty());
+		CHECK_FALSE(find_snapshot_by_name(interactables, "SubViewportCube").is_empty());
+		CHECK(find_snapshot_by_name(interactables, "@Helper3D").is_empty());
+		CHECK(find_snapshot_by_name(interactables, "OffscreenCube").is_empty());
+		CHECK(find_snapshot_by_name(interactables, "@SubViewportHelper").is_empty());
+		CHECK(find_snapshot_by_name(interactables, "SubViewportOffscreen").is_empty());
+
+		Dictionary snapshot_request;
+		snapshot_request["cmd"] = "get_node_snapshot";
+		Dictionary selector;
+		selector["group"] = "world";
+		Array nearest_point;
+		nearest_point.push_back(0);
+		nearest_point.push_back(0);
+		selector["nearestToScreenPoint"] = nearest_point;
+		snapshot_request["selector"] = selector;
+		Dictionary snapshot_response = server.test_cmd_get_node_snapshot(snapshot_request);
+		REQUIRE((bool)snapshot_response["ok"]);
+		const Dictionary nearest_node = ((Dictionary)snapshot_response["result"])["node"];
+		CHECK_EQ(String(nearest_node["name"]), String("CubeTarget"));
+	}
+
+	TEST_CASE("[SceneTree] wait_scene_changed tracks content scene instead of current_scene only") {
+		RouterSceneContext scene;
+		CLIAIInputServer server{ CLIAIInputServer::Options() };
+
+		Dictionary wait_request;
+		wait_request["cmd"] = "wait_scene_changed";
+		wait_request["fromScenePath"] = "/root/RouterRoot/Menu";
+		bool deferred = false;
+		Dictionary wait_response = server.test_cmd_wait_scene_changed(wait_request, false, deferred);
+		CHECK(wait_response.is_empty());
+		CHECK(deferred);
+		REQUIRE(server.test_has_pending_waits());
+
+		server.test_process_pending_waits();
+		CHECK(server.test_has_pending_waits());
+		CHECK_EQ(server.test_sent_response_count(), 0);
+
+		scene.switch_to_level();
+		server.test_process_pending_waits();
+		if (server.test_has_pending_waits()) {
+			server.test_force_all_pending_waits_to_now();
+			server.test_process_pending_waits();
+		}
+		CHECK_FALSE(server.test_has_pending_waits());
+		REQUIRE_EQ(server.test_sent_response_count(), 1);
+		const Dictionary response = server.test_sent_response(0);
+		CHECK((bool)response["ok"]);
+		const Dictionary result = response["result"];
+		CHECK_EQ(String(result["fromScenePath"]), String("/root/RouterRoot/Menu"));
+		CHECK_EQ(String(result["toScenePath"]), String("/root/RouterRoot/Level"));
+		CHECK_EQ(String(result["fromRootScenePath"]), String("/root/RouterRoot"));
+		CHECK_EQ(String(result["toRootScenePath"]), String("/root/RouterRoot"));
 	}
 
 	TEST_CASE("[SceneTree] Emits trace events for request, wait and runtime perf flows") {
@@ -713,6 +950,48 @@ TEST_SUITE("[Main][CLIAIInputServer][SceneTree]") {
 		const Dictionary recording = perf_result["recording"];
 		CHECK((bool)recording["completed"]);
 		CHECK_EQ((int64_t)recording["capturedFrames"], 1);
+
+		TestCustomFeatureTraceHelpers::cleanup_directory_recursive(trace_root);
+	}
+
+	TEST_CASE("[SceneTree] Direct operation traces include sceneDigest on success and failure") {
+		TestSceneContext scene;
+		CLIAIInputServer server{ CLIAIInputServer::Options() };
+		const String trace_root = TestUtils::get_temp_path("cli_ai_input_server_direct_trace_root");
+		TestCustomFeatureTraceHelpers::cleanup_directory_recursive(trace_root);
+
+		CustomFeatureTracer::StartupOptions trace_options;
+		trace_options.base_dir_override = trace_root;
+		trace_options.binary_path = "godot-dev";
+		trace_options.cwd = "E:/GitHub/godot";
+		trace_options.project_path = "E:/GitHub/godot";
+		trace_options.process_mode = "cli_project_run";
+		trace_options.pid = 2468;
+
+		String trace_error;
+		REQUIRE_EQ(CustomFeatureTracer::initialize_singleton(trace_options, trace_error), OK);
+		REQUIRE(trace_error.is_empty());
+		const String session_dir = CustomFeatureTracer::get_singleton()->get_session_dir_for_tests();
+
+		server.test_clear_sent_responses();
+		server.test_process_line("{\"id\":11,\"cmd\":\"click_target\",\"selector\":{\"name\":\"PlayButton\"}}");
+		drain_server_batch(server);
+		server.test_process_line("{\"id\":12,\"cmd\":\"click_target\",\"selector\":{\"name\":\"MissingButton\"},\"captureOnError\":true}");
+		drain_server_batch(server);
+
+		server.shutdown();
+		CustomFeatureTracer::shutdown_singleton();
+
+		const Vector<Dictionary> events = TestCustomFeatureTraceHelpers::read_events(session_dir);
+		REQUIRE_FALSE(events.is_empty());
+
+		const Dictionary batch_finished_response = find_event_response_payload(events, session_dir, "batch_finished");
+		REQUIRE_FALSE(batch_finished_response.is_empty());
+		CHECK(batch_finished_response.has("sceneDigest"));
+
+		const Dictionary batch_step_failed_response = find_event_response_payload(events, session_dir, "batch_step_failed");
+		REQUIRE_FALSE(batch_step_failed_response.is_empty());
+		CHECK(batch_step_failed_response.has("sceneDigest"));
 
 		TestCustomFeatureTraceHelpers::cleanup_directory_recursive(trace_root);
 	}

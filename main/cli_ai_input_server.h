@@ -35,6 +35,7 @@
 #include "core/io/tcp_server.h"
 #include "core/math/rect2.h"
 #include "core/math/vector3.h"
+#include "core/object/object_id.h"
 #include "core/templates/hash_set.h"
 #include "core/templates/hash_map.h"
 #include "core/templates/list.h"
@@ -45,7 +46,9 @@
 
 class Camera3D;
 class Image;
+class InputEvent;
 class Node;
+class SceneTree;
 class Viewport;
 
 class CLIAIInputServer {
@@ -104,6 +107,10 @@ public:
 	void test_process_line(const String &p_line) { _process_line(p_line); }
 	void test_finish_runtime_perf_stop(bool p_completed, bool p_event_response) { _finish_runtime_perf_stop(p_completed, p_event_response); }
 	void test_process_pending_waits() { _process_pending_waits(); }
+	void test_process_batch(int p_budget = 128) {
+		int budget = p_budget;
+		_process_batch(budget);
+	}
 	static uint64_t test_current_frame() { return _current_frame(); }
 	void test_setup_active_batch(int p_step, const String &p_on_error) {
 		active_batch.active = true;
@@ -118,6 +125,15 @@ public:
 		if (!pending_waits.is_empty()) {
 			pending_waits.write[pending_waits.size() - 1].timeout_frame = _current_frame();
 			pending_waits.write[pending_waits.size() - 1].next_poll_frame = _current_frame();
+		}
+	}
+	void test_force_all_pending_waits_to_now() {
+		for (int i = 0; i < pending_waits.size(); i++) {
+			pending_waits.write[i].timeout_frame = _current_frame();
+			pending_waits.write[i].next_poll_frame = _current_frame();
+			if (pending_waits.write[i].spec.condition_kind == "frames") {
+				pending_waits.write[i].started_frame = _current_frame() - pending_waits.write[i].spec.frames;
+			}
 		}
 	}
 	Dictionary test_last_error_bundle() const { return last_error_bundle; }
@@ -144,6 +160,9 @@ public:
 		root_image_cache.unref();
 	}
 	bool test_get_root_image(Ref<Image> &r_image) const { return _get_root_image(r_image); }
+	void test_clear_sent_responses() { test_sent_responses.clear(); }
+	int test_sent_response_count() const { return test_sent_responses.size(); }
+	Dictionary test_sent_response(int p_index) const { return p_index >= 0 && p_index < test_sent_responses.size() ? (Dictionary)test_sent_responses[p_index] : Dictionary(); }
 #endif
 
 private:
@@ -177,6 +196,12 @@ private:
 		String property_name;
 		Variant expected_value;
 		String baseline_scene_path;
+		String baseline_content_scene_path;
+		String baseline_target_scene_path;
+		ObjectID baseline_scene_id;
+		ObjectID baseline_content_scene_id;
+		ObjectID baseline_target_scene_id;
+		bool baseline_target_existed = false;
 		Ref<Image> baseline_image;
 		double screenshot_diff_threshold = 0.0;
 	};
@@ -326,6 +351,8 @@ private:
 	void _inject_mouse_motion(const Vector2 &p_position, const Vector2 &p_relative);
 	void _inject_mouse_button(MouseButton p_button, const Vector2 &p_position, bool p_pressed, bool p_double_click);
 	void _inject_text_input(const String &p_text);
+	bool _dispatch_root_input(const Ref<InputEvent> &p_event, bool p_local_coords = true) const;
+	bool _dispatch_root_text_input(const String &p_text) const;
 	void _release_held_inputs();
 	void _abort_runtime_perf(bool p_send_event);
 	static int64_t _key_hold_id(Key p_key, bool p_shift, bool p_ctrl, bool p_alt, bool p_meta);
@@ -337,6 +364,8 @@ private:
 	void _rebuild_observation_frame_cache() const;
 	void _append_observation_entries(Node *p_node, Viewport *p_root_viewport) const;
 	bool _build_snapshot_for_node(Node *p_node, Dictionary &r_snapshot) const;
+	Node *_resolve_content_scene_node(SceneTree *p_scene_tree) const;
+	void _resolve_scene_paths(SceneTree *p_scene_tree, String &r_root_scene_path, String &r_content_scene_path, ObjectID *r_root_scene_id = nullptr, ObjectID *r_content_scene_id = nullptr) const;
 	static Camera3D *_get_effective_camera(Viewport *p_viewport);
 	bool _get_viewport_to_root_transform(Viewport *p_viewport, Viewport *p_root_viewport, Transform2D &r_transform) const;
 	bool _extract_selector_spec(const Dictionary &p_request, const String &p_key, const String &p_label, SelectorSpec &r_spec, String &r_error) const;
@@ -352,6 +381,7 @@ private:
 	Dictionary _build_target_snapshot(Node *p_node, Viewport *p_root_viewport) const;
 	TargetResolution _resolve_target(const SelectorSpec &p_selector, bool p_require_screen_position) const;
 	bool _is_interactable_snapshot(const Dictionary &p_snapshot) const;
+	bool _is_clickable_3d_snapshot(const Dictionary &p_snapshot) const;
 	Vector2 _resolve_target_screen_position(const Dictionary &p_snapshot) const;
 	bool _snapshot_has_screen_position(const Dictionary &p_snapshot) const;
 	bool _extract_wait_request(const Dictionary &p_request, const String &p_condition_kind, const Variant &p_id, bool p_has_id, bool p_from_batch, PendingWait &r_wait, String &r_error_code, String &r_error_message) const;
@@ -400,5 +430,6 @@ private:
 #ifdef TESTS_ENABLED
 	mutable int test_observation_cache_rebuilds = 0;
 	mutable int test_root_image_fetches = 0;
+	Array test_sent_responses;
 #endif
 };

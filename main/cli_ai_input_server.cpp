@@ -43,9 +43,11 @@
 #include "core/os/os.h"
 #include "main/custom_feature_tracer.h"
 #include "scene/3d/camera_3d.h"
+#include "scene/3d/physics/collision_object_3d.h"
 #include "scene/3d/node_3d.h"
 #include "scene/3d/visual_instance_3d.h"
 #include "scene/gui/control.h"
+#include "scene/gui/line_edit.h"
 #include "scene/main/canvas_item.h"
 #include "scene/main/scene_tree.h"
 #include "scene/main/viewport.h"
@@ -495,6 +497,9 @@ bool CLIAIInputServer::is_listening() const {
 }
 
 void CLIAIInputServer::_send_response(const Dictionary &p_response) {
+#ifdef TESTS_ENABLED
+	test_sent_responses.push_back(p_response);
+#endif
 	if (client.is_null() || client->get_status() != StreamPeerSocket::STATUS_CONNECTED) {
 		return;
 	}
@@ -502,6 +507,30 @@ void CLIAIInputServer::_send_response(const Dictionary &p_response) {
 	const String line = JSON::stringify(p_response) + "\n";
 	const CharString utf8 = line.utf8();
 	client->put_data((const uint8_t *)utf8.get_data(), utf8.length());
+}
+
+bool CLIAIInputServer::_dispatch_root_input(const Ref<InputEvent> &p_event, bool p_local_coords) const {
+	SceneTree *scene_tree = _get_runtime_scene_tree();
+	if (!scene_tree || !scene_tree->get_root() || p_event.is_null()) {
+		return false;
+	}
+
+	Window *root = scene_tree->get_root();
+	p_event->set_device(InputEvent::DEVICE_ID_INTERNAL);
+	if (InputEventFromWindow *window_event = Object::cast_to<InputEventFromWindow>(*p_event)) {
+		window_event->set_window_id(root->get_window_id());
+	}
+	root->push_input(p_event, p_local_coords);
+	return true;
+}
+
+bool CLIAIInputServer::_dispatch_root_text_input(const String &p_text) const {
+	SceneTree *scene_tree = _get_runtime_scene_tree();
+	if (!scene_tree || !scene_tree->get_root()) {
+		return false;
+	}
+	scene_tree->get_root()->push_text_input(p_text);
+	return true;
 }
 
 void CLIAIInputServer::_send_busy_and_close(Ref<StreamPeerTCP> p_peer) {
@@ -849,12 +878,35 @@ bool CLIAIInputServer::_is_interactable_snapshot(const Dictionary &p_snapshot) c
 		return false;
 	}
 	if (p_snapshot.has("is3D") && (bool)p_snapshot["is3D"]) {
-		return _snapshot_has_screen_position(p_snapshot);
+		return _is_clickable_3d_snapshot(p_snapshot);
 	}
 	if (p_snapshot.has("disabled") && p_snapshot["disabled"].get_type() == Variant::BOOL && (bool)p_snapshot["disabled"]) {
 		return false;
 	}
 	return _snapshot_has_screen_position(p_snapshot);
+}
+
+bool CLIAIInputServer::_is_clickable_3d_snapshot(const Dictionary &p_snapshot) const {
+	if (!_snapshot_has_screen_position(p_snapshot)) {
+		return false;
+	}
+	if (!p_snapshot.has("nodePath") || String(p_snapshot["nodePath"]).is_empty()) {
+		return false;
+	}
+	if (p_snapshot.has("name") && String(p_snapshot["name"]).begins_with("@")) {
+		return false;
+	}
+
+	SceneTree *scene_tree = _get_runtime_scene_tree();
+	if (!scene_tree || !scene_tree->get_root()) {
+		return false;
+	}
+	Node *node = scene_tree->get_root()->get_node_or_null(NodePath(String(p_snapshot["nodePath"])));
+	CollisionObject3D *collision = Object::cast_to<CollisionObject3D>(node);
+	if (!collision || !collision->can_process() || !collision->is_ray_pickable()) {
+		return false;
+	}
+	return true;
 }
 
 Camera3D *CLIAIInputServer::_get_effective_camera(Viewport *p_viewport) {
@@ -1017,8 +1069,7 @@ Dictionary CLIAIInputServer::_build_target_snapshot(Node *p_node, Viewport *p_ro
 		if (camera && _get_viewport_to_root_transform(node_viewport, p_root_viewport, viewport_to_root) && !camera->is_position_behind(node_3d->get_global_position())) {
 			const Vector2 viewport_point = camera->unproject_position(node_3d->get_global_position());
 			const Vector2 root_point = viewport_to_root.xform(viewport_point);
-			snapshot["screenPoint"] = _vector2_to_array(root_point);
-			snapshot["hasScreenPosition"] = true;
+			const Rect2 root_visible_rect = p_root_viewport ? p_root_viewport->get_visible_rect() : Rect2();
 
 			if (VisualInstance3D *visual_instance = Object::cast_to<VisualInstance3D>(p_node)) {
 				const AABB aabb = visual_instance->get_aabb();
@@ -1039,17 +1090,99 @@ Dictionary CLIAIInputServer::_build_target_snapshot(Node *p_node, Viewport *p_ro
 					if (rect.size == Vector2()) {
 						rect = Rect2(viewport_point - Vector2(2, 2), Vector2(4, 4));
 					}
-					snapshot["screenRect"] = _rect2_to_dictionary(_transform_rect(viewport_to_root, rect));
+					const Rect2 root_rect = _transform_rect(viewport_to_root, rect);
+					if (root_visible_rect.intersects(root_rect, true)) {
+						const Rect2 clipped_rect = root_visible_rect.intersection(root_rect);
+						snapshot["screenPoint"] = _vector2_to_array(root_point);
+						snapshot["screenRect"] = _rect2_to_dictionary(clipped_rect.has_area() ? clipped_rect : root_rect);
+						snapshot["hasScreenPosition"] = true;
+					}
 				} else {
-					snapshot["screenRect"] = _make_point_rect(root_point);
+					const Rect2 point_rect(root_point - Vector2(2, 2), Vector2(4, 4));
+					if (root_visible_rect.intersects(point_rect, true)) {
+						snapshot["screenPoint"] = _vector2_to_array(root_point);
+						snapshot["screenRect"] = _make_point_rect(root_point);
+						snapshot["hasScreenPosition"] = true;
+					}
 				}
-			} else {
+			} else if (root_visible_rect.has_point(root_point)) {
+				snapshot["screenPoint"] = _vector2_to_array(root_point);
 				snapshot["screenRect"] = _make_point_rect(root_point);
+				snapshot["hasScreenPosition"] = true;
 			}
 		}
 	}
 
 	return snapshot;
+}
+
+Node *CLIAIInputServer::_resolve_content_scene_node(SceneTree *p_scene_tree) const {
+	if (!p_scene_tree) {
+		return nullptr;
+	}
+	Node *current_scene = p_scene_tree->get_current_scene();
+	if (!current_scene) {
+		return nullptr;
+	}
+	Node *best = nullptr;
+	int best_depth = -1;
+
+	List<Node *> stack;
+	stack.push_back(current_scene);
+	while (!stack.is_empty()) {
+		Node *node = stack.back()->get();
+		stack.pop_back();
+		if (!node) {
+			continue;
+		}
+
+		const bool is_scene_instance = !node->get_scene_file_path().is_empty();
+		if (node != current_scene && is_scene_instance) {
+			int depth = 0;
+			for (Node *cursor = node; cursor && cursor != current_scene; cursor = cursor->get_parent()) {
+				depth++;
+			}
+			if (depth > best_depth) {
+				best = node;
+				best_depth = depth;
+			}
+		}
+
+		for (int i = node->get_child_count() - 1; i >= 0; i--) {
+			stack.push_back(node->get_child(i));
+		}
+	}
+
+	return best;
+}
+
+void CLIAIInputServer::_resolve_scene_paths(SceneTree *p_scene_tree, String &r_root_scene_path, String &r_content_scene_path, ObjectID *r_root_scene_id, ObjectID *r_content_scene_id) const {
+	r_root_scene_path = String();
+	r_content_scene_path = String();
+	if (r_root_scene_id) {
+		*r_root_scene_id = ObjectID();
+	}
+	if (r_content_scene_id) {
+		*r_content_scene_id = ObjectID();
+	}
+	if (!p_scene_tree) {
+		return;
+	}
+
+	Node *current_scene = p_scene_tree->get_current_scene();
+	if (current_scene) {
+		r_root_scene_path = String(current_scene->get_path());
+		if (r_root_scene_id) {
+			*r_root_scene_id = current_scene->get_instance_id();
+		}
+	}
+	Node *content_scene = _resolve_content_scene_node(p_scene_tree);
+	if (content_scene) {
+		r_content_scene_path = String(content_scene->get_path());
+		if (r_content_scene_id) {
+			*r_content_scene_id = content_scene->get_instance_id();
+		}
+	}
 }
 
 void CLIAIInputServer::_append_observation_entries(Node *p_node, Viewport *p_root_viewport) const {
@@ -1161,6 +1294,9 @@ CLIAIInputServer::TargetResolution CLIAIInputServer::_resolve_target(const Selec
 			if (!_snapshot_has_screen_position(candidate)) {
 				continue;
 			}
+			if (p_require_screen_position && candidate.has("is3D") && (bool)candidate["is3D"] && !_is_clickable_3d_snapshot(candidate)) {
+				continue;
+			}
 			const double distance = _resolve_target_screen_position(candidate).distance_squared_to(p_selector.nearest_to_screen_point);
 			if (best_index < 0 || distance < best_distance) {
 				best_index = i;
@@ -1201,9 +1337,13 @@ Dictionary CLIAIInputServer::_build_viewport_summary(bool p_include_counts) cons
 
 	Viewport *root = scene_tree->get_root();
 	Camera3D *camera = _get_effective_camera(root);
+	String root_scene_path;
+	String content_scene_path;
+	_resolve_scene_paths(scene_tree, root_scene_path, content_scene_path);
 	summary["windowSize"] = _vector2_to_array(root->get_visible_rect().size);
 	summary["rootPath"] = String(root->get_path());
-	summary["rootScene"] = scene_tree->get_current_scene() ? String(scene_tree->get_current_scene()->get_path()) : String();
+	summary["rootScene"] = root_scene_path;
+	summary["contentScene"] = !content_scene_path.is_empty() ? content_scene_path : root_scene_path;
 	summary["activeCamera"] = camera ? String(camera->get_path()) : String();
 
 	if (p_include_counts && _ensure_observation_frame_cache()) {
@@ -1574,12 +1714,35 @@ bool CLIAIInputServer::_extract_wait_request(const Dictionary &p_request, const 
 	}
 
 	if (p_condition_kind == "scene_changed") {
-		String baseline_scene_path = p_request.has("fromScenePath") ? String(p_request["fromScenePath"]) : String();
-		if (baseline_scene_path.is_empty()) {
-			SceneTree *scene_tree = _get_runtime_scene_tree();
-			baseline_scene_path = scene_tree && scene_tree->get_current_scene() ? String(scene_tree->get_current_scene()->get_path()) : String();
+		SceneTree *scene_tree = _get_runtime_scene_tree();
+		String root_scene_path;
+		String content_scene_path;
+		ObjectID root_scene_id;
+		ObjectID content_scene_id;
+		_resolve_scene_paths(scene_tree, root_scene_path, content_scene_path, &root_scene_id, &content_scene_id);
+		r_wait.spec.baseline_scene_path = root_scene_path;
+		r_wait.spec.baseline_scene_id = root_scene_id;
+		r_wait.spec.baseline_content_scene_path = !content_scene_path.is_empty() ? content_scene_path : root_scene_path;
+		r_wait.spec.baseline_content_scene_id = content_scene_id != ObjectID() ? content_scene_id : root_scene_id;
+		r_wait.spec.baseline_target_scene_path = p_request.has("fromScenePath") ? String(p_request["fromScenePath"]) : String();
+		if (r_wait.spec.baseline_target_scene_path.is_empty()) {
+			r_wait.spec.baseline_target_scene_path = r_wait.spec.baseline_content_scene_path;
+			r_wait.spec.baseline_target_scene_id = r_wait.spec.baseline_content_scene_id;
+			r_wait.spec.baseline_target_existed = r_wait.spec.baseline_target_scene_id != ObjectID();
+			return true;
 		}
-		r_wait.spec.baseline_scene_path = baseline_scene_path;
+
+		Node *baseline_target = nullptr;
+		if (scene_tree && scene_tree->get_root()) {
+			baseline_target = scene_tree->get_root()->get_node_or_null(NodePath(r_wait.spec.baseline_target_scene_path));
+		}
+		if (!baseline_target) {
+			r_error_code = "invalid_wait";
+			r_error_message = "wait_scene_changed.fromScenePath must resolve to an existing node when the wait is armed.";
+			return false;
+		}
+		r_wait.spec.baseline_target_scene_id = baseline_target->get_instance_id();
+		r_wait.spec.baseline_target_existed = true;
 		return true;
 	}
 
@@ -1706,10 +1869,36 @@ bool CLIAIInputServer::_evaluate_wait_condition(PendingWait &r_wait, bool &r_fin
 
 	if (r_wait.spec.condition_kind == "scene_changed") {
 		SceneTree *scene_tree = _get_runtime_scene_tree();
-		const String current_scene_path = scene_tree && scene_tree->get_current_scene() ? String(scene_tree->get_current_scene()->get_path()) : String();
-		if (current_scene_path != r_wait.spec.baseline_scene_path) {
-			r_result["fromScenePath"] = r_wait.spec.baseline_scene_path;
-			r_result["toScenePath"] = current_scene_path;
+		String current_root_scene_path;
+		String current_content_scene_path;
+		ObjectID current_root_scene_id;
+		ObjectID current_content_scene_id;
+		_resolve_scene_paths(scene_tree, current_root_scene_path, current_content_scene_path, &current_root_scene_id, &current_content_scene_id);
+		const String current_effective_scene_path = !current_content_scene_path.is_empty() ? current_content_scene_path : current_root_scene_path;
+		const String baseline_effective_scene_path = !r_wait.spec.baseline_target_scene_path.is_empty() ? r_wait.spec.baseline_target_scene_path :
+				(!r_wait.spec.baseline_content_scene_path.is_empty() ? r_wait.spec.baseline_content_scene_path : r_wait.spec.baseline_scene_path);
+		bool baseline_target_exists = false;
+		ObjectID current_target_scene_id;
+		if (scene_tree && scene_tree->get_root() && !baseline_effective_scene_path.is_empty()) {
+			if (Node *target_node = scene_tree->get_root()->get_node_or_null(NodePath(baseline_effective_scene_path))) {
+				baseline_target_exists = true;
+				current_target_scene_id = target_node->get_instance_id();
+			}
+		}
+		const ObjectID current_effective_scene_id = current_content_scene_id != ObjectID() ? current_content_scene_id : current_root_scene_id;
+		const bool target_disappeared = r_wait.spec.baseline_target_existed && !baseline_target_exists;
+		const bool target_replaced = r_wait.spec.baseline_target_scene_id != ObjectID() && current_target_scene_id != ObjectID() && current_target_scene_id != r_wait.spec.baseline_target_scene_id;
+		const bool content_path_changed = !r_wait.spec.baseline_content_scene_path.is_empty() && current_content_scene_path != r_wait.spec.baseline_content_scene_path;
+		const bool content_instance_changed = r_wait.spec.baseline_content_scene_id != ObjectID() && current_effective_scene_id != ObjectID() && current_effective_scene_id != r_wait.spec.baseline_content_scene_id;
+		const bool root_path_changed = r_wait.spec.baseline_content_scene_path.is_empty() && current_root_scene_path != r_wait.spec.baseline_scene_path;
+		const bool root_instance_changed = r_wait.spec.baseline_content_scene_path.is_empty() && r_wait.spec.baseline_scene_id != ObjectID() && current_root_scene_id != ObjectID() && current_root_scene_id != r_wait.spec.baseline_scene_id;
+		if (target_disappeared || target_replaced || content_path_changed || content_instance_changed || root_path_changed || root_instance_changed) {
+			r_result["fromScenePath"] = baseline_effective_scene_path;
+			r_result["toScenePath"] = current_effective_scene_path;
+			r_result["fromRootScenePath"] = r_wait.spec.baseline_scene_path;
+			r_result["toRootScenePath"] = current_root_scene_path;
+			r_result["fromContentScenePath"] = r_wait.spec.baseline_content_scene_path;
+			r_result["toContentScenePath"] = current_content_scene_path;
 			r_finished = true;
 		}
 		return true;
@@ -1833,7 +2022,10 @@ void CLIAIInputServer::_process_pending_waits() {
 			if (wait.from_batch) {
 				_complete_batch_wait(wait, result);
 			} else {
-				const Dictionary response = _make_success_response(wait.id, wait.has_id, result);
+				Dictionary response = _make_success_response(wait.id, wait.has_id, result);
+				if (!active_batch.active) {
+					response["sceneDigest"] = _build_scene_digest();
+				}
 				if (CustomFeatureTracer::has_singleton()) {
 					Dictionary payloads;
 					CustomFeatureTracer::get_singleton()->add_json_payload(payloads, "response", response);
@@ -1909,7 +2101,11 @@ Dictionary CLIAIInputServer::_execute_operation(const Dictionary &p_operation, b
 			return _make_contextual_error_response(p_operation, p_operation.has("id") ? p_operation["id"] : Variant(), p_operation.has("id"), error_code, error_message, last_resolved_target);
 		}
 		result["expandedSteps"] = expanded.size();
-		return _make_success_response(p_operation.has("id") ? p_operation["id"] : Variant(), p_operation.has("id"), result);
+		Dictionary response = _make_success_response(p_operation.has("id") ? p_operation["id"] : Variant(), p_operation.has("id"), result);
+		if (!p_from_batch) {
+			response["sceneDigest"] = _build_scene_digest();
+		}
+		return response;
 	}
 
 	return _execute_immediate_operation(p_operation, p_from_batch, r_deferred);
@@ -1976,6 +2172,46 @@ Dictionary CLIAIInputServer::_execute_immediate_operation(const Dictionary &p_op
 	}
 	if (cmd == "get_scene_tree") {
 		return _cmd_get_scene_tree(p_operation);
+	}
+	if (cmd == "focus_target") {
+		String selector_error;
+		SelectorSpec selector;
+		if (!_extract_selector_spec(p_operation, "selector", "selector", selector, selector_error) || selector.is_empty()) {
+			return _make_contextual_error_response(p_operation, id, has_id, "invalid_operation", selector_error.is_empty() ? "selector must not be empty." : selector_error, last_resolved_target);
+		}
+		const TargetResolution resolution = _resolve_target(selector, false);
+		if (resolution.ambiguous) {
+			return _make_contextual_error_response(p_operation, id, has_id, "ambiguous_target", "selector resolved to multiple targets.", last_resolved_target);
+		}
+		if (!resolution.ok) {
+			return _make_contextual_error_response(p_operation, id, has_id, "target_not_found", "No target matched selector.", last_resolved_target);
+		}
+		last_resolved_target = resolution.snapshot;
+		SceneTree *scene_tree = _get_runtime_scene_tree();
+		Node *node = nullptr;
+		if (scene_tree && scene_tree->get_root() && resolution.snapshot.has("nodePath")) {
+			node = scene_tree->get_root()->get_node_or_null(NodePath(String(resolution.snapshot["nodePath"])));
+		}
+		if (Control *control = Object::cast_to<Control>(node)) {
+			control->grab_focus();
+			const bool focused = scene_tree && scene_tree->get_root() && scene_tree->get_root()->gui_get_focus_owner() == control;
+			if (!focused) {
+				return _make_contextual_error_response(p_operation, id, has_id, "target_not_focusable", "Resolved target did not become the focused control.", resolution.snapshot);
+			}
+			Dictionary result;
+			result["resolvedTarget"] = resolution.snapshot;
+			result["focused"] = true;
+			return _make_success_response(id, has_id, result);
+		}
+		if (!_snapshot_has_screen_position(resolution.snapshot)) {
+			return _make_contextual_error_response(p_operation, id, has_id, "target_not_clickable", "Resolved target does not expose a usable screen position.", resolution.snapshot);
+		}
+		const Vector2 position = _resolve_target_screen_position(resolution.snapshot);
+		_inject_mouse_motion(position, position - last_mouse_position);
+		Dictionary result;
+		result["resolvedTarget"] = resolution.snapshot;
+		result["position"] = _vector2_to_array(position);
+		return _make_success_response(id, has_id, result);
 	}
 	if (cmd == "type_text_commit") {
 		return _cmd_type_text_commit(p_operation);
@@ -2088,8 +2324,28 @@ void CLIAIInputServer::_finish_batch(bool p_completed) {
 	const bool ok = p_completed && active_batch.errors.is_empty();
 	Dictionary response = _make_response_base(active_batch.id, active_batch.has_id, ok);
 	response["result"] = result;
+	if (active_batch.direct_operation) {
+		response["sceneDigest"] = _build_scene_digest();
+	}
 	if (!ok) {
-		response["error"] = _make_error_payload("batch_failed", "Batch did not complete successfully.");
+		Dictionary top_error = _make_error_payload("batch_failed", "Batch did not complete successfully.");
+		if (active_batch.direct_operation && !last_error_bundle.is_empty()) {
+			if (last_error_bundle.has("error") && last_error_bundle["error"].get_type() == Variant::DICTIONARY) {
+				top_error = last_error_bundle["error"];
+			}
+			if (last_error_bundle.has("lastResolvedTarget")) {
+				response["lastResolvedTarget"] = last_error_bundle["lastResolvedTarget"];
+			}
+			if (last_error_bundle.has("screenshotPath")) {
+				response["screenshotPath"] = last_error_bundle["screenshotPath"];
+			}
+		} else if (active_batch.direct_operation && !active_batch.errors.is_empty() && active_batch.errors[0].get_type() == Variant::DICTIONARY) {
+			const Dictionary error_entry = active_batch.errors[0];
+			if (error_entry.has("error") && error_entry["error"].get_type() == Variant::DICTIONARY) {
+				top_error = error_entry["error"];
+			}
+		}
+		response["error"] = top_error;
 	}
 	_record_last_error_bundle(response);
 	if (CustomFeatureTracer::has_singleton()) {
@@ -2281,6 +2537,11 @@ bool CLIAIInputServer::_prepare_expanded_operation(const Dictionary &p_operation
 			r_error_message = "Resolved target does not expose a usable screen position.";
 			return resolution;
 		}
+		if (require_screen && resolution.snapshot.has("is3D") && (bool)resolution.snapshot["is3D"] && !_is_clickable_3d_snapshot(resolution.snapshot)) {
+			r_error_code = "target_not_clickable";
+			r_error_message = "Resolved target is not a clickable 3D target.";
+			return resolution;
+		}
 		last_resolved_target = resolution.snapshot;
 		return resolution;
 	};
@@ -2335,20 +2596,27 @@ bool CLIAIInputServer::_prepare_expanded_operation(const Dictionary &p_operation
 		if (selector.is_empty()) {
 			return true;
 		}
-		const TargetResolution resolution = resolve_action_target(selector, "No target matched selector.");
+		const bool focus_like_cmd = cmd == "focus_target";
+		const bool type_like_cmd = cmd == "type_text" || cmd == "type_text_and_wait";
+		const bool require_screen = !focus_like_cmd;
+		const TargetResolution resolution = resolve_action_target(selector, "No target matched selector.", require_screen);
 		if (!r_error_code.is_empty()) {
 			return true;
 		}
-		const Vector2 position = _resolve_target_screen_position(resolution.snapshot);
 		r_result["resolvedTarget"] = resolution.snapshot;
-		r_result["position"] = _vector2_to_array(position);
+		if (_snapshot_has_screen_position(resolution.snapshot)) {
+			const Vector2 position = _resolve_target_screen_position(resolution.snapshot);
+			r_result["position"] = _vector2_to_array(position);
+		}
 
 		if (cmd == "hover_target") {
+			const Vector2 position = _resolve_target_screen_position(resolution.snapshot);
 			r_expanded.push_back(_make_mouse_motion_op(position));
 			return true;
 		}
 
 		if (cmd == "scroll_view") {
+			const Vector2 position = _resolve_target_screen_position(resolution.snapshot);
 			String direction = "down";
 			int steps = 1;
 			if (!_get_string(p_operation, "direction", "down", direction, r_error_message) || !_get_int(p_operation, "steps", 1, steps, r_error_message)) {
@@ -2384,16 +2652,10 @@ bool CLIAIInputServer::_prepare_expanded_operation(const Dictionary &p_operation
 				r_error_code = "invalid_operation";
 				return true;
 			}
-			Dictionary click_op;
-			click_op["cmd"] = "click";
-			click_op["x"] = position.x;
-			click_op["y"] = position.y;
-			click_op["button"] = "left";
-			click_op["pressFrames"] = 1;
-			if (!expand_from_dict(click_op)) {
-				return true;
-			}
-			r_expanded.push_back(_make_wait_op(1));
+			Dictionary focus_op;
+			focus_op["cmd"] = "focus_target";
+			focus_op["selector"] = p_operation["selector"];
+			r_expanded.push_back(focus_op);
 			r_expanded.push_back(_make_type_text_commit_op(text));
 			r_result["textLength"] = text.length();
 
@@ -2410,11 +2672,13 @@ bool CLIAIInputServer::_prepare_expanded_operation(const Dictionary &p_operation
 			return true;
 		}
 
-		String base_cmd = cmd;
 		if (cmd == "focus_target") {
-			base_cmd = "click_target";
+			r_expanded.push_back(p_operation);
+			return true;
 		}
 
+		const Vector2 position = _resolve_target_screen_position(resolution.snapshot);
+		String base_cmd = cmd;
 		Dictionary high_level;
 		high_level["x"] = position.x;
 		high_level["y"] = position.y;
@@ -2790,7 +3054,10 @@ Dictionary CLIAIInputServer::_cmd_key(const Dictionary &p_request) {
 		}
 		event->set_unicode((char32_t)unicode);
 	}
-	Input::get_singleton()->parse_input_event(event);
+	Ref<InputEvent> base_event = event;
+	if (!_dispatch_root_input(base_event, true)) {
+		return _make_error_response(id, has_id, "scene_tree_unavailable", "SceneTree root viewport is unavailable.");
+	}
 
 	const int64_t hold_id = _key_hold_id(key, shift, ctrl, alt, meta);
 	if (pressed) {
@@ -2859,7 +3126,8 @@ void CLIAIInputServer::_inject_mouse_button(MouseButton p_button, const Vector2 
 	event->set_global_position(p_position);
 	event->set_button_mask(ai_mouse_button_mask);
 	event->set_double_click(p_double_click);
-	Input::get_singleton()->parse_input_event(event);
+	Ref<InputEvent> base_event = event;
+	_dispatch_root_input(base_event, true);
 }
 
 void CLIAIInputServer::_inject_mouse_motion(const Vector2 &p_position, const Vector2 &p_relative) {
@@ -2873,12 +3141,25 @@ void CLIAIInputServer::_inject_mouse_motion(const Vector2 &p_position, const Vec
 	event->set_relative(p_relative);
 	event->set_relative_screen_position(p_relative);
 	event->set_button_mask(ai_mouse_button_mask);
-	Input::get_singleton()->parse_input_event(event);
+	Ref<InputEvent> base_event = event;
+	_dispatch_root_input(base_event, true);
 }
 
 void CLIAIInputServer::_inject_text_input(const String &p_text) {
+	String text_buffer;
 	for (int i = 0; i < p_text.length(); i++) {
 		const char32_t codepoint = p_text.unicode_at(i);
+		const bool is_control = codepoint == '\n' || codepoint == '\r' || codepoint == '\t' || codepoint == '\b';
+		if (!is_control) {
+			text_buffer += String::chr(codepoint);
+			continue;
+		}
+
+		if (!text_buffer.is_empty()) {
+			_dispatch_root_text_input(text_buffer);
+			text_buffer = String();
+		}
+
 		Key keycode = Key::NONE;
 		if (codepoint == '\n' || codepoint == '\r') {
 			keycode = Key::ENTER;
@@ -2894,7 +3175,8 @@ void CLIAIInputServer::_inject_text_input(const String &p_text) {
 		press_event->set_physical_keycode(keycode);
 		press_event->set_unicode(codepoint);
 		press_event->set_pressed(true);
-		Input::get_singleton()->parse_input_event(press_event);
+		Ref<InputEvent> press_base = press_event;
+		_dispatch_root_input(press_base, true);
 
 		Ref<InputEventKey> release_event;
 		release_event.instantiate();
@@ -2902,7 +3184,12 @@ void CLIAIInputServer::_inject_text_input(const String &p_text) {
 		release_event->set_physical_keycode(keycode);
 		release_event->set_unicode(codepoint);
 		release_event->set_pressed(false);
-		Input::get_singleton()->parse_input_event(release_event);
+		Ref<InputEvent> release_base = release_event;
+		_dispatch_root_input(release_base, true);
+	}
+
+	if (!text_buffer.is_empty()) {
+		_dispatch_root_text_input(text_buffer);
 	}
 }
 
@@ -3386,6 +3673,10 @@ Dictionary CLIAIInputServer::_cmd_type_text_commit(const Dictionary &p_request) 
 	if (!_get_string(p_request, "text", String(), text, error)) {
 		return _make_error_response(id, has_id, "invalid_text", error);
 	}
+	SceneTree *scene_tree = _get_runtime_scene_tree();
+	if (!scene_tree || !scene_tree->get_root()) {
+		return _make_error_response(id, has_id, "scene_tree_unavailable", "SceneTree root viewport is unavailable.");
+	}
 	_inject_text_input(text);
 
 	Dictionary result;
@@ -3529,7 +3820,8 @@ void CLIAIInputServer::_release_held_inputs() {
 		event->set_ctrl_pressed(held_key.ctrl);
 		event->set_alt_pressed(held_key.alt);
 		event->set_meta_pressed(held_key.meta);
-		Input::get_singleton()->parse_input_event(event);
+		Ref<InputEvent> base_event = event;
+		_dispatch_root_input(base_event, true);
 	}
 	held_keys.clear();
 

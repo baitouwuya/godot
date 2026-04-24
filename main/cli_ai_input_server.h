@@ -98,6 +98,11 @@ public:
 	Dictionary test_cmd_wait_node_exists(const Dictionary &p_request, bool p_from_batch, bool &r_deferred) { return _cmd_wait_node_exists(p_request, p_from_batch, r_deferred); }
 	Dictionary test_cmd_wait_property(const Dictionary &p_request, bool p_from_batch, bool &r_deferred) { return _cmd_wait_property(p_request, p_from_batch, r_deferred); }
 	Dictionary test_cmd_wait_scene_changed(const Dictionary &p_request, bool p_from_batch, bool &r_deferred) { return _cmd_wait_scene_changed(p_request, p_from_batch, r_deferred); }
+	Dictionary test_cmd_perf_start(const Dictionary &p_request) { return _cmd_perf_start(p_request); }
+	Dictionary test_cmd_perf_stop(const Dictionary &p_request, bool p_from_batch, bool &r_deferred) { return _cmd_perf_stop(p_request, p_from_batch, r_deferred); }
+	Dictionary test_cmd_perf_status() const { return _cmd_perf_status(); }
+	void test_process_line(const String &p_line) { _process_line(p_line); }
+	void test_finish_runtime_perf_stop(bool p_completed, bool p_event_response) { _finish_runtime_perf_stop(p_completed, p_event_response); }
 	void test_process_pending_waits() { _process_pending_waits(); }
 	static uint64_t test_current_frame() { return _current_frame(); }
 	void test_setup_active_batch(int p_step, const String &p_on_error) {
@@ -203,6 +208,7 @@ private:
 	struct PendingWait {
 		Variant id;
 		bool has_id = false;
+		String trace_correlation_id;
 		bool from_batch = false;
 		int batch_step = -1;
 		String command;
@@ -219,6 +225,7 @@ private:
 		bool active = false;
 		Variant id;
 		bool has_id = false;
+		String trace_correlation_id;
 		Array ops;
 		Array micro_ops;
 		Array results;
@@ -387,6 +394,7 @@ private:
 	CLIPerformanceRecorder *runtime_perf_recorder = nullptr;
 	Variant pending_perf_stop_id;
 	bool pending_perf_stop_has_id = false;
+	String pending_perf_stop_trace_correlation_id;
 	bool pending_perf_stop = false;
 
 #ifdef TESTS_ENABLED

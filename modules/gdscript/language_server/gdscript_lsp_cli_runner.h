@@ -90,4 +90,8 @@ public:
 	static bool is_enabled(const Options &p_options);
 	static Error validate_options(const Options &p_options, String &r_error);
 	static int run(const Options &p_options);
+#ifdef TESTS_ENABLED
+	static Variant run_query_for_tests(const Options &p_options, String &r_error);
+	static int run_diagnostics_for_tests(const Options &p_options);
+#endif
 };

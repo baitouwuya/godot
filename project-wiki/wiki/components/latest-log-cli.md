@@ -385,6 +385,29 @@ runner 内部固定分成 4 段：
 - 尾部无问题块时才回退到全文件
 - `text/json/both` 都复用同一份分析结果
 
+## 埋点
+
+当前版本会自动接入共享定制功能埋点系统，不需要额外 CLI flag。
+
+会记录的核心事件包括：
+
+- `run_started`
+- `base_log_path_resolved`
+- `latest_log_selected`
+- `summary`
+- `run_finished`
+- `base_log_path_failed`
+- `latest_log_not_found`
+- `build_output_failed`
+
+当前行为要点：
+
+- `summary` 和最终 `output` 都会作为 payload 保留
+- `raw` / `both` 的大文本输出会自动转成 sidecar，不把巨型内容塞进单个事件
+- 这些 trace 不会改变 `text/json/both/raw` 的 stdout 契约
+
+具体落盘位置和会话目录结构见 [定制功能埋点系统](custom-feature-tracing.md)。
+
 ## 验证
 
 需要确认功能可信度时阅读这一节。
@@ -452,3 +475,4 @@ scons platform=windows target=editor dev_build=yes module_mono_enabled=no tests=
 
 - [项目 Wiki 索引](../index.md)
 - [Wiki 日志](../log.md)
+- [定制功能埋点系统](custom-feature-tracing.md)

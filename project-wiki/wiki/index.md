@@ -10,6 +10,7 @@
 | CLI 性能录制器 | `--perf-record` | CLI 项目运行时的逐帧性能摘要、分位数、慢帧快照、budget 统计和可选 JSONL 样本导出 | [CLI 性能录制器](components/cli-performance-recorder.md) |
 | 最新日志 CLI | `--latest-log` | 默认输出面向 AI 的语义压缩日志摘要，支持 `text`、`json`、`both`、`raw`，并带问题块、重复折叠、关键词和栈摘要 | [最新日志 CLI](components/latest-log-cli.md) |
 | Runtime AI Agent Control Mode | `--ai-agent-control`、Project Settings、Run Bar 开关 | 本机 TCP JSONL 运行时 agent 桥，支持语义观察、条件等待、高层目标动作、batch 调试、socket 返回的性能探针，并已补齐观察缓存、截图缓存和严格错误语义 | [Runtime AI Agent Control Mode](components/runtime-ai-agent-control.md) |
+| 定制功能埋点系统 | 默认自动开启，无独立读取 CLI | 为 4 个定制功能自动写入共享结构化 trace，会话目录包含 `manifest.json`、滚动 `events-*.jsonl` 和 `payloads/`，支持 sidecar、外部文件引用和错误捕获 | [定制功能埋点系统](components/custom-feature-tracing.md) |
 
 ## 操作流程
 

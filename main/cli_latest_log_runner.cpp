@@ -38,6 +38,7 @@
 #include "core/os/os.h"
 #include "core/templates/hash_map.h"
 #include "core/templates/hashfuncs.h"
+#include "main/custom_feature_tracer.h"
 
 #include "modules/modules_enabled.gen.h"
 
@@ -1465,26 +1466,88 @@ Error CLILatestLogRunner::build_output(const String &p_log_path, const String &p
 }
 
 int CLILatestLogRunner::run(const Options &p_options, const String &p_log_file_override) {
+	CustomFeatureTracer *tracer = CustomFeatureTracer::get_singleton();
+	const String correlation_id = tracer ? tracer->next_correlation_id(CustomFeatureTracer::FEATURE_LATEST_LOG_CLI) : String();
+	CustomFeatureTracer::ScopedEventContext trace_context(CustomFeatureTracer::FEATURE_LATEST_LOG_CLI, correlation_id);
+	if (tracer) {
+		Dictionary start_data;
+		start_data["lines"] = p_options.lines;
+		start_data["format"] = get_format_name(p_options.format);
+		start_data["logFileOverride"] = p_log_file_override;
+		tracer->record_event(CustomFeatureTracer::FEATURE_LATEST_LOG_CLI, "run_started", "info", correlation_id, start_data);
+	}
+
 	const String base_log_path = resolve_base_log_path(p_log_file_override);
 	if (base_log_path.is_empty()) {
+		if (tracer) {
+			tracer->record_error_event(CustomFeatureTracer::FEATURE_LATEST_LOG_CLI, "base_log_path_failed", correlation_id, "base_log_path_failed", "Unable to resolve the configured project log path.");
+		}
 		OS::get_singleton()->printerr("Error: Unable to resolve the configured project log path.\n");
 		return EXIT_INVALID_ARGUMENTS;
+	}
+	if (tracer) {
+		Dictionary data;
+		data["baseLogPath"] = base_log_path;
+		tracer->record_event(CustomFeatureTracer::FEATURE_LATEST_LOG_CLI, "base_log_path_resolved", "info", correlation_id, data);
 	}
 
 	String latest_log_path;
 	if (find_latest_log_path(base_log_path, latest_log_path) != OK) {
+		if (tracer) {
+			Dictionary data;
+			data["baseLogPath"] = base_log_path;
+			tracer->record_error_event(CustomFeatureTracer::FEATURE_LATEST_LOG_CLI, "latest_log_not_found", correlation_id, "log_not_found", vformat("No log files were found for \"%s\".", base_log_path), data);
+		}
 		OS::get_singleton()->printerr("Error: No log files were found for \"%s\".\n", base_log_path.utf8().get_data());
 		return EXIT_NOT_FOUND;
+	}
+	if (tracer) {
+		Dictionary data;
+		data["baseLogPath"] = base_log_path;
+		data["latestLogPath"] = latest_log_path;
+		tracer->record_event(CustomFeatureTracer::FEATURE_LATEST_LOG_CLI, "latest_log_selected", "info", correlation_id, data);
 	}
 
 	String output;
 	Dictionary summary;
 	String error;
 	if (build_output(latest_log_path, base_log_path, p_options, output, summary, error) != OK) {
+		if (tracer) {
+			Dictionary data;
+			data["baseLogPath"] = base_log_path;
+			data["latestLogPath"] = latest_log_path;
+			Dictionary payloads;
+			if (!output.is_empty()) {
+				tracer->add_text_payload(payloads, "partialOutput", "text/plain", output);
+			}
+			tracer->record_error_event(CustomFeatureTracer::FEATURE_LATEST_LOG_CLI, "build_output_failed", correlation_id, "read_failed", error, data, payloads);
+		}
 		OS::get_singleton()->printerr("Error: %s\n", error.utf8().get_data());
 		return EXIT_READ_FAILED;
 	}
+	if (tracer) {
+		Dictionary data;
+		data["baseLogPath"] = base_log_path;
+		data["latestLogPath"] = latest_log_path;
+		data["format"] = get_format_name(p_options.format);
+		if (summary.has("analysis")) {
+			data["analysis"] = summary["analysis"];
+		}
+		if (summary.has("counts")) {
+			data["counts"] = summary["counts"];
+		}
+		Dictionary payloads;
+		tracer->add_json_payload(payloads, "summary", summary);
+		tracer->add_text_payload(payloads, "output", p_options.format == FORMAT_JSON ? "application/json" : "text/plain", output);
+		tracer->record_event(CustomFeatureTracer::FEATURE_LATEST_LOG_CLI, "summary", "info", correlation_id, data, payloads);
+	}
 
 	_print_stdout(output);
+	if (tracer) {
+		Dictionary data;
+		data["exitCode"] = EXIT_OK;
+		data["latestLogPath"] = latest_log_path;
+		tracer->record_event(CustomFeatureTracer::FEATURE_LATEST_LOG_CLI, "run_finished", "info", correlation_id, data);
+	}
 	return EXIT_OK;
 }

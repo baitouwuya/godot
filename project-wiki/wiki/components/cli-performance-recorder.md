@@ -191,6 +191,24 @@
 - 外部绘图。
 - 自定义离线分析。
 
+## 埋点
+
+当前版本会自动接入共享定制功能埋点系统，不需要额外 CLI flag。
+
+会记录的核心事件包括：
+
+- `options_validated` / `options_validation_failed`
+- `initialized` / `initialize_failed`
+- `summary`
+
+当前行为要点：
+
+- `summary` 会把最终录制摘要作为 payload 保留下来
+- 如果存在 `--perf-samples-file`，trace 只引用该样本文件，不重复复制
+- 逐帧采样本身不会额外镜像进 trace，避免默认路径开销过高
+
+具体落盘位置和会话目录结构见 [定制功能埋点系统](custom-feature-tracing.md)。
+
 ## 验证
 
 需要确认功能可信度时阅读这一节。
@@ -240,3 +258,4 @@ scons platform=windows target=editor dev_build=yes module_mono_enabled=no tests=
 
 - [项目 Wiki 索引](../index.md)
 - [Wiki 日志](../log.md)
+- [定制功能埋点系统](custom-feature-tracing.md)

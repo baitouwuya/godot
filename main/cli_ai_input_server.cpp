@@ -41,6 +41,7 @@
 #include "core/math/math_funcs.h"
 #include "core/os/keyboard.h"
 #include "core/os/os.h"
+#include "main/custom_feature_tracer.h"
 #include "scene/3d/camera_3d.h"
 #include "scene/3d/node_3d.h"
 #include "scene/3d/visual_instance_3d.h"
@@ -52,6 +53,41 @@
 #include "servers/rendering/rendering_server.h"
 
 static const int MAX_OPS_PER_FRAME = 128;
+
+static String _trace_correlation_from_request(CustomFeatureTracer *p_tracer, const Dictionary &p_request) {
+	if (!p_tracer) {
+		return String();
+	}
+	return p_request.has("id") ? p_tracer->correlation_id_from_external_id(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, p_request["id"]) : p_tracer->next_correlation_id(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL);
+}
+
+static Dictionary _make_trace_request_data(const Dictionary &p_request) {
+	Dictionary data;
+	data["cmd"] = p_request.get("cmd", String());
+	data["hasId"] = p_request.has("id");
+	if (p_request.has("id")) {
+		data["id"] = p_request["id"];
+	}
+	return data;
+}
+
+static Dictionary _make_trace_response_data(const Dictionary &p_response) {
+	Dictionary data;
+	data["ok"] = p_response.get("ok", false);
+	data["frame"] = p_response.get("frame", -1);
+	data["hasId"] = p_response.has("id");
+	if (p_response.has("id")) {
+		data["id"] = p_response["id"];
+	}
+	if (p_response.has("event")) {
+		data["event"] = p_response["event"];
+	}
+	if (p_response.has("error")) {
+		Dictionary error = p_response["error"];
+		data["errorCode"] = error.get("code", String());
+	}
+	return data;
+}
 
 static Variant _get_object_property_or_nil(Object *p_object, const StringName &p_property, bool &r_valid) {
 	r_valid = false;
@@ -428,13 +464,26 @@ CLIAIInputServer::~CLIAIInputServer() {
 
 Error CLIAIInputServer::initialize(String &r_error) {
 	r_error = String();
+	CustomFeatureTracer *tracer = CustomFeatureTracer::get_singleton();
+	CustomFeatureTracer::ScopedEventContext trace_context(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL);
 
 	server.instantiate();
 	const Error err = server->listen((uint16_t)options.port, IPAddress("127.0.0.1"));
 	if (err != OK) {
+		if (tracer) {
+			Dictionary data;
+			data["port"] = options.port;
+			tracer->record_error_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "server_listen_failed", String(), "listen_failed", vformat("Unable to listen for AI agent control on 127.0.0.1:%d (error code %d).", options.port, (int)err), data);
+		}
 		r_error = vformat("Unable to listen for AI agent control on 127.0.0.1:%d (error code %d).", options.port, (int)err);
 		server.unref();
 		return err;
+	}
+	if (tracer) {
+		Dictionary data;
+		data["host"] = "127.0.0.1";
+		data["port"] = options.port;
+		tracer->record_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "server_started", "info", String(), data);
 	}
 
 	OS::get_singleton()->printerr("AI agent control listening on 127.0.0.1:%d\n", options.port);
@@ -460,6 +509,14 @@ void CLIAIInputServer::_send_busy_and_close(Ref<StreamPeerTCP> p_peer) {
 	response["ok"] = false;
 	response["frame"] = (int64_t)_current_frame();
 	response["error"] = _make_error_payload("busy", "Another AI agent client is already connected.");
+	CustomFeatureTracer *tracer = CustomFeatureTracer::get_singleton();
+	if (tracer) {
+		const String correlation_id = tracer->next_correlation_id(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL);
+		Dictionary data = _make_trace_response_data(response);
+		Dictionary payloads;
+		tracer->add_json_payload(payloads, "response", response);
+		tracer->record_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "busy_rejected", "warning", correlation_id, data, payloads);
+	}
 
 	const String line = JSON::stringify(response) + "\n";
 	const CharString utf8 = line.utf8();
@@ -468,6 +525,7 @@ void CLIAIInputServer::_send_busy_and_close(Ref<StreamPeerTCP> p_peer) {
 }
 
 void CLIAIInputServer::_disconnect_client(bool p_abort_state) {
+	CustomFeatureTracer *tracer = CustomFeatureTracer::get_singleton();
 	if (p_abort_state) {
 		_release_held_inputs();
 		_abort_runtime_perf(false);
@@ -477,6 +535,11 @@ void CLIAIInputServer::_disconnect_client(bool p_abort_state) {
 	if (client.is_valid()) {
 		client->disconnect_from_host();
 		client.unref();
+	}
+	if (tracer) {
+		Dictionary data;
+		data["abortState"] = p_abort_state;
+		tracer->record_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "client_disconnected", "info", String(), data);
 	}
 	line_buffer.clear();
 	pending_client_bytes.clear();
@@ -509,6 +572,11 @@ void CLIAIInputServer::_accept_new_clients() {
 		}
 
 		client = incoming;
+		if (CustomFeatureTracer::has_singleton()) {
+			Dictionary data;
+			data["frame"] = (int64_t)_current_frame();
+			CustomFeatureTracer::get_singleton()->record_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "client_connected", "info", String(), data);
+		}
 		line_buffer.clear();
 		dropping_oversized_line = false;
 	}
@@ -1153,27 +1221,62 @@ Dictionary CLIAIInputServer::_build_scene_digest() const {
 }
 
 void CLIAIInputServer::_process_line(const String &p_line) {
+	CustomFeatureTracer *tracer = CustomFeatureTracer::get_singleton();
 	JSON json;
 	const Error err = json.parse(p_line);
 	if (err != OK) {
+		const String correlation_id = tracer ? tracer->next_correlation_id(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL) : String();
 		const Dictionary response = _make_error_response(Variant(), false, "invalid_json", json.get_error_message());
 		_record_last_error_bundle(response);
+		if (tracer) {
+			Dictionary data = _make_trace_response_data(response);
+			Dictionary payloads;
+			tracer->add_text_payload(payloads, "requestLine", "text/plain", p_line);
+			tracer->add_json_payload(payloads, "response", response);
+			tracer->record_error_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "request_invalid_json", correlation_id, "invalid_json", json.get_error_message(), data, payloads);
+		}
 		_send_response(response);
 		return;
 	}
 
 	const Variant parsed = json.get_data();
 	if (parsed.get_type() != Variant::DICTIONARY) {
+		const String correlation_id = tracer ? tracer->next_correlation_id(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL) : String();
 		const Dictionary response = _make_error_response(Variant(), false, "invalid_json", "Request must be a JSON object.");
 		_record_last_error_bundle(response);
+		if (tracer) {
+			Dictionary data = _make_trace_response_data(response);
+			Dictionary payloads;
+			tracer->add_text_payload(payloads, "requestLine", "text/plain", p_line);
+			tracer->add_json_payload(payloads, "response", response);
+			tracer->record_error_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "request_invalid_json", correlation_id, "invalid_json", "Request must be a JSON object.", data, payloads);
+		}
 		_send_response(response);
 		return;
 	}
 
+	const Dictionary request = parsed;
+	const String correlation_id = _trace_correlation_from_request(tracer, request);
+	CustomFeatureTracer::ScopedEventContext trace_context(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, correlation_id);
+	if (tracer) {
+		Dictionary payloads;
+		tracer->add_json_payload(payloads, "request", request);
+		tracer->record_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "request_received", "info", correlation_id, _make_trace_request_data(request), payloads);
+	}
 	bool deferred = false;
-	const Dictionary response = _handle_request(parsed, false, deferred);
+	const Dictionary response = _handle_request(request, false, deferred);
 	if (!deferred) {
 		_record_last_error_bundle(response);
+		if (tracer) {
+			Dictionary payloads;
+			tracer->add_json_payload(payloads, "response", response);
+			const Dictionary error = response.has("error") && response["error"].get_type() == Variant::DICTIONARY ? (Dictionary)response["error"] : Dictionary();
+			if (!error.is_empty()) {
+				tracer->record_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "response_sent", error.get("code", String()) == "timeout" ? "warning" : "error", correlation_id, _make_trace_response_data(response), payloads, error);
+			} else {
+				tracer->record_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "response_sent", "info", correlation_id, _make_trace_response_data(response), payloads);
+			}
+		}
 		_send_response(response);
 	}
 }
@@ -1378,6 +1481,7 @@ bool CLIAIInputServer::_extract_wait_request(const Dictionary &p_request, const 
 	r_wait = PendingWait();
 	r_wait.id = p_id;
 	r_wait.has_id = p_has_id;
+	r_wait.trace_correlation_id = p_from_batch ? active_batch.trace_correlation_id : CustomFeatureTracer::get_current_correlation_id();
 	r_wait.from_batch = p_from_batch;
 	r_wait.command = p_request.has("cmd") ? String(p_request["cmd"]) : p_condition_kind;
 	r_wait.spec.condition_kind = p_condition_kind;
@@ -1640,6 +1744,15 @@ void CLIAIInputServer::_queue_wait(const PendingWait &p_wait, bool p_from_batch)
 		active_batch.waiting = true;
 	}
 	pending_waits.push_back(wait);
+	if (CustomFeatureTracer::has_singleton()) {
+		Dictionary data;
+		data["cmd"] = wait.command;
+		data["condition"] = wait.spec.condition_kind;
+		data["timeoutFrames"] = wait.spec.timeout_frames;
+		data["pollEveryFrames"] = wait.spec.poll_every_frames;
+		data["fromBatch"] = wait.from_batch;
+		CustomFeatureTracer::get_singleton()->record_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "wait_queued", "info", wait.trace_correlation_id, data);
+	}
 }
 
 void CLIAIInputServer::_complete_batch_wait(const PendingWait &p_wait, const Dictionary &p_result) {
@@ -1655,6 +1768,14 @@ void CLIAIInputServer::_complete_batch_wait(const PendingWait &p_wait, const Dic
 }
 
 void CLIAIInputServer::_fail_wait(const PendingWait &p_wait, const Dictionary &p_error_response) {
+	if (CustomFeatureTracer::has_singleton()) {
+		Dictionary data = _make_trace_response_data(p_error_response);
+		data["cmd"] = p_wait.command;
+		data["condition"] = p_wait.spec.condition_kind;
+		Dictionary payloads;
+		CustomFeatureTracer::get_singleton()->add_json_payload(payloads, "response", p_error_response);
+		CustomFeatureTracer::get_singleton()->record_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "wait_failed", "warning", p_wait.trace_correlation_id, data, payloads, p_error_response.has("error") && p_error_response["error"].get_type() == Variant::DICTIONARY ? (Dictionary)p_error_response["error"] : Dictionary());
+	}
 	if (p_wait.from_batch) {
 		active_batch.waiting = false;
 		_fail_batch_step(p_wait.batch_step, p_error_response);
@@ -1678,6 +1799,7 @@ void CLIAIInputServer::poll_commands() {
 void CLIAIInputServer::_process_pending_waits() {
 	for (int i = pending_waits.size() - 1; i >= 0; i--) {
 		PendingWait wait = pending_waits[i];
+		CustomFeatureTracer::ScopedEventContext trace_context(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, wait.trace_correlation_id);
 		const uint64_t frame = _current_frame();
 		if (frame < wait.next_poll_frame) {
 			continue;
@@ -1699,10 +1821,25 @@ void CLIAIInputServer::_process_pending_waits() {
 			if (!wait.last_resolved_target.is_empty()) {
 				last_resolved_target = wait.last_resolved_target;
 			}
+			if (CustomFeatureTracer::has_singleton()) {
+				Dictionary data;
+				data["cmd"] = wait.command;
+				data["condition"] = wait.spec.condition_kind;
+				data["fromBatch"] = wait.from_batch;
+				Dictionary payloads;
+				CustomFeatureTracer::get_singleton()->add_json_payload(payloads, "result", result);
+				CustomFeatureTracer::get_singleton()->record_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "wait_finished", "info", wait.trace_correlation_id, data, payloads);
+			}
 			if (wait.from_batch) {
 				_complete_batch_wait(wait, result);
 			} else {
-				_send_response(_make_success_response(wait.id, wait.has_id, result));
+				const Dictionary response = _make_success_response(wait.id, wait.has_id, result);
+				if (CustomFeatureTracer::has_singleton()) {
+					Dictionary payloads;
+					CustomFeatureTracer::get_singleton()->add_json_payload(payloads, "response", response);
+					CustomFeatureTracer::get_singleton()->record_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "response_sent", "info", wait.trace_correlation_id, _make_trace_response_data(response), payloads);
+				}
+				_send_response(response);
 			}
 			pending_waits.remove_at(i);
 			continue;
@@ -1869,6 +2006,11 @@ Dictionary CLIAIInputServer::_execute_immediate_operation(const Dictionary &p_op
 		event["event"] = "checkpoint";
 		event["name"] = p_operation.has("name") ? String(p_operation["name"]) : String();
 		event["step"] = active_batch.step;
+		if (CustomFeatureTracer::has_singleton()) {
+			Dictionary payloads;
+			CustomFeatureTracer::get_singleton()->add_json_payload(payloads, "response", event);
+			CustomFeatureTracer::get_singleton()->record_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "batch_checkpoint", "info", active_batch.trace_correlation_id, _make_trace_response_data(event), payloads);
+		}
 		_send_response(event);
 		checkpoint_history.push_back(event);
 		active_batch.checkpoints.push_back(event);
@@ -1917,11 +2059,19 @@ bool CLIAIInputServer::_start_batch(const Dictionary &p_request, bool p_direct_o
 	active_batch.active = true;
 	active_batch.id = id;
 	active_batch.has_id = has_id;
+	active_batch.trace_correlation_id = CustomFeatureTracer::get_current_correlation_id();
 	active_batch.ops = ops;
 	active_batch.on_error = on_error;
 	active_batch.started_frame = _current_frame();
 	active_batch.direct_operation = p_direct_operation;
 	active_batch.checkpoints.clear();
+	if (CustomFeatureTracer::has_singleton()) {
+		Dictionary data;
+		data["opsCount"] = ops.size();
+		data["onError"] = on_error;
+		data["directOperation"] = p_direct_operation;
+		CustomFeatureTracer::get_singleton()->record_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "batch_started", "info", active_batch.trace_correlation_id, data);
+	}
 	return true;
 }
 
@@ -1942,6 +2092,11 @@ void CLIAIInputServer::_finish_batch(bool p_completed) {
 		response["error"] = _make_error_payload("batch_failed", "Batch did not complete successfully.");
 	}
 	_record_last_error_bundle(response);
+	if (CustomFeatureTracer::has_singleton()) {
+		Dictionary payloads;
+		CustomFeatureTracer::get_singleton()->add_json_payload(payloads, "response", response);
+		CustomFeatureTracer::get_singleton()->record_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "batch_finished", ok ? "info" : "warning", active_batch.trace_correlation_id, _make_trace_response_data(response), payloads, response.has("error") && response["error"].get_type() == Variant::DICTIONARY ? (Dictionary)response["error"] : Dictionary());
+	}
 	_send_response(response);
 	active_batch = ActiveBatch();
 }
@@ -1960,6 +2115,13 @@ void CLIAIInputServer::_fail_batch_step(int p_step, const Dictionary &p_error_re
 		active_batch.failed_step = p_step;
 	}
 	_record_last_error_bundle(p_error_response);
+	if (CustomFeatureTracer::has_singleton()) {
+		Dictionary data = _make_trace_response_data(p_error_response);
+		data["step"] = p_step;
+		Dictionary payloads;
+		CustomFeatureTracer::get_singleton()->add_json_payload(payloads, "response", p_error_response);
+		CustomFeatureTracer::get_singleton()->record_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "batch_step_failed", "warning", active_batch.trace_correlation_id, data, payloads, p_error_response.has("error") && p_error_response["error"].get_type() == Variant::DICTIONARY ? (Dictionary)p_error_response["error"] : Dictionary());
+	}
 
 	if (active_batch.on_error == "stop") {
 		_release_held_inputs();
@@ -1987,6 +2149,7 @@ void CLIAIInputServer::_cancel_active_batch(const String &p_error_code, const St
 
 void CLIAIInputServer::_process_batch(int &r_budget) {
 	while (active_batch.active && r_budget > 0) {
+		CustomFeatureTracer::ScopedEventContext trace_context(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, active_batch.trace_correlation_id);
 		if (active_batch.waiting) {
 			return;
 		}
@@ -3152,6 +3315,17 @@ Dictionary CLIAIInputServer::_cmd_perf_start(const Dictionary &p_request) {
 		runtime_perf_recorder = nullptr;
 		return _make_error_response(id, has_id, "perf_samples_file_failed", initialize_error);
 	}
+	if (CustomFeatureTracer::has_singleton()) {
+		Dictionary data;
+		data["name"] = perf_options.recording_name;
+		data["startFrame"] = perf_options.start_frame;
+		data["topFrames"] = top_frames;
+		if (perf_options.samples_file_set) {
+			data["samplesFile"] = perf_options.samples_file;
+		}
+		const String trace_correlation_id = active_batch.active ? active_batch.trace_correlation_id : CustomFeatureTracer::get_current_correlation_id();
+		CustomFeatureTracer::get_singleton()->record_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "runtime_perf_started", "info", trace_correlation_id, data);
+	}
 
 	Dictionary result;
 	result["name"] = perf_options.recording_name;
@@ -3164,6 +3338,7 @@ void CLIAIInputServer::_mark_runtime_perf_stop_requested(const Variant &p_id, bo
 	pending_perf_stop = true;
 	pending_perf_stop_id = p_id;
 	pending_perf_stop_has_id = p_has_id;
+	pending_perf_stop_trace_correlation_id = CustomFeatureTracer::get_current_correlation_id();
 }
 
 Dictionary CLIAIInputServer::_cmd_perf_stop(const Dictionary &p_request, bool p_from_batch, bool &r_deferred) {
@@ -3182,6 +3357,11 @@ Dictionary CLIAIInputServer::_cmd_perf_stop(const Dictionary &p_request, bool p_
 		runtime_perf_recorder->close();
 		memdelete(runtime_perf_recorder);
 		runtime_perf_recorder = nullptr;
+		if (CustomFeatureTracer::has_singleton()) {
+			Dictionary payloads;
+			CustomFeatureTracer::get_singleton()->add_json_payload(payloads, "summary", summary);
+			CustomFeatureTracer::get_singleton()->record_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "runtime_perf_summary", "info", active_batch.trace_correlation_id, Dictionary(), payloads);
+		}
 		return _make_success_response(id, has_id, summary);
 	}
 	_mark_runtime_perf_stop_requested(id, has_id);
@@ -3250,6 +3430,11 @@ Dictionary CLIAIInputServer::_cmd_cancel_batch(const Dictionary &p_request) {
 	Dictionary batch_response = _make_error_response(active_batch.id, active_batch.has_id, "batch_cancelled", "Batch was cancelled by cancel_batch.");
 	batch_response["result"] = batch_result;
 	_record_last_error_bundle(batch_response);
+	if (CustomFeatureTracer::has_singleton()) {
+		Dictionary payloads;
+		CustomFeatureTracer::get_singleton()->add_json_payload(payloads, "response", batch_response);
+		CustomFeatureTracer::get_singleton()->record_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "batch_cancelled", "warning", active_batch.trace_correlation_id, _make_trace_response_data(batch_response), payloads, batch_response.has("error") && batch_response["error"].get_type() == Variant::DICTIONARY ? (Dictionary)batch_response["error"] : Dictionary());
+	}
 	_send_response(batch_response);
 
 	_release_held_inputs();
@@ -3295,6 +3480,7 @@ void CLIAIInputServer::_finish_runtime_perf_stop(bool p_completed, bool p_event_
 		pending_perf_stop = false;
 		return;
 	}
+	CustomFeatureTracer::ScopedEventContext trace_context(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, pending_perf_stop_trace_correlation_id);
 
 	if (runtime_perf_recorder->get_captured_frames() > 0) {
 		runtime_perf_recorder->set_summary_end_frame((int64_t)runtime_perf_recorder->get_last_sampled_frame());
@@ -3306,6 +3492,11 @@ void CLIAIInputServer::_finish_runtime_perf_stop(bool p_completed, bool p_event_
 	if (p_event_response) {
 		response["event"] = "perf_summary";
 	}
+	if (CustomFeatureTracer::has_singleton()) {
+		Dictionary payloads;
+		CustomFeatureTracer::get_singleton()->add_json_payload(payloads, "response", response);
+		CustomFeatureTracer::get_singleton()->record_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "runtime_perf_summary", p_completed ? "info" : "warning", pending_perf_stop_trace_correlation_id, _make_trace_response_data(response), payloads);
+	}
 	_send_response(response);
 
 	runtime_perf_recorder->close();
@@ -3314,6 +3505,7 @@ void CLIAIInputServer::_finish_runtime_perf_stop(bool p_completed, bool p_event_
 	pending_perf_stop = false;
 	pending_perf_stop_id = Variant();
 	pending_perf_stop_has_id = false;
+	pending_perf_stop_trace_correlation_id = String();
 }
 
 void CLIAIInputServer::_release_held_inputs() {
@@ -3369,9 +3561,17 @@ void CLIAIInputServer::_abort_runtime_perf(bool p_send_event) {
 	pending_perf_stop = false;
 	pending_perf_stop_id = Variant();
 	pending_perf_stop_has_id = false;
+	pending_perf_stop_trace_correlation_id = String();
 }
 
 void CLIAIInputServer::shutdown() {
+	if (CustomFeatureTracer::has_singleton()) {
+		Dictionary data;
+		data["listening"] = is_listening();
+		data["batchActive"] = active_batch.active;
+		data["runtimePerfActive"] = runtime_perf_recorder != nullptr;
+		CustomFeatureTracer::get_singleton()->record_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "server_shutdown", "info", String(), data);
+	}
 	if (runtime_perf_recorder) {
 		_finish_runtime_perf_stop(false, true);
 	}

@@ -33,6 +33,7 @@
 #include "main/cli_ai_input_server.h"
 #include "main/cli_latest_log_runner.h"
 #include "main/cli_performance_recorder.h"
+#include "main/custom_feature_tracer.h"
 
 #include "core/config/project_settings.h"
 #include "core/core_globals.h"
@@ -50,6 +51,7 @@
 #include "core/io/image.h"
 #include "core/io/image_loader.h"
 #include "core/io/ip.h"
+#include "core/io/json.h"
 #include "core/io/resource_loader.h"
 #include "core/object/message_queue.h"
 #include "core/object/script_language.h"
@@ -289,6 +291,127 @@ static CLIAIInputServer *cli_ai_agent_server = nullptr;
 static CLILatestLogRunner::Options cli_latest_log_options;
 static CLIPerformanceRecorder::Options cli_perf_options;
 static CLIPerformanceRecorder *cli_perf_recorder = nullptr;
+
+static String _get_custom_feature_process_mode() {
+	if (cmdline_tool) {
+		return "cmdline_tool";
+	}
+	if (editor || project_manager) {
+		return "editor_run";
+	}
+	return "cli_project_run";
+}
+
+static String _get_custom_feature_project_path(const String &p_project_path) {
+	if (p_project_path.is_empty() || p_project_path == ".") {
+		return OS::get_singleton()->get_cwd();
+	}
+	return p_project_path.simplify_path();
+}
+
+#ifdef GDSCRIPT_LSP_CLI_ENABLED
+static Dictionary _make_gdscript_lsp_trace_options_data(const GDScriptLSPCLIRunner::Options &p_options) {
+	Dictionary data;
+	data["query"] = p_options.query;
+	data["diagnostics"] = p_options.diagnostics;
+	data["file"] = p_options.file;
+	data["line"] = p_options.line;
+	data["column"] = p_options.column;
+	data["paramsJsonProvided"] = !p_options.params_json.is_empty();
+	data["includeDeclaration"] = p_options.include_declaration;
+	data["diagnosticsFormat"] = p_options.diagnostics_format;
+	data["diagnosticsSeverity"] = p_options.diagnostics_severity;
+	data["diagnosticsFailOn"] = p_options.diagnostics_fail_on;
+	return data;
+}
+#endif
+
+static Dictionary _make_cli_latest_log_trace_options_data(const CLILatestLogRunner::Options &p_options) {
+	Dictionary data;
+	data["enabled"] = p_options.enabled;
+	data["lines"] = p_options.lines;
+	data["linesSet"] = p_options.lines_set;
+	data["format"] = CLILatestLogRunner::get_format_name(p_options.format);
+	data["formatSet"] = p_options.format_set;
+	return data;
+}
+
+static Dictionary _make_cli_perf_trace_options_data(const CLIPerformanceRecorder::Options &p_options) {
+	Dictionary data;
+	data["enabled"] = p_options.enabled;
+	data["startFrame"] = p_options.start_frame;
+	data["endFrame"] = p_options.end_frame;
+	data["topFrames"] = p_options.top_frames;
+	data["samplesFile"] = p_options.samples_file;
+	data["recordingName"] = p_options.recording_name;
+	return data;
+}
+
+static Dictionary _make_ai_agent_trace_options_data(const CLIAIInputServer::Options &p_options) {
+	Dictionary data;
+	data["enabled"] = p_options.enabled;
+	data["port"] = p_options.port;
+	data["maxBatchOps"] = p_options.max_batch_ops;
+	data["maxLineBytes"] = p_options.max_line_bytes;
+	data["defaultPerfTopFrames"] = p_options.default_perf_top_frames;
+	data["defaultSceneTreeMaxDepth"] = p_options.default_scene_tree_max_depth;
+	data["defaultWaitTimeoutFrames"] = p_options.default_wait_timeout_frames;
+	data["defaultPollEveryFrames"] = p_options.default_poll_every_frames;
+	data["defaultCaptureOnError"] = p_options.default_capture_on_error;
+	data["defaultQueryMaxResults"] = p_options.default_query_max_results;
+	data["screenshotDirectory"] = p_options.screenshot_directory;
+	return data;
+}
+
+static String _resolve_trace_artifact_path(const String &p_path) {
+	if (p_path.is_empty()) {
+		return String();
+	}
+	if (p_path.begins_with("res://") || p_path.begins_with("user://") || p_path.begins_with("uid://")) {
+		return ProjectSettings::get_singleton()->globalize_path(p_path).simplify_path();
+	}
+	if (p_path.is_absolute_path()) {
+		return p_path.simplify_path();
+	}
+	return OS::get_singleton()->get_cwd().path_join(p_path).simplify_path();
+}
+
+static bool _should_trace_custom_feature_pre_project_setup() {
+#ifdef GDSCRIPT_LSP_CLI_ENABLED
+	return GDScriptLSPCLIRunner::is_enabled(gdscript_lsp_cli_options);
+#else
+	return false;
+#endif
+}
+
+static bool _should_trace_custom_feature_post_project_setup() {
+	const bool latest_log_touched = cli_latest_log_options.enabled || cli_latest_log_options.lines_set || cli_latest_log_options.format_set;
+	const bool perf_touched = cli_perf_options.enabled || cli_perf_options.start_frame_set || cli_perf_options.end_frame_set || cli_perf_options.top_frames_set || cli_perf_options.samples_file_set;
+	const bool ai_touched = cli_ai_agent_options.enabled || cli_ai_agent_options.enabled_set || cli_ai_agent_options.port_set || cli_ai_agent_options.max_batch_ops_set || cli_ai_agent_options.max_line_bytes_set;
+	return _should_trace_custom_feature_pre_project_setup() || latest_log_touched || perf_touched || ai_touched;
+}
+
+static void _ensure_custom_feature_tracer_initialized(const String &p_project_path, bool p_include_post_project_features) {
+	bool should_trace = _should_trace_custom_feature_pre_project_setup();
+	if (p_include_post_project_features) {
+		should_trace = should_trace || _should_trace_custom_feature_post_project_setup();
+	}
+	if (!should_trace && !CustomFeatureTracer::has_singleton()) {
+		return;
+	}
+
+	CustomFeatureTracer::StartupOptions trace_options;
+	trace_options.binary_path = OS::get_singleton()->get_executable_path();
+	trace_options.cwd = OS::get_singleton()->get_cwd();
+	trace_options.project_path = _get_custom_feature_project_path(p_project_path);
+	trace_options.process_mode = _get_custom_feature_process_mode();
+	trace_options.pid = OS::get_singleton()->get_process_id();
+
+	String trace_error;
+	if (CustomFeatureTracer::initialize_singleton(trace_options, trace_error) != OK) {
+		OS::get_singleton()->printerr("Warning: Failed to initialize custom feature tracing: %s\n", trace_error.utf8().get_data());
+	}
+}
 static MovieWriter *movie_writer = nullptr;
 static bool disable_vsync = false;
 static bool print_fps = false;
@@ -2086,6 +2209,17 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 #ifdef GDSCRIPT_LSP_CLI_ENABLED
 	GDScriptLanguageServer::cli_mode = GDScriptLSPCLIRunner::is_enabled(gdscript_lsp_cli_options);
 	GDScriptLSPCLIRunner::apply_startup_options(gdscript_lsp_cli_options, editor, cmdline_tool, wait_for_import, quiet_stdout, recovery_mode);
+	_ensure_custom_feature_tracer_initialized(project_path, false);
+	if (CustomFeatureTracer::has_singleton() && GDScriptLanguageServer::cli_mode) {
+		CustomFeatureTracer *tracer = CustomFeatureTracer::get_singleton();
+		Dictionary startup_data = _make_gdscript_lsp_trace_options_data(gdscript_lsp_cli_options);
+		startup_data["editor"] = editor;
+		startup_data["cmdlineTool"] = cmdline_tool;
+		startup_data["waitForImport"] = wait_for_import;
+		startup_data["quietStdout"] = quiet_stdout;
+		startup_data["recoveryMode"] = recovery_mode;
+		tracer->record_event(CustomFeatureTracer::FEATURE_GDSCRIPT_LSP_CLI, "startup_options", "info", String(), startup_data);
+	}
 	if (GDScriptLanguageServer::cli_mode) {
 		Engine::get_singleton()->_print_header = false;
 	}
@@ -2101,8 +2235,14 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 	if (GDScriptLSPCLIRunner::is_enabled(gdscript_lsp_cli_options)) {
 		String validation_error;
 		if (GDScriptLSPCLIRunner::validate_options(gdscript_lsp_cli_options, validation_error) != OK) {
+			if (CustomFeatureTracer::has_singleton()) {
+				CustomFeatureTracer::get_singleton()->record_error_event(CustomFeatureTracer::FEATURE_GDSCRIPT_LSP_CLI, "options_validation_failed", String(), "invalid_arguments", validation_error, _make_gdscript_lsp_trace_options_data(gdscript_lsp_cli_options));
+			}
 			OS::get_singleton()->print("Error: %s\n", validation_error.utf8().get_data());
 			goto error;
+		}
+		if (CustomFeatureTracer::has_singleton()) {
+			CustomFeatureTracer::get_singleton()->record_event(CustomFeatureTracer::FEATURE_GDSCRIPT_LSP_CLI, "options_validated", "info", String(), _make_gdscript_lsp_trace_options_data(gdscript_lsp_cli_options));
 		}
 	}
 #endif // GDSCRIPT_LSP_CLI_ENABLED
@@ -2222,19 +2362,38 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 #endif
 
 	CLIAIInputServer::apply_project_settings(cli_ai_agent_options);
+	_ensure_custom_feature_tracer_initialized(project_path, true);
 	if (CLIAIInputServer::validate_options(cli_ai_agent_options, editor, project_manager, cmdline_tool, cli_ai_agent_validation_error) != OK) {
+		if (CustomFeatureTracer::has_singleton()) {
+			CustomFeatureTracer::get_singleton()->record_error_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "options_validation_failed", String(), "invalid_arguments", cli_ai_agent_validation_error, _make_ai_agent_trace_options_data(cli_ai_agent_options));
+		}
 		OS::get_singleton()->print("Error: %s\n", cli_ai_agent_validation_error.utf8().get_data());
 		goto error;
 	}
+	if (CustomFeatureTracer::has_singleton() && CLIAIInputServer::is_enabled(cli_ai_agent_options)) {
+		CustomFeatureTracer::get_singleton()->record_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "options_validated", "info", String(), _make_ai_agent_trace_options_data(cli_ai_agent_options));
+	}
 
 	if (CLILatestLogRunner::validate_options(cli_latest_log_options, found_project, editor, project_manager, cli_latest_log_validation_error) != OK) {
+		if (CustomFeatureTracer::has_singleton()) {
+			CustomFeatureTracer::get_singleton()->record_error_event(CustomFeatureTracer::FEATURE_LATEST_LOG_CLI, "options_validation_failed", String(), "invalid_arguments", cli_latest_log_validation_error, _make_cli_latest_log_trace_options_data(cli_latest_log_options));
+		}
 		OS::get_singleton()->print("Error: %s\n", cli_latest_log_validation_error.utf8().get_data());
 		goto error;
 	}
+	if (CustomFeatureTracer::has_singleton() && CLILatestLogRunner::is_enabled(cli_latest_log_options)) {
+		CustomFeatureTracer::get_singleton()->record_event(CustomFeatureTracer::FEATURE_LATEST_LOG_CLI, "options_validated", "info", String(), _make_cli_latest_log_trace_options_data(cli_latest_log_options));
+	}
 
 	if (CLIPerformanceRecorder::validate_options(cli_perf_options, editor, project_manager, cmdline_tool, cli_perf_validation_error) != OK) {
+		if (CustomFeatureTracer::has_singleton()) {
+			CustomFeatureTracer::get_singleton()->record_error_event(CustomFeatureTracer::FEATURE_CLI_PERF_RECORDER, "options_validation_failed", String(), "invalid_arguments", cli_perf_validation_error, _make_cli_perf_trace_options_data(cli_perf_options));
+		}
 		OS::get_singleton()->print("Error: %s\n", cli_perf_validation_error.utf8().get_data());
 		goto error;
+	}
+	if (CustomFeatureTracer::has_singleton() && cli_perf_options.enabled) {
+		CustomFeatureTracer::get_singleton()->record_event(CustomFeatureTracer::FEATURE_CLI_PERF_RECORDER, "options_validated", "info", String(), _make_cli_perf_trace_options_data(cli_perf_options));
 	}
 
 #if defined(TOOLS_ENABLED) && (defined(WINDOWS_ENABLED) || defined(LINUXBSD_ENABLED))
@@ -2982,6 +3141,8 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 	return OK;
 
 error:
+
+	CustomFeatureTracer::shutdown_singleton();
 
 	text_driver = "";
 	display_driver = "";
@@ -4889,10 +5050,20 @@ int Main::start() {
 		cli_perf_recorder = memnew(CLIPerformanceRecorder(cli_perf_options));
 		String cli_perf_initialize_error;
 		if (cli_perf_recorder->initialize(cli_perf_initialize_error) != OK) {
+			if (CustomFeatureTracer::has_singleton()) {
+				Dictionary payloads;
+				if (cli_perf_options.samples_file_set) {
+					CustomFeatureTracer::get_singleton()->add_text_payload(payloads, "samplesFilePath", "text/plain", cli_perf_options.samples_file);
+				}
+				CustomFeatureTracer::get_singleton()->record_error_event(CustomFeatureTracer::FEATURE_CLI_PERF_RECORDER, "initialize_failed", String(), "initialize_failed", cli_perf_initialize_error, _make_cli_perf_trace_options_data(cli_perf_options), payloads);
+			}
 			OS::get_singleton()->print("Error: %s\n", cli_perf_initialize_error.utf8().get_data());
 			memdelete(cli_perf_recorder);
 			cli_perf_recorder = nullptr;
 			return EXIT_FAILURE;
+		}
+		if (CustomFeatureTracer::has_singleton()) {
+			CustomFeatureTracer::get_singleton()->record_event(CustomFeatureTracer::FEATURE_CLI_PERF_RECORDER, "initialized", "info", String(), _make_cli_perf_trace_options_data(cli_perf_options));
 		}
 	}
 
@@ -4900,10 +5071,16 @@ int Main::start() {
 		cli_ai_agent_server = memnew(CLIAIInputServer(cli_ai_agent_options));
 		String cli_ai_agent_initialize_error;
 		if (cli_ai_agent_server->initialize(cli_ai_agent_initialize_error) != OK) {
+			if (CustomFeatureTracer::has_singleton()) {
+				CustomFeatureTracer::get_singleton()->record_error_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "initialize_failed", String(), "initialize_failed", cli_ai_agent_initialize_error, _make_ai_agent_trace_options_data(cli_ai_agent_options));
+			}
 			OS::get_singleton()->print("Error: %s\n", cli_ai_agent_initialize_error.utf8().get_data());
 			memdelete(cli_ai_agent_server);
 			cli_ai_agent_server = nullptr;
 			return EXIT_FAILURE;
+		}
+		if (CustomFeatureTracer::has_singleton()) {
+			CustomFeatureTracer::get_singleton()->record_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "initialized", "info", String(), _make_ai_agent_trace_options_data(cli_ai_agent_options));
 		}
 	}
 
@@ -5400,21 +5577,42 @@ void Main::cleanup(bool p_force) {
 		memdelete(camera_server);
 	}
 
-	OS::get_singleton()->finalize();
-
-	finalize_display();
-
 	OS::get_singleton()->benchmark_end_measure("Shutdown", "Main::Cleanup");
 	OS::get_singleton()->benchmark_dump();
 	_err_flush_stdout();
 	const bool cli_perf_completed = cli_perf_recorder && cli_perf_recorder->is_completed();
 
 	if (cli_perf_recorder) {
-		cli_perf_recorder->print_summary_stdout(cli_perf_completed);
+		const Dictionary cli_perf_summary = cli_perf_recorder->build_summary(cli_perf_completed);
 		cli_perf_recorder->close();
+		if (CustomFeatureTracer::has_singleton()) {
+			CustomFeatureTracer *tracer = CustomFeatureTracer::get_singleton();
+			Dictionary data = _make_cli_perf_trace_options_data(cli_perf_options);
+			data["completed"] = cli_perf_completed;
+			data["capturedFrames"] = ((Dictionary)cli_perf_summary["recording"]).get("capturedFrames", 0);
+			Dictionary payloads;
+			tracer->add_json_payload(payloads, "summary", cli_perf_summary);
+			if (cli_perf_options.samples_file_set) {
+				const String samples_path = _resolve_trace_artifact_path(cli_perf_options.samples_file);
+				if (!samples_path.is_empty()) {
+					tracer->add_existing_file_payload(payloads, "samplesFile", "application/jsonl", samples_path);
+				}
+			}
+			tracer->record_event(CustomFeatureTracer::FEATURE_CLI_PERF_RECORDER, "summary", "info", String(), data, payloads);
+		}
+		const bool stdout_was_enabled = OS::get_singleton()->is_stdout_enabled();
+		OS::get_singleton()->set_stdout_enabled(true);
+		OS::get_singleton()->print("%s\n", JSON::stringify(cli_perf_summary).utf8().get_data());
+		OS::get_singleton()->set_stdout_enabled(stdout_was_enabled);
 		memdelete(cli_perf_recorder);
 		cli_perf_recorder = nullptr;
 	}
+
+	CustomFeatureTracer::shutdown_singleton();
+
+	OS::get_singleton()->finalize();
+
+	finalize_display();
 
 	if (input) {
 		memdelete(input);

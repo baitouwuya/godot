@@ -48,12 +48,17 @@
 
 #include "core/io/dir_access.h"
 #include "core/io/file_access_pack.h"
+#include "core/io/json.h"
+#include "main/custom_feature_tracer.h"
 #include "core/os/os.h"
 #include "editor/doc/editor_help.h"
 #include "editor/editor_node.h"
 
 #include "modules/gdscript/gdscript_analyzer.h"
 #include "modules/regex/regex.h"
+
+#include "tests/main/test_custom_feature_trace_helpers.h"
+#include "tests/test_utils.h"
 
 #include "thirdparty/doctest/doctest.h"
 
@@ -719,6 +724,81 @@ func f():
 		CHECK(GDScriptLSPCLIRunner::should_fail_for_severity(LSP::DiagnosticSeverity::Warning, GDScriptLSPCLIRunner::DIAGNOSTICS_FAIL_ON_WARNING));
 		CHECK(GDScriptLSPCLIRunner::should_fail_for_severity(LSP::DiagnosticSeverity::Hint, GDScriptLSPCLIRunner::DIAGNOSTICS_FAIL_ON_ANY));
 		CHECK(!GDScriptLSPCLIRunner::should_fail_for_severity(LSP::DiagnosticSeverity::Error, GDScriptLSPCLIRunner::DIAGNOSTICS_FAIL_ON_NEVER));
+	}
+
+	TEST_CASE("[cli_runner][tracing]") {
+		EditorFileSystem *efs = memnew(EditorFileSystem);
+		GDScriptLanguageProtocol *proto = initialize(root);
+		REQUIRE(proto);
+		const String trace_root = TestUtils::get_temp_path("gdscript_lsp_cli_trace_root");
+		TestCustomFeatureTraceHelpers::cleanup_directory_recursive(trace_root);
+
+		CustomFeatureTracer::StartupOptions trace_options;
+		trace_options.base_dir_override = trace_root;
+		trace_options.binary_path = "godot-dev";
+		trace_options.cwd = "E:/GitHub/godot";
+		trace_options.project_path = "E:/GitHub/godot";
+		trace_options.process_mode = "cmdline_tool";
+		trace_options.pid = 8642;
+
+		String trace_error;
+		REQUIRE_EQ(CustomFeatureTracer::initialize_singleton(trace_options, trace_error), OK);
+		REQUIRE(trace_error.is_empty());
+		const String session_dir = CustomFeatureTracer::get_singleton()->get_session_dir_for_tests();
+
+		SUBCASE("query runs emit params and result trace events") {
+			GDScriptLSPCLIRunner::Options options;
+			options.query = "document-symbol";
+			options.file = "res://lsp/local_variables.gd";
+
+			String query_error;
+			{
+				CustomFeatureTracer::ScopedEventContext trace_context(CustomFeatureTracer::FEATURE_GDSCRIPT_LSP_CLI, "lsp-query-trace");
+				const Variant query_result = GDScriptLSPCLIRunner::run_query_for_tests(options, query_error);
+				CHECK(query_error.is_empty());
+				CHECK(query_result.get_type() != Variant::NIL);
+			}
+			CustomFeatureTracer::shutdown_singleton();
+
+			const Vector<Dictionary> events = TestCustomFeatureTraceHelpers::read_events(session_dir);
+			const Dictionary params_event = TestCustomFeatureTraceHelpers::find_event(events, CustomFeatureTracer::FEATURE_GDSCRIPT_LSP_CLI, "query_params");
+			const Dictionary result_event = TestCustomFeatureTraceHelpers::find_event(events, CustomFeatureTracer::FEATURE_GDSCRIPT_LSP_CLI, "query_result");
+			REQUIRE_FALSE(params_event.is_empty());
+			REQUIRE_FALSE(result_event.is_empty());
+			TestCustomFeatureTraceHelpers::check_common_event_fields(params_event);
+			TestCustomFeatureTraceHelpers::check_common_event_fields(result_event);
+		}
+
+		SUBCASE("diagnostics runs emit diagnostics summary trace events") {
+			GDScriptLSPCLIRunner::Options options;
+			options.diagnostics = true;
+			options.diagnostics_format = GDScriptLSPCLIRunner::DIAGNOSTICS_FORMAT_SUMMARY;
+			options.diagnostics_severity = GDScriptLSPCLIRunner::DIAGNOSTICS_SEVERITY_ALL;
+			options.diagnostics_fail_on = GDScriptLSPCLIRunner::DIAGNOSTICS_FAIL_ON_NEVER;
+
+			{
+				CustomFeatureTracer::ScopedEventContext trace_context(CustomFeatureTracer::FEATURE_GDSCRIPT_LSP_CLI, "lsp-diagnostics-trace");
+				CHECK_EQ(GDScriptLSPCLIRunner::run_diagnostics_for_tests(options), GDScriptLSPCLIRunner::EXIT_OK);
+			}
+			CustomFeatureTracer::shutdown_singleton();
+
+			const Vector<Dictionary> events = TestCustomFeatureTraceHelpers::read_events(session_dir);
+			const Dictionary diagnostics_event = TestCustomFeatureTraceHelpers::find_event(events, CustomFeatureTracer::FEATURE_GDSCRIPT_LSP_CLI, "diagnostics_summary");
+			REQUIRE_FALSE(diagnostics_event.is_empty());
+			TestCustomFeatureTraceHelpers::check_common_event_fields(diagnostics_event);
+			const Dictionary payloads = diagnostics_event["payloads"];
+			REQUIRE(payloads.has("diagnostics"));
+			const Variant diagnostics_payload = JSON::parse_string(TestCustomFeatureTraceHelpers::read_payload_text(session_dir, payloads["diagnostics"]));
+			REQUIRE(diagnostics_payload.get_type() == Variant::ARRAY);
+		}
+
+		if (CustomFeatureTracer::has_singleton()) {
+			CustomFeatureTracer::shutdown_singleton();
+		}
+		TestCustomFeatureTraceHelpers::cleanup_directory_recursive(trace_root);
+		memdelete(proto);
+		memdelete(efs);
+		finish_language();
 	}
 
 	TEST_CASE("BBCode to markdown conversion") {

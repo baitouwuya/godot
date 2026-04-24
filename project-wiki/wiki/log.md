@@ -56,3 +56,10 @@ wiki 活动的追加式记录。
 - 更新 `project-wiki/wiki/index.md`，将“自定义功能”列表改为当前能力总览表。
 - 更新 `project-wiki/wiki/components/runtime-ai-agent-control.md`，补充根窗口坐标口径、`viewportPath`、`hasScreenPosition`、`invalid_query`、`invalid_wait`、`target_not_clickable`、观察缓存、截图缓存、Run Bar 参数一致性、最新验证覆盖和 `SubViewport` 相关 warning 限制。
 - 复核 `project-wiki/wiki/components/gdscript-lsp-cli.md`、`project-wiki/wiki/components/cli-performance-recorder.md`、`project-wiki/wiki/components/latest-log-cli.md` 与当前代码实现一致，本轮未改动。
+
+## [2026-04-24] docs | 定制功能埋点系统 v1
+
+- 创建 `project-wiki/wiki/components/custom-feature-tracing.md`。
+- 更新 `project-wiki/wiki/index.md`，将共享埋点系统加入当前定制功能总览。
+- 更新 `project-wiki/wiki/components/gdscript-lsp-cli.md`、`project-wiki/wiki/components/cli-performance-recorder.md`、`project-wiki/wiki/components/latest-log-cli.md`、`project-wiki/wiki/components/runtime-ai-agent-control.md`，补充自动 tracing 行为、典型事件和 sidecar 规则。
+- 文档明确当前只有写入端，没有新的读取 CLI。

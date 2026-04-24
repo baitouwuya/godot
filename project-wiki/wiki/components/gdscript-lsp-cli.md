@@ -156,6 +156,29 @@ CLI 默认使用基于 recovery-mode 语义的最小 editor 启动路径。这�
 - 诊断退出码由 `--diagnostics-fail-on` 控制。
 - recovery-mode 启动下跳过首次扫描阶段的插件初始化。
 
+## 埋点
+
+当前版本会自动接入共享定制功能埋点系统，不需要额外 CLI flag。
+
+会记录的核心事件包括：
+
+- `startup_options`
+- `options_validated` / `options_validation_failed`
+- `run_started`
+- `query_params`
+- `query_result`
+- `diagnostics_summary`
+- `query_failed`
+- `run_finished`
+
+其中：
+
+- 较大的 params / result / diagnostics 会进入 trace payload sidecar
+- 失败会带结构化 `error`
+- 这些 trace 不会改写原有 stdout JSON 契约
+
+具体落盘位置和会话目录结构见 [定制功能埋点系统](custom-feature-tracing.md)。
+
 ## 验证
 
 需要确认功能可信度时阅读这一节。
@@ -218,3 +241,4 @@ scons platform=windows target=editor dev_build=yes module_mono_enabled=no tests=
 
 - [项目 Wiki 索引](../index.md)
 - [Wiki 日志](../log.md)
+- [定制功能埋点系统](custom-feature-tracing.md)

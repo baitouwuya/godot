@@ -31,12 +31,14 @@
 #pragma once
 
 #include "main/cli_latest_log_runner.h"
+#include "main/custom_feature_tracer.h"
 
 #include "core/config/project_settings.h"
 #include "core/io/dir_access.h"
 #include "core/io/file_access.h"
 #include "core/io/json.h"
 #include "core/os/os.h"
+#include "tests/main/test_custom_feature_trace_helpers.h"
 #include "tests/test_utils.h"
 
 #include "thirdparty/doctest/doctest.h"
@@ -594,6 +596,61 @@ TEST_SUITE("[Main][CLILatestLogRunner]") {
 			CHECK_EQ(int(get_dictionary(summary, "counts")["warning"]), 1);
 		}
 		cleanup_path(temp_log);
+	}
+
+	TEST_CASE("Emits trace events for latest-log runs when the tracer is active") {
+		const String temp_log = TestUtils::get_temp_path("cli_latest_log_runner_trace.log");
+		const String trace_root = TestUtils::get_temp_path("cli_latest_log_runner_trace_root");
+		cleanup_path(temp_log);
+		TestCustomFeatureTraceHelpers::cleanup_directory_recursive(trace_root);
+		write_text_file(temp_log,
+				"ERROR: traced failure 7\n"
+				"   at: _ready (res://trace.gd:4)\n");
+
+		CustomFeatureTracer::StartupOptions trace_options;
+		trace_options.base_dir_override = trace_root;
+		trace_options.binary_path = "godot-dev";
+		trace_options.cwd = "E:/GitHub/godot";
+		trace_options.project_path = "E:/GitHub/godot";
+		trace_options.process_mode = "cmdline_tool";
+		trace_options.pid = 2468;
+
+		String trace_error;
+		REQUIRE_EQ(CustomFeatureTracer::initialize_singleton(trace_options, trace_error), OK);
+		REQUIRE(trace_error.is_empty());
+		const String session_dir = CustomFeatureTracer::get_singleton()->get_session_dir_for_tests();
+
+		CLILatestLogRunner::Options options;
+		options.enabled = true;
+		options.format = CLILatestLogRunner::FORMAT_JSON;
+		options.lines = 0;
+
+		CHECK_EQ(CLILatestLogRunner::run(options, temp_log), CLILatestLogRunner::EXIT_OK);
+		CustomFeatureTracer::shutdown_singleton();
+
+		const Vector<Dictionary> events = TestCustomFeatureTraceHelpers::read_events(session_dir);
+		REQUIRE_FALSE(events.is_empty());
+		for (int i = 0; i < events.size(); i++) {
+			TestCustomFeatureTraceHelpers::check_common_event_fields(events[i]);
+		}
+
+		const Dictionary summary_event = TestCustomFeatureTraceHelpers::find_event(events, CustomFeatureTracer::FEATURE_LATEST_LOG_CLI, "summary");
+		REQUIRE_FALSE(summary_event.is_empty());
+		const Dictionary payloads = summary_event["payloads"];
+		REQUIRE(payloads.has("summary"));
+		const Variant summary_payload = JSON::parse_string(TestCustomFeatureTraceHelpers::read_payload_text(session_dir, payloads["summary"]));
+		REQUIRE(summary_payload.get_type() == Variant::DICTIONARY);
+		const Dictionary traced_summary = summary_payload;
+		CHECK_EQ(String(traced_summary["format"]), String("json"));
+		CHECK_EQ(int(((Dictionary)traced_summary["counts"])["error"]), 1);
+
+		const Dictionary finished_event = TestCustomFeatureTraceHelpers::find_event(events, CustomFeatureTracer::FEATURE_LATEST_LOG_CLI, "run_finished");
+		REQUIRE_FALSE(finished_event.is_empty());
+		const Dictionary finished_data = finished_event["data"];
+		CHECK_EQ((int)finished_data["exitCode"], CLILatestLogRunner::EXIT_OK);
+
+		cleanup_path(temp_log);
+		TestCustomFeatureTraceHelpers::cleanup_directory_recursive(trace_root);
 	}
 }
 

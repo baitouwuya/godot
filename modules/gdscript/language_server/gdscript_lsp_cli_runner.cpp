@@ -39,6 +39,7 @@
 #include "core/config/project_settings.h"
 #include "core/io/json.h"
 #include "core/os/os.h"
+#include "main/custom_feature_tracer.h"
 
 static bool _consume_argument_value(const String &p_arg, List<String>::Element *&r_next, String &r_value, String &r_error) {
 	if (!r_next) {
@@ -170,35 +171,55 @@ static Variant _run_query(const GDScriptLSPCLIRunner::Options &p_options, String
 	GDScriptLanguageProtocol *protocol = GDScriptLanguageProtocol::get_singleton();
 	Ref<GDScriptWorkspace> workspace = protocol->get_workspace();
 	Ref<GDScriptTextDocument> text_document = protocol->get_text_document();
+	CustomFeatureTracer *tracer = CustomFeatureTracer::get_singleton();
+	const String correlation_id = CustomFeatureTracer::get_current_correlation_id();
 
 	Dictionary params;
 	if (GDScriptLSPCLIRunner::build_query_params(p_options, workspace, params, r_error) != OK) {
 		return Variant();
 	}
+	if (tracer) {
+		Dictionary data;
+		data["query"] = p_options.query;
+		Dictionary payloads;
+		tracer->add_json_payload(payloads, "params", params);
+		tracer->record_event(CustomFeatureTracer::FEATURE_GDSCRIPT_LSP_CLI, "query_params", "info", correlation_id, data, payloads);
+	}
+
+	Variant result;
 
 	if (p_options.query == "hover") {
-		return text_document->hover(params);
+		result = text_document->hover(params);
 	} else if (p_options.query == "definition") {
-		return text_document->definition(params);
+		result = text_document->definition(params);
 	} else if (p_options.query == "declaration") {
-		return text_document->declaration(params);
+		result = text_document->declaration(params);
 	} else if (p_options.query == "references") {
 		if (!params.has("context")) {
 			Dictionary context;
 			context["includeDeclaration"] = p_options.include_declaration;
 			params["context"] = context;
 		}
-		return text_document->references(params);
+		result = text_document->references(params);
 	} else if (p_options.query == "document-symbol") {
-		return text_document->documentSymbol(params);
+		result = text_document->documentSymbol(params);
 	} else if (p_options.query == "completion") {
-		return text_document->completion(params);
+		result = text_document->completion(params);
 	} else if (p_options.query == "signature-help") {
-		return text_document->signatureHelp(params);
+		result = text_document->signatureHelp(params);
+	} else {
+		r_error = "Unsupported --lsp-query operation: " + p_options.query;
+		return Variant();
 	}
 
-	r_error = "Unsupported --lsp-query operation: " + p_options.query;
-	return Variant();
+	if (tracer) {
+		Dictionary data;
+		data["query"] = p_options.query;
+		Dictionary payloads;
+		tracer->add_json_payload(payloads, "result", result);
+		tracer->record_event(CustomFeatureTracer::FEATURE_GDSCRIPT_LSP_CLI, "query_result", "info", correlation_id, data, payloads);
+	}
+	return result;
 }
 
 static Dictionary _make_diagnostic_json(const Ref<GDScriptWorkspace> &p_workspace, const String &p_path, const LSP::Diagnostic &p_diagnostic) {
@@ -212,6 +233,8 @@ static Dictionary _make_diagnostic_json(const Ref<GDScriptWorkspace> &p_workspac
 static int _run_diagnostics(const GDScriptLSPCLIRunner::Options &p_options) {
 	GDScriptLanguageProtocol *protocol = GDScriptLanguageProtocol::get_singleton();
 	Ref<GDScriptWorkspace> workspace = protocol->get_workspace();
+	CustomFeatureTracer *tracer = CustomFeatureTracer::get_singleton();
+	const String correlation_id = CustomFeatureTracer::get_current_correlation_id();
 
 	List<String> paths;
 	workspace->list_script_files("res://", paths);
@@ -234,10 +257,9 @@ static int _run_diagnostics(const GDScriptLSPCLIRunner::Options &p_options) {
 			should_fail = should_fail || GDScriptLSPCLIRunner::should_fail_for_severity(diagnostic.severity, p_options.diagnostics_fail_on);
 
 			Dictionary diagnostic_json = _make_diagnostic_json(workspace, path, diagnostic);
+			diagnostics.push_back(diagnostic_json);
 			if (p_options.diagnostics_format == GDScriptLSPCLIRunner::DIAGNOSTICS_FORMAT_JSONL) {
 				_print_json_stdout(diagnostic_json);
-			} else {
-				diagnostics.push_back(diagnostic_json);
 			}
 		}
 	}
@@ -248,6 +270,17 @@ static int _run_diagnostics(const GDScriptLSPCLIRunner::Options &p_options) {
 		_print_json_stdout(diagnostics);
 	} else if (p_options.diagnostics_format == GDScriptLSPCLIRunner::DIAGNOSTICS_FORMAT_SUMMARY) {
 		_print_json_stdout(GDScriptLSPCLIRunner::summarize_diagnostics(diagnostics));
+	}
+	if (tracer) {
+		Dictionary data;
+		data["format"] = p_options.diagnostics_format;
+		data["severity"] = p_options.diagnostics_severity;
+		data["failOn"] = p_options.diagnostics_fail_on;
+		data["exitCode"] = should_fail ? GDScriptLSPCLIRunner::EXIT_DIAGNOSTICS_FOUND : GDScriptLSPCLIRunner::EXIT_OK;
+		data["summary"] = GDScriptLSPCLIRunner::summarize_diagnostics(diagnostics);
+		Dictionary payloads;
+		tracer->add_json_payload(payloads, "diagnostics", diagnostics);
+		tracer->record_event(CustomFeatureTracer::FEATURE_GDSCRIPT_LSP_CLI, "diagnostics_summary", "info", correlation_id, data, payloads);
 	}
 
 	return should_fail ? GDScriptLSPCLIRunner::EXIT_DIAGNOSTICS_FOUND : GDScriptLSPCLIRunner::EXIT_OK;
@@ -534,9 +567,26 @@ Error GDScriptLSPCLIRunner::validate_options(const Options &p_options, String &r
 
 int GDScriptLSPCLIRunner::run(const Options &p_options) {
 	ERR_FAIL_COND_V(!is_enabled(p_options), EXIT_OK);
+	CustomFeatureTracer *tracer = CustomFeatureTracer::get_singleton();
+	const String correlation_id = tracer ? tracer->next_correlation_id(CustomFeatureTracer::FEATURE_GDSCRIPT_LSP_CLI) : String();
+	CustomFeatureTracer::ScopedEventContext trace_context(CustomFeatureTracer::FEATURE_GDSCRIPT_LSP_CLI, correlation_id);
+	if (tracer) {
+		Dictionary data;
+		data["query"] = p_options.query;
+		data["diagnostics"] = p_options.diagnostics;
+		data["file"] = p_options.file;
+		data["line"] = p_options.line;
+		data["column"] = p_options.column;
+		data["includeDeclaration"] = p_options.include_declaration;
+		data["paramsJsonProvided"] = !p_options.params_json.is_empty();
+		tracer->record_event(CustomFeatureTracer::FEATURE_GDSCRIPT_LSP_CLI, "run_started", "info", correlation_id, data);
+	}
 
 	GDScriptLanguageProtocol *protocol = GDScriptLanguageProtocol::get_singleton();
 	if (!protocol) {
+		if (tracer) {
+			tracer->record_error_event(CustomFeatureTracer::FEATURE_GDSCRIPT_LSP_CLI, "initialize_failed", correlation_id, "protocol_not_initialized", "GDScriptLanguageProtocol is not initialized.");
+		}
 		ERR_PRINT("GDScript LSP CLI failed: GDScriptLanguageProtocol is not initialized.");
 		return EXIT_INITIALIZATION_FAILED;
 	}
@@ -544,12 +594,20 @@ int GDScriptLSPCLIRunner::run(const Options &p_options) {
 	const int previous_client_id = protocol->get_current_client();
 	const int client_id = protocol->create_internal_client();
 	if (client_id == LSP_NO_CLIENT) {
+		if (tracer) {
+			tracer->record_error_event(CustomFeatureTracer::FEATURE_GDSCRIPT_LSP_CLI, "initialize_failed", correlation_id, "internal_client_failed", "Could not create an internal LSP client.");
+		}
 		ERR_PRINT("GDScript LSP CLI failed: Could not create an internal LSP client.");
 		return EXIT_INITIALIZATION_FAILED;
 	}
 
 	int exit_code = EXIT_OK;
 	if (protocol->initialize_for_current_client() != OK) {
+		if (tracer) {
+			Dictionary data;
+			data["clientId"] = client_id;
+			tracer->record_error_event(CustomFeatureTracer::FEATURE_GDSCRIPT_LSP_CLI, "initialize_failed", correlation_id, "protocol_initialize_failed", "Could not initialize the GDScript language protocol.", data);
+		}
 		ERR_PRINT("GDScript LSP CLI failed: Could not initialize the GDScript language protocol.");
 		protocol->remove_internal_client(client_id, previous_client_id);
 		return EXIT_INITIALIZATION_FAILED;
@@ -561,6 +619,11 @@ int GDScriptLSPCLIRunner::run(const Options &p_options) {
 		String error;
 		Variant result = _run_query(p_options, error);
 		if (!error.is_empty()) {
+			if (tracer) {
+				Dictionary data;
+				data["query"] = p_options.query;
+				tracer->record_error_event(CustomFeatureTracer::FEATURE_GDSCRIPT_LSP_CLI, "query_failed", correlation_id, "query_failed", error, data);
+			}
 			ERR_PRINT("GDScript LSP CLI failed: " + error);
 			exit_code = EXIT_QUERY_FAILED;
 		} else {
@@ -569,5 +632,21 @@ int GDScriptLSPCLIRunner::run(const Options &p_options) {
 	}
 
 	protocol->remove_internal_client(client_id, previous_client_id);
+	if (tracer) {
+		Dictionary data;
+		data["exitCode"] = exit_code;
+		data["clientId"] = client_id;
+		tracer->record_event(CustomFeatureTracer::FEATURE_GDSCRIPT_LSP_CLI, "run_finished", exit_code == EXIT_OK ? "info" : "warning", correlation_id, data);
+	}
 	return exit_code;
 }
+
+#ifdef TESTS_ENABLED
+Variant GDScriptLSPCLIRunner::run_query_for_tests(const Options &p_options, String &r_error) {
+	return _run_query(p_options, r_error);
+}
+
+int GDScriptLSPCLIRunner::run_diagnostics_for_tests(const Options &p_options) {
+	return _run_diagnostics(p_options);
+}
+#endif

@@ -445,6 +445,36 @@ runtime perf 仍复用现有 `CLIPerformanceRecorder`：
 
 两者可以共存。
 
+## 埋点
+
+当前版本会自动接入共享定制功能埋点系统，不需要额外 CLI flag。
+
+会记录的核心事件包括：
+
+- `server_started` / `server_shutdown`
+- `client_connected` / `client_disconnected`
+- `request_received`
+- `response_sent`
+- `wait_queued`
+- `wait_finished`
+- `wait_failed`
+- `batch_started`
+- `batch_checkpoint`
+- `batch_finished`
+- `batch_step_failed`
+- `batch_cancelled`
+- `runtime_perf_started`
+- `runtime_perf_summary`
+
+当前行为要点：
+
+- 请求带 `id` 时，trace 会优先复用该 `id` 作为 `correlationId`
+- 大型 request / response / scene 查询结果 / perf summary 会自动走 payload sidecar
+- 引擎 `ERROR` / `WARNING` / `SCRIPT ERROR` / `SHADER ERROR` 也会进入同一会话 trace
+- wait、batch 和 deferred `perf_stop` 路径也会继续保留原始关联 ID，不只覆盖同步请求阶段
+
+具体落盘位置和会话目录结构见 [定制功能埋点系统](custom-feature-tracing.md)。
+
 ## 验证
 
 自动化：
@@ -512,4 +542,5 @@ scons platform=windows target=editor dev_build=yes module_mono_enabled=no tests=
 ## 相关链接
 
 - [CLI 性能录制器](cli-performance-recorder.md)
+- [定制功能埋点系统](custom-feature-tracing.md)
 - [自定义功能分支流程](../operations/custom-feature-branching.md)

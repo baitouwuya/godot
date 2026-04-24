@@ -31,11 +31,13 @@
 #pragma once
 
 #include "main/cli_ai_input_server.h"
+#include "main/custom_feature_tracer.h"
 
 #ifdef TOOLS_ENABLED
 #include "editor/run/editor_run_bar.h"
 #endif
 
+#include "core/io/json.h"
 #include "scene/3d/camera_3d.h"
 #include "scene/3d/node_3d.h"
 #include "scene/gui/button.h"
@@ -44,6 +46,9 @@
 #include "scene/main/scene_tree.h"
 #include "scene/main/viewport.h"
 #include "scene/main/window.h"
+
+#include "tests/main/test_custom_feature_trace_helpers.h"
+#include "tests/test_utils.h"
 
 #include "thirdparty/doctest/doctest.h"
 
@@ -619,6 +624,97 @@ TEST_SUITE("[Main][CLIAIInputServer][SceneTree]") {
 		const bool second_image_ok = server.test_get_root_image(second_image);
 		CHECK_EQ(first_image_ok, second_image_ok);
 		CHECK_EQ(server.test_root_image_fetch_count(), 1);
+	}
+
+	TEST_CASE("[SceneTree] Emits trace events for request, wait and runtime perf flows") {
+		TestSceneContext scene;
+		CLIAIInputServer server{ CLIAIInputServer::Options() };
+		const String trace_root = TestUtils::get_temp_path("cli_ai_input_server_trace_root");
+		TestCustomFeatureTraceHelpers::cleanup_directory_recursive(trace_root);
+
+		CustomFeatureTracer::StartupOptions trace_options;
+		trace_options.base_dir_override = trace_root;
+		trace_options.binary_path = "godot-dev";
+		trace_options.cwd = "E:/GitHub/godot";
+		trace_options.project_path = "E:/GitHub/godot";
+		trace_options.process_mode = "cli_project_run";
+		trace_options.pid = 1357;
+
+		String trace_error;
+		REQUIRE_EQ(CustomFeatureTracer::initialize_singleton(trace_options, trace_error), OK);
+		REQUIRE(trace_error.is_empty());
+		const String session_dir = CustomFeatureTracer::get_singleton()->get_session_dir_for_tests();
+
+		server.test_process_line("{\"id\":1,\"cmd\":\"get_status\"}");
+
+		{
+			CustomFeatureTracer::ScopedEventContext trace_context(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "wait-trace");
+			Dictionary wait_request;
+			wait_request["cmd"] = "wait_property";
+			Dictionary selector;
+			selector["name"] = "PlayButton";
+			wait_request["selector"] = selector;
+			wait_request["property"] = "text";
+			wait_request["equals"] = "Play";
+			bool deferred = false;
+			Dictionary wait_response = server.test_cmd_wait_property(wait_request, false, deferred);
+			CHECK(wait_response.is_empty());
+			CHECK(deferred);
+			server.test_process_pending_waits();
+		}
+
+		{
+			CustomFeatureTracer::ScopedEventContext trace_context(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "perf-trace");
+			Dictionary perf_start_request;
+			perf_start_request["cmd"] = "perf_start";
+			perf_start_request["name"] = "trace-session";
+			const Dictionary perf_start_response = server.test_cmd_perf_start(perf_start_request);
+			REQUIRE((bool)perf_start_response["ok"]);
+
+			bool deferred = false;
+			Dictionary perf_stop_request;
+			perf_stop_request["cmd"] = "perf_stop";
+			perf_stop_request["id"] = 5;
+			const Dictionary perf_stop_response = server.test_cmd_perf_stop(perf_stop_request, false, deferred);
+			CHECK(perf_stop_response.is_empty());
+			CHECK(deferred);
+			server.record_frame(0, 16000, 4000, 3000, 2000, 0.016);
+		}
+
+		server.shutdown();
+		CustomFeatureTracer::shutdown_singleton();
+
+		const Vector<Dictionary> events = TestCustomFeatureTraceHelpers::read_events(session_dir);
+		REQUIRE_FALSE(events.is_empty());
+		for (int i = 0; i < events.size(); i++) {
+			TestCustomFeatureTraceHelpers::check_common_event_fields(events[i]);
+		}
+
+		const Dictionary request_event = TestCustomFeatureTraceHelpers::find_event(events, CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "request_received");
+		REQUIRE_FALSE(request_event.is_empty());
+		CHECK_EQ(String(((Dictionary)request_event["data"])["cmd"]), String("get_status"));
+
+		const Dictionary wait_event = TestCustomFeatureTraceHelpers::find_event(events, CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "wait_finished");
+		REQUIRE_FALSE(wait_event.is_empty());
+		CHECK_EQ(String(((Dictionary)wait_event["data"])["cmd"]), String("wait_property"));
+
+		const Dictionary perf_start_event = TestCustomFeatureTraceHelpers::find_event(events, CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "runtime_perf_started");
+		REQUIRE_FALSE(perf_start_event.is_empty());
+
+		const Dictionary perf_summary_event = TestCustomFeatureTraceHelpers::find_event(events, CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "runtime_perf_summary");
+		REQUIRE_FALSE(perf_summary_event.is_empty());
+		const Dictionary perf_payloads = perf_summary_event["payloads"];
+		REQUIRE(perf_payloads.has("response"));
+		const Variant perf_response_payload = JSON::parse_string(TestCustomFeatureTraceHelpers::read_payload_text(session_dir, perf_payloads["response"]));
+		REQUIRE(perf_response_payload.get_type() == Variant::DICTIONARY);
+		const Dictionary perf_response = perf_response_payload;
+		REQUIRE((bool)perf_response["ok"]);
+		const Dictionary perf_result = perf_response["result"];
+		const Dictionary recording = perf_result["recording"];
+		CHECK((bool)recording["completed"]);
+		CHECK_EQ((int64_t)recording["capturedFrames"], 1);
+
+		TestCustomFeatureTraceHelpers::cleanup_directory_recursive(trace_root);
 	}
 
 #ifdef TOOLS_ENABLED

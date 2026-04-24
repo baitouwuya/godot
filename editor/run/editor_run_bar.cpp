@@ -232,6 +232,27 @@ Vector<String> EditorRunBar::_get_xr_mode_play_args(RunXRModeMenuItem p_menu_ite
 	return play_args;
 }
 
+void EditorRunBar::_append_ai_agent_control_run_args(Vector<String> &r_args, bool p_enabled, int p_port, int p_max_batch_ops, int p_max_line_bytes) {
+	if (!p_enabled) {
+		return;
+	}
+	r_args.push_back("--ai-agent-control");
+	r_args.push_back("--ai-agent-port");
+	r_args.push_back(itos(p_port));
+	r_args.push_back("--ai-agent-max-ops");
+	r_args.push_back(itos(p_max_batch_ops));
+	r_args.push_back("--ai-agent-max-line-bytes");
+	r_args.push_back(itos(p_max_line_bytes));
+}
+
+#ifdef TESTS_ENABLED
+Vector<String> EditorRunBar::test_append_ai_agent_control_run_args(const Vector<String> &p_args, bool p_enabled, int p_port, int p_max_batch_ops, int p_max_line_bytes) {
+	Vector<String> args = p_args;
+	_append_ai_agent_control_run_args(args, p_enabled, p_port, p_max_batch_ops, p_max_line_bytes);
+	return args;
+}
+#endif
+
 void EditorRunBar::_quick_run_selected(const String &p_file_path, int p_menu_item) {
 	play_custom_scene(p_file_path, _get_xr_mode_play_args(static_cast<RunXRModeMenuItem>(p_menu_item)));
 }
@@ -369,16 +390,13 @@ void EditorRunBar::_run_scene(const String &p_scene_path, const Vector<String> &
 	}
 
 	Vector<String> args = p_run_args;
+	_append_ai_agent_control_run_args(
+			args,
+			is_ai_agent_control_effective_enabled(),
+			(int)GLOBAL_GET("editor/ai_agent_control/port"),
+			(int)GLOBAL_GET("editor/ai_agent_control/max_batch_ops"),
+			(int)GLOBAL_GET("editor/ai_agent_control/max_line_bytes"));
 	EditorNode::get_singleton()->call_run_scene(run_filename, args);
-	if (is_ai_agent_control_effective_enabled()) {
-		args.push_back("--ai-agent-control");
-		args.push_back("--ai-agent-port");
-		args.push_back(itos((int)GLOBAL_GET("editor/ai_agent_control/port")));
-		args.push_back("--ai-agent-max-ops");
-		args.push_back(itos((int)GLOBAL_GET("editor/ai_agent_control/max_batch_ops")));
-		args.push_back("--ai-agent-max-line-bytes");
-		args.push_back(itos((int)GLOBAL_GET("editor/ai_agent_control/max_line_bytes")));
-	}
 
 	// Use the existing URI, in case it is overridden by the CLI.
 	String uri = EditorDebuggerNode::get_singleton()->get_server_uri();

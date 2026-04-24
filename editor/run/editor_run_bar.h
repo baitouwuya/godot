@@ -118,6 +118,7 @@ class EditorRunBar : public MarginContainer {
 
 private:
 	static Vector<String> _get_xr_mode_play_args(RunXRModeMenuItem p_menu_item);
+	static void _append_ai_agent_control_run_args(Vector<String> &r_args, bool p_enabled, int p_port, int p_max_batch_ops, int p_max_line_bytes);
 
 protected:
 	void _notification(int p_what);
@@ -154,6 +155,10 @@ public:
 	Button *get_pause_button() { return pause_button; }
 
 	HBoxContainer *get_buttons_container();
+
+#ifdef TESTS_ENABLED
+	static Vector<String> test_append_ai_agent_control_run_args(const Vector<String> &p_args, bool p_enabled, int p_port, int p_max_batch_ops, int p_max_line_bytes);
+#endif
 
 	EditorRunBar();
 };

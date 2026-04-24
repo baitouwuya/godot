@@ -44,3 +44,9 @@ wiki 活动的追加式记录。
 - 更新 `project-wiki/wiki/components/latest-log-cli.md`。
 - 补充 `--latest-log-format <text|json|both|raw>`、默认增强文本摘要、`raw` 兼容模式、问题块识别、保守模板化、数值压缩、相邻重复折叠、栈摘要与 JSON 契约。
 - 更新 `project-wiki/wiki/index.md`，将“最新日志 CLI”描述同步到增强版语义。
+
+## [2026-04-24] docs | Runtime AI Agent Control 语义观察与条件同步增强
+
+- 重写 `project-wiki/wiki/components/runtime-ai-agent-control.md`。
+- 补充语义观察层、结构化 selector、条件等待原语、高层目标动作、`expect`、`batch_status`、`cancel_batch`、`get_last_error_bundle`、失败证据和新的项目设置默认值。
+- 更新 `project-wiki/wiki/index.md`，将 Runtime AI Agent Control 描述同步到“语义观察 + 条件等待 + 高层动作”版本。

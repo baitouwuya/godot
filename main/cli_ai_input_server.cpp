@@ -41,13 +41,41 @@
 #include "core/math/math_funcs.h"
 #include "core/os/keyboard.h"
 #include "core/os/os.h"
+#include "scene/3d/camera_3d.h"
 #include "scene/3d/node_3d.h"
+#include "scene/3d/visual_instance_3d.h"
+#include "scene/gui/control.h"
 #include "scene/main/canvas_item.h"
 #include "scene/main/scene_tree.h"
 #include "scene/main/viewport.h"
 #include "scene/main/window.h"
+#include "servers/rendering/rendering_server.h"
 
 static const int MAX_OPS_PER_FRAME = 128;
+
+static Variant _get_object_property_or_nil(Object *p_object, const StringName &p_property, bool &r_valid) {
+	r_valid = false;
+	if (!p_object) {
+		return Variant();
+	}
+	return p_object->get(p_property, &r_valid);
+}
+
+static Dictionary _make_point_rect(const Vector2 &p_point, float p_extent = 4.0f) {
+	Dictionary rect;
+	rect["x"] = p_point.x - p_extent * 0.5f;
+	rect["y"] = p_point.y - p_extent * 0.5f;
+	rect["width"] = p_extent;
+	rect["height"] = p_extent;
+	return rect;
+}
+
+static SceneTree *_get_runtime_scene_tree() {
+	if (SceneTree::get_singleton()) {
+		return SceneTree::get_singleton();
+	}
+	return OS::get_singleton() ? Object::cast_to<SceneTree>(OS::get_singleton()->get_main_loop()) : nullptr;
+}
 
 void CLIAIInputServer::register_project_settings() {
 	GLOBAL_DEF_BASIC("editor/ai_agent_control/enabled", false);
@@ -56,6 +84,10 @@ void CLIAIInputServer::register_project_settings() {
 	GLOBAL_DEF_BASIC(PropertyInfo(Variant::INT, "editor/ai_agent_control/max_line_bytes", PROPERTY_HINT_RANGE, "256,16777216,1"), 1048576);
 	GLOBAL_DEF_BASIC(PropertyInfo(Variant::INT, "editor/ai_agent_control/default_perf_top_frames", PROPERTY_HINT_RANGE, "0,1024,1"), 10);
 	GLOBAL_DEF_BASIC(PropertyInfo(Variant::INT, "editor/ai_agent_control/default_scene_tree_max_depth", PROPERTY_HINT_RANGE, "0,128,1"), 32);
+	GLOBAL_DEF_BASIC(PropertyInfo(Variant::INT, "editor/ai_agent_control/default_wait_timeout_frames", PROPERTY_HINT_RANGE, "1,65536,1"), 240);
+	GLOBAL_DEF_BASIC(PropertyInfo(Variant::INT, "editor/ai_agent_control/default_poll_every_frames", PROPERTY_HINT_RANGE, "1,1024,1"), 1);
+	GLOBAL_DEF_BASIC("editor/ai_agent_control/default_capture_on_error", false);
+	GLOBAL_DEF_BASIC(PropertyInfo(Variant::INT, "editor/ai_agent_control/default_query_max_results", PROPERTY_HINT_RANGE, "1,4096,1"), 128);
 	GLOBAL_DEF_BASIC(PropertyInfo(Variant::STRING, "editor/ai_agent_control/screenshot_directory", PROPERTY_HINT_GLOBAL_DIR), "");
 }
 
@@ -138,6 +170,10 @@ void CLIAIInputServer::apply_project_settings(Options &r_options) {
 
 	r_options.default_perf_top_frames = GLOBAL_GET("editor/ai_agent_control/default_perf_top_frames");
 	r_options.default_scene_tree_max_depth = GLOBAL_GET("editor/ai_agent_control/default_scene_tree_max_depth");
+	r_options.default_wait_timeout_frames = GLOBAL_GET("editor/ai_agent_control/default_wait_timeout_frames");
+	r_options.default_poll_every_frames = GLOBAL_GET("editor/ai_agent_control/default_poll_every_frames");
+	r_options.default_capture_on_error = GLOBAL_GET("editor/ai_agent_control/default_capture_on_error");
+	r_options.default_query_max_results = GLOBAL_GET("editor/ai_agent_control/default_query_max_results");
 	r_options.screenshot_directory = GLOBAL_GET("editor/ai_agent_control/screenshot_directory");
 }
 
@@ -162,6 +198,18 @@ Error CLIAIInputServer::validate_options(const Options &p_options, bool p_editor
 	}
 	if (p_options.default_scene_tree_max_depth < 0 || p_options.default_scene_tree_max_depth > 128) {
 		r_error = "editor/ai_agent_control/default_scene_tree_max_depth must be between 0 and 128.";
+		return ERR_INVALID_PARAMETER;
+	}
+	if (p_options.default_wait_timeout_frames < 1) {
+		r_error = "editor/ai_agent_control/default_wait_timeout_frames must be greater than or equal to 1.";
+		return ERR_INVALID_PARAMETER;
+	}
+	if (p_options.default_poll_every_frames < 1) {
+		r_error = "editor/ai_agent_control/default_poll_every_frames must be greater than or equal to 1.";
+		return ERR_INVALID_PARAMETER;
+	}
+	if (p_options.default_query_max_results < 1) {
+		r_error = "editor/ai_agent_control/default_query_max_results must be greater than or equal to 1.";
 		return ERR_INVALID_PARAMETER;
 	}
 
@@ -194,6 +242,14 @@ bool CLIAIInputServer::_variant_to_bool(const Variant &p_value, bool &r_value) {
 		return false;
 	}
 	r_value = (bool)p_value;
+	return true;
+}
+
+bool CLIAIInputServer::_variant_to_string(const Variant &p_value, String &r_value) {
+	if (p_value.get_type() != Variant::STRING && p_value.get_type() != Variant::STRING_NAME) {
+		return false;
+	}
+	r_value = String(p_value);
 	return true;
 }
 
@@ -233,6 +289,18 @@ bool CLIAIInputServer::_get_bool(const Dictionary &p_dict, const String &p_key, 
 	return true;
 }
 
+bool CLIAIInputServer::_get_string(const Dictionary &p_dict, const String &p_key, const String &p_default, String &r_value, String &r_error) {
+	if (!p_dict.has(p_key)) {
+		r_value = p_default;
+		return true;
+	}
+	if (!_variant_to_string(p_dict[p_key], r_value)) {
+		r_error = p_key + " must be a string.";
+		return false;
+	}
+	return true;
+}
+
 bool CLIAIInputServer::_get_vector2_from_array(const Variant &p_value, Vector2 &r_value) {
 	if (p_value.get_type() != Variant::ARRAY) {
 		return false;
@@ -259,6 +327,64 @@ Dictionary CLIAIInputServer::_make_error_payload(const String &p_code, const Str
 
 uint64_t CLIAIInputServer::_current_frame() {
 	return Engine::get_singleton() ? Engine::get_singleton()->get_process_frames() : 0;
+}
+
+Array CLIAIInputServer::_vector2_to_array(const Vector2 &p_value) {
+	Array value;
+	value.push_back(p_value.x);
+	value.push_back(p_value.y);
+	return value;
+}
+
+Array CLIAIInputServer::_vector3_to_array(const Vector3 &p_value) {
+	Array value;
+	value.push_back(p_value.x);
+	value.push_back(p_value.y);
+	value.push_back(p_value.z);
+	return value;
+}
+
+Dictionary CLIAIInputServer::_rect2_to_dictionary(const Rect2 &p_value) {
+	Dictionary rect;
+	rect["x"] = p_value.position.x;
+	rect["y"] = p_value.position.y;
+	rect["width"] = p_value.size.x;
+	rect["height"] = p_value.size.y;
+	return rect;
+}
+
+bool CLIAIInputServer::_dictionary_to_rect2(const Dictionary &p_rect, Rect2 &r_rect, String &r_error) {
+	double x = 0.0;
+	double y = 0.0;
+	double width = 0.0;
+	double height = 0.0;
+	if (!_get_double(p_rect, "x", 0.0, x, r_error) || !_get_double(p_rect, "y", 0.0, y, r_error) || !_get_double(p_rect, "width", 0.0, width, r_error) || !_get_double(p_rect, "height", 0.0, height, r_error)) {
+		return false;
+	}
+	r_rect = Rect2(x, y, width, height);
+	return true;
+}
+
+Rect2 CLIAIInputServer::_transform_rect(const Transform2D &p_transform, const Rect2 &p_rect) {
+	Rect2 rect(p_transform.xform(p_rect.position), Vector2());
+	rect.expand_to(p_transform.xform(p_rect.position + Vector2(p_rect.size.x, 0.0)));
+	rect.expand_to(p_transform.xform(p_rect.position + p_rect.size));
+	rect.expand_to(p_transform.xform(p_rect.position + Vector2(0.0, p_rect.size.y)));
+	rect.size = rect.size.abs();
+	return rect;
+}
+
+Vector2 CLIAIInputServer::_rect_center(const Dictionary &p_rect) {
+	double x = 0.0;
+	double y = 0.0;
+	double width = 0.0;
+	double height = 0.0;
+	String unused_error;
+	_get_double(p_rect, "x", 0.0, x, unused_error);
+	_get_double(p_rect, "y", 0.0, y, unused_error);
+	_get_double(p_rect, "width", 0.0, width, unused_error);
+	_get_double(p_rect, "height", 0.0, height, unused_error);
+	return Vector2(x + width * 0.5, y + height * 0.5);
 }
 
 bool CLIAIInputServer::parse_mouse_button(const Variant &p_value, MouseButton &r_button) {
@@ -355,6 +481,14 @@ void CLIAIInputServer::_disconnect_client(bool p_abort_state) {
 	line_buffer.clear();
 	pending_client_bytes.clear();
 	dropping_oversized_line = false;
+	last_resolved_target.clear();
+	last_error_bundle.clear();
+	checkpoint_history.clear();
+	observation_cache = ObservationFrameCache();
+	root_image_cache_frame = UINT64_MAX;
+	root_image_cache_populated = false;
+	root_image_cache_available = false;
+	root_image_cache.unref();
 }
 
 void CLIAIInputServer::_accept_new_clients() {
@@ -445,7 +579,9 @@ void CLIAIInputServer::_poll_client_lines(int &r_budget) {
 		}
 
 		if (line_buffer.size() + 1 > options.max_line_bytes) {
-			_send_response(_make_error_response(Variant(), false, "line_too_large", "JSONL request exceeded max_line_bytes."));
+			const Dictionary response = _make_error_response(Variant(), false, "line_too_large", "JSONL request exceeded max_line_bytes.");
+			_record_last_error_bundle(response);
+			_send_response(response);
 			line_buffer.clear();
 			dropping_oversized_line = true;
 			continue;
@@ -477,25 +613,1054 @@ Dictionary CLIAIInputServer::_make_error_response(const Variant &p_id, bool p_ha
 	return response;
 }
 
+bool CLIAIInputServer::_should_capture_on_error(const Dictionary &p_request) const {
+	if (!p_request.has("captureOnError")) {
+		return options.default_capture_on_error;
+	}
+	bool capture = false;
+	return _variant_to_bool(p_request["captureOnError"], capture) ? capture : options.default_capture_on_error;
+}
+
+void CLIAIInputServer::_decorate_error_response(const Dictionary &p_request, Dictionary &r_response, const Dictionary &p_last_resolved_target) const {
+	if (!p_last_resolved_target.is_empty()) {
+		r_response["lastResolvedTarget"] = p_last_resolved_target;
+	}
+	if (!_should_capture_on_error(p_request)) {
+		return;
+	}
+
+	Dictionary screenshot_result;
+	String screenshot_error;
+	if (_capture_screenshot_result(p_request, screenshot_result, screenshot_error) == OK && screenshot_result.has("path")) {
+		r_response["screenshotPath"] = screenshot_result["path"];
+	}
+	r_response["sceneDigest"] = _build_scene_digest();
+}
+
+Dictionary CLIAIInputServer::_make_contextual_error_response(const Dictionary &p_request, const Variant &p_id, bool p_has_id, const String &p_code, const String &p_message, const Dictionary &p_last_resolved_target) const {
+	Dictionary response = _make_error_response(p_id, p_has_id, p_code, p_message);
+	_decorate_error_response(p_request, response, p_last_resolved_target);
+	return response;
+}
+
+void CLIAIInputServer::_record_last_error_bundle(const Dictionary &p_response) {
+	if (!p_response.has("ok") || (bool)p_response["ok"]) {
+		return;
+	}
+	last_error_bundle = p_response;
+}
+
+bool CLIAIInputServer::_extract_selector_spec(const Dictionary &p_request, const String &p_key, const String &p_label, SelectorSpec &r_spec, String &r_error) const {
+	r_error = String();
+	if (!p_key.is_empty()) {
+		if (!p_request.has(p_key)) {
+			r_spec = SelectorSpec();
+			return true;
+		}
+		if (p_request[p_key].get_type() != Variant::DICTIONARY) {
+			r_error = p_key + " must be an object.";
+			return false;
+		}
+		return _parse_selector_spec(p_request[p_key], p_label, r_spec, r_error);
+	}
+
+	Dictionary selector;
+	static const char *keys[] = { "path", "name", "type", "group", "text", "is3D", "visible", "screenRect", "nearestToScreenPoint" };
+	for (uint32_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+		const String key = keys[i];
+		if (p_request.has(key)) {
+			selector[key] = p_request[key];
+		}
+	}
+	return _parse_selector_spec(selector, p_label, r_spec, r_error);
+}
+
+bool CLIAIInputServer::_parse_selector_spec(const Dictionary &p_dict, const String &p_label, SelectorSpec &r_spec, String &r_error) const {
+	r_spec = SelectorSpec();
+	r_error = String();
+	if (p_dict.is_empty()) {
+		return true;
+	}
+
+	static const char *allowed_keys[] = { "path", "name", "type", "group", "text", "is3D", "visible", "screenRect", "nearestToScreenPoint" };
+	HashSet<String> allowed;
+	for (uint32_t i = 0; i < sizeof(allowed_keys) / sizeof(allowed_keys[0]); i++) {
+		allowed.insert(String(allowed_keys[i]));
+	}
+
+	const Array keys = p_dict.keys();
+	for (int i = 0; i < keys.size(); i++) {
+		if (keys[i].get_type() != Variant::STRING && keys[i].get_type() != Variant::STRING_NAME) {
+			r_error = p_label + " keys must be strings.";
+			return false;
+		}
+		const String key = String(keys[i]);
+		if (!allowed.has(key)) {
+			r_error = vformat("Unsupported %s field: %s.", p_label, key);
+			return false;
+		}
+	}
+
+	if (!_get_string(p_dict, "path", String(), r_spec.path, r_error) ||
+			!_get_string(p_dict, "name", String(), r_spec.name, r_error) ||
+			!_get_string(p_dict, "type", String(), r_spec.type, r_error) ||
+			!_get_string(p_dict, "group", String(), r_spec.group, r_error) ||
+			!_get_string(p_dict, "text", String(), r_spec.text, r_error)) {
+		return false;
+	}
+
+	if (p_dict.has("is3D")) {
+		r_spec.has_is_3d = true;
+		if (!_variant_to_bool(p_dict["is3D"], r_spec.is_3d)) {
+			r_error = "is3D must be a boolean.";
+			return false;
+		}
+	}
+	if (p_dict.has("visible")) {
+		r_spec.has_visible = true;
+		if (!_variant_to_bool(p_dict["visible"], r_spec.visible)) {
+			r_error = "visible must be a boolean.";
+			return false;
+		}
+	}
+	if (p_dict.has("screenRect")) {
+		if (p_dict["screenRect"].get_type() != Variant::DICTIONARY) {
+			r_error = "screenRect must be an object.";
+			return false;
+		}
+		r_spec.has_screen_rect = true;
+		if (!_dictionary_to_rect2(p_dict["screenRect"], r_spec.screen_rect, r_error)) {
+			r_error = "screenRect." + r_error;
+			return false;
+		}
+	}
+	if (p_dict.has("nearestToScreenPoint")) {
+		r_spec.has_nearest_to_screen_point = true;
+		if (!_get_vector2_from_array(p_dict["nearestToScreenPoint"], r_spec.nearest_to_screen_point)) {
+			r_error = "nearestToScreenPoint must be a [x, y] array.";
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool CLIAIInputServer::_resolve_query_limit(const Dictionary &p_request, int &r_max_results, String &r_error) const {
+	r_max_results = options.default_query_max_results;
+	if (!_get_int(p_request, "maxResults", r_max_results, r_max_results, r_error)) {
+		return false;
+	}
+	if (r_max_results < 1) {
+		r_error = "maxResults must be greater than or equal to 1.";
+		return false;
+	}
+	return true;
+}
+
+bool CLIAIInputServer::_snapshot_has_screen_position(const Dictionary &p_snapshot) const {
+	if (p_snapshot.has("hasScreenPosition") && p_snapshot["hasScreenPosition"].get_type() == Variant::BOOL) {
+		return (bool)p_snapshot["hasScreenPosition"];
+	}
+	return (p_snapshot.has("screenRect") && p_snapshot["screenRect"].get_type() == Variant::DICTIONARY) ||
+			(p_snapshot.has("screenPoint") && p_snapshot["screenPoint"].get_type() == Variant::ARRAY);
+}
+
+Vector2 CLIAIInputServer::_resolve_target_screen_position(const Dictionary &p_snapshot) const {
+	if (p_snapshot.has("screenRect") && p_snapshot["screenRect"].get_type() == Variant::DICTIONARY) {
+		return _rect_center(p_snapshot["screenRect"]);
+	}
+	Vector2 point;
+	if (p_snapshot.has("screenPoint") && _get_vector2_from_array(p_snapshot["screenPoint"], point)) {
+		return point;
+	}
+	return Vector2();
+}
+
+bool CLIAIInputServer::_is_interactable_snapshot(const Dictionary &p_snapshot) const {
+	if (!p_snapshot.has("visible") || !(bool)p_snapshot["visible"]) {
+		return false;
+	}
+	if (p_snapshot.has("is3D") && (bool)p_snapshot["is3D"]) {
+		return _snapshot_has_screen_position(p_snapshot);
+	}
+	if (p_snapshot.has("disabled") && p_snapshot["disabled"].get_type() == Variant::BOOL && (bool)p_snapshot["disabled"]) {
+		return false;
+	}
+	return _snapshot_has_screen_position(p_snapshot);
+}
+
+Camera3D *CLIAIInputServer::_get_effective_camera(Viewport *p_viewport) {
+	if (!p_viewport) {
+		return nullptr;
+	}
+	return p_viewport->is_camera_3d_override_enabled() ? p_viewport->get_overridden_camera_3d() : p_viewport->get_camera_3d();
+}
+
+bool CLIAIInputServer::_get_viewport_to_root_transform(Viewport *p_viewport, Viewport *p_root_viewport, Transform2D &r_transform) const {
+	if (!p_viewport || !p_root_viewport) {
+		return false;
+	}
+	r_transform = p_root_viewport->get_screen_transform().affine_inverse() * p_viewport->get_screen_transform();
+	return true;
+}
+
+bool CLIAIInputServer::_matches_selector_spec(const Dictionary &p_snapshot, const SelectorSpec &p_spec) const {
+	if (p_spec.is_empty()) {
+		return true;
+	}
+	if (!p_spec.path.is_empty() && (!p_snapshot.has("nodePath") || String(p_snapshot["nodePath"]) != p_spec.path)) {
+		return false;
+	}
+	if (!p_spec.name.is_empty() && (!p_snapshot.has("name") || String(p_snapshot["name"]) != p_spec.name)) {
+		return false;
+	}
+	if (!p_spec.type.is_empty() && (!p_snapshot.has("type") || String(p_snapshot["type"]) != p_spec.type)) {
+		return false;
+	}
+	if (!p_spec.text.is_empty() && (!p_snapshot.has("text") || p_snapshot["text"].get_type() == Variant::NIL || String(p_snapshot["text"]) != p_spec.text)) {
+		return false;
+	}
+	if (!p_spec.group.is_empty()) {
+		if (!p_snapshot.has("groups") || p_snapshot["groups"].get_type() != Variant::ARRAY) {
+			return false;
+		}
+		const Array groups = p_snapshot["groups"];
+		bool found = false;
+		for (int i = 0; i < groups.size(); i++) {
+			if (String(groups[i]) == p_spec.group) {
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			return false;
+		}
+	}
+	if (p_spec.has_is_3d && (!p_snapshot.has("is3D") || (bool)p_snapshot["is3D"] != p_spec.is_3d)) {
+		return false;
+	}
+	if (p_spec.has_visible && (!p_snapshot.has("visible") || (bool)p_snapshot["visible"] != p_spec.visible)) {
+		return false;
+	}
+	if (p_spec.has_screen_rect) {
+		if (!p_snapshot.has("screenRect") || p_snapshot["screenRect"].get_type() != Variant::DICTIONARY) {
+			return false;
+		}
+		Rect2 snapshot_rect;
+		String error;
+		if (!_dictionary_to_rect2(p_snapshot["screenRect"], snapshot_rect, error)) {
+			return false;
+		}
+		if (!p_spec.screen_rect.intersects(snapshot_rect)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+Dictionary CLIAIInputServer::_build_target_snapshot(Node *p_node, Viewport *p_root_viewport) const {
+	Dictionary snapshot;
+	snapshot["nodePath"] = p_node ? String(p_node->get_path()) : String();
+	snapshot["name"] = p_node ? String(p_node->get_name()) : String();
+	snapshot["type"] = p_node ? String(p_node->get_class()) : String();
+	snapshot["groups"] = Array();
+	snapshot["visible"] = true;
+	snapshot["disabled"] = Variant();
+	snapshot["is3D"] = false;
+	snapshot["screenRect"] = Variant();
+	snapshot["screenPoint"] = Variant();
+	snapshot["hasScreenPosition"] = false;
+	snapshot["viewportPath"] = String();
+	snapshot["worldPosition"] = Variant();
+	snapshot["text"] = Variant();
+	snapshot["value"] = Variant();
+	snapshot["selected"] = Variant();
+	snapshot["childCount"] = p_node ? p_node->get_child_count() : 0;
+
+	if (!p_node) {
+		return snapshot;
+	}
+
+	Viewport *node_viewport = p_node->get_viewport();
+	snapshot["viewportPath"] = node_viewport ? String(node_viewport->get_path()) : String();
+
+	Array groups;
+	List<Node::GroupInfo> group_list;
+	p_node->get_groups(&group_list);
+	for (const Node::GroupInfo &group_info : group_list) {
+		const String group_name = String(group_info.name);
+		if (!group_name.begins_with("_")) {
+			groups.push_back(group_name);
+		}
+	}
+	snapshot["groups"] = groups;
+
+	bool property_valid = false;
+	Variant value = _get_object_property_or_nil(p_node, "disabled", property_valid);
+	if (property_valid) {
+		snapshot["disabled"] = value;
+	}
+
+	value = _get_object_property_or_nil(p_node, "text", property_valid);
+	if (property_valid) {
+		snapshot["text"] = value;
+	}
+
+	value = _get_object_property_or_nil(p_node, "value", property_valid);
+	if (property_valid) {
+		snapshot["value"] = value;
+	}
+
+	value = _get_object_property_or_nil(p_node, "selected", property_valid);
+	if (property_valid) {
+		snapshot["selected"] = value;
+	} else {
+		value = _get_object_property_or_nil(p_node, "button_pressed", property_valid);
+		if (property_valid) {
+			snapshot["selected"] = value;
+		}
+	}
+
+	const Transform2D screen_to_root = p_root_viewport ? p_root_viewport->get_screen_transform().affine_inverse() : Transform2D();
+	if (Window *window = Object::cast_to<Window>(p_node)) {
+		snapshot["visible"] = window->is_visible();
+		const Rect2 screen_rect(window->get_screen_transform().get_origin(), window->get_size());
+		snapshot["screenRect"] = _rect2_to_dictionary(_transform_rect(screen_to_root, screen_rect));
+		snapshot["hasScreenPosition"] = true;
+	}
+
+	if (Control *control = Object::cast_to<Control>(p_node)) {
+		snapshot["visible"] = control->is_visible_in_tree();
+		snapshot["screenRect"] = _rect2_to_dictionary(_transform_rect(screen_to_root, control->get_screen_rect()));
+		snapshot["hasScreenPosition"] = true;
+	}
+
+	if (CanvasItem *canvas_item = Object::cast_to<CanvasItem>(p_node)) {
+		snapshot["visible"] = canvas_item->is_visible_in_tree();
+	}
+
+	if (Node3D *node_3d = Object::cast_to<Node3D>(p_node)) {
+		snapshot["is3D"] = true;
+		snapshot["visible"] = node_3d->is_visible_in_tree();
+		snapshot["worldPosition"] = _vector3_to_array(node_3d->get_global_position());
+
+		Transform2D viewport_to_root;
+		Camera3D *camera = _get_effective_camera(node_viewport);
+		if (camera && _get_viewport_to_root_transform(node_viewport, p_root_viewport, viewport_to_root) && !camera->is_position_behind(node_3d->get_global_position())) {
+			const Vector2 viewport_point = camera->unproject_position(node_3d->get_global_position());
+			const Vector2 root_point = viewport_to_root.xform(viewport_point);
+			snapshot["screenPoint"] = _vector2_to_array(root_point);
+			snapshot["hasScreenPosition"] = true;
+
+			if (VisualInstance3D *visual_instance = Object::cast_to<VisualInstance3D>(p_node)) {
+				const AABB aabb = visual_instance->get_aabb();
+				Vector<Vector2> projected;
+				projected.reserve(8);
+				for (int i = 0; i < 8; i++) {
+					const Vector3 world_corner = visual_instance->get_global_transform().xform(aabb.get_endpoint(i));
+					if (!camera->is_position_behind(world_corner)) {
+						projected.push_back(camera->unproject_position(world_corner));
+					}
+				}
+				if (!projected.is_empty()) {
+					Rect2 rect(projected[0], Vector2());
+					for (int i = 1; i < projected.size(); i++) {
+						rect.expand_to(projected[i]);
+					}
+					rect.size = rect.size.abs();
+					if (rect.size == Vector2()) {
+						rect = Rect2(viewport_point - Vector2(2, 2), Vector2(4, 4));
+					}
+					snapshot["screenRect"] = _rect2_to_dictionary(_transform_rect(viewport_to_root, rect));
+				} else {
+					snapshot["screenRect"] = _make_point_rect(root_point);
+				}
+			} else {
+				snapshot["screenRect"] = _make_point_rect(root_point);
+			}
+		}
+	}
+
+	return snapshot;
+}
+
+void CLIAIInputServer::_append_observation_entries(Node *p_node, Viewport *p_root_viewport) const {
+	if (!p_node) {
+		return;
+	}
+
+	const Dictionary snapshot = _build_target_snapshot(p_node, p_root_viewport);
+	ObservationEntry entry;
+	entry.snapshot = snapshot;
+	entry.interactable = _is_interactable_snapshot(snapshot);
+	observation_cache.entries.push_back(entry);
+	observation_cache.path_to_index[String(snapshot["nodePath"])] = observation_cache.entries.size() - 1;
+
+	const bool is_3d = snapshot.has("is3D") && (bool)snapshot["is3D"];
+	if (is_3d) {
+		observation_cache.count_3d++;
+		if (entry.interactable) {
+			observation_cache.interactable_count_3d++;
+		}
+	} else if (Object::cast_to<Control>(p_node)) {
+		observation_cache.ui_count++;
+		if (entry.interactable) {
+			observation_cache.ui_interactable_count++;
+		}
+	}
+
+	for (int i = 0; i < p_node->get_child_count(); i++) {
+		_append_observation_entries(p_node->get_child(i), p_root_viewport);
+	}
+}
+
+bool CLIAIInputServer::_ensure_observation_frame_cache() const {
+	const uint64_t frame = _current_frame();
+	if (observation_cache.populated && observation_cache.frame == frame) {
+		return true;
+	}
+	_rebuild_observation_frame_cache();
+	return observation_cache.populated && observation_cache.frame == frame;
+}
+
+void CLIAIInputServer::_rebuild_observation_frame_cache() const {
+	observation_cache = ObservationFrameCache();
+	observation_cache.frame = _current_frame();
+	SceneTree *scene_tree = _get_runtime_scene_tree();
+	if (!scene_tree || !scene_tree->get_root()) {
+		return;
+	}
+	observation_cache.populated = true;
+#ifdef TESTS_ENABLED
+	test_observation_cache_rebuilds++;
+#endif
+	_append_observation_entries(scene_tree->get_root(), scene_tree->get_root());
+}
+
+bool CLIAIInputServer::_build_snapshot_for_node(Node *p_node, Dictionary &r_snapshot) const {
+	r_snapshot.clear();
+	SceneTree *scene_tree = _get_runtime_scene_tree();
+	if (!scene_tree || !scene_tree->get_root() || !p_node) {
+		return false;
+	}
+	r_snapshot = _build_target_snapshot(p_node, scene_tree->get_root());
+	return !r_snapshot.is_empty();
+}
+
+bool CLIAIInputServer::_get_snapshot_for_selector_path(const SelectorSpec &p_selector, Dictionary &r_snapshot) const {
+	r_snapshot.clear();
+	if (p_selector.path.is_empty()) {
+		return false;
+	}
+	SceneTree *scene_tree = _get_runtime_scene_tree();
+	if (!scene_tree || !scene_tree->get_root()) {
+		return false;
+	}
+	Node *node = scene_tree->get_root()->get_node_or_null(NodePath(p_selector.path));
+	return _build_snapshot_for_node(node, r_snapshot);
+}
+
+CLIAIInputServer::TargetResolution CLIAIInputServer::_resolve_target(const SelectorSpec &p_selector, bool p_require_screen_position) const {
+	TargetResolution resolution;
+
+	Array matches;
+	if (!p_selector.path.is_empty()) {
+		Dictionary snapshot;
+		if (_get_snapshot_for_selector_path(p_selector, snapshot) && _matches_selector_spec(snapshot, p_selector)) {
+			matches.push_back(snapshot);
+		}
+	} else {
+		if (!_ensure_observation_frame_cache()) {
+			return resolution;
+		}
+		for (int i = 0; i < observation_cache.entries.size(); i++) {
+			const Dictionary &snapshot = observation_cache.entries[i].snapshot;
+			if (_matches_selector_spec(snapshot, p_selector)) {
+				matches.push_back(snapshot);
+			}
+		}
+	}
+
+	if (matches.is_empty()) {
+		return resolution;
+	}
+
+	if (p_selector.has_nearest_to_screen_point) {
+		int best_index = -1;
+		double best_distance = 0.0;
+		for (int i = 0; i < matches.size(); i++) {
+			const Dictionary candidate = matches[i];
+			if (!_snapshot_has_screen_position(candidate)) {
+				continue;
+			}
+			const double distance = _resolve_target_screen_position(candidate).distance_squared_to(p_selector.nearest_to_screen_point);
+			if (best_index < 0 || distance < best_distance) {
+				best_index = i;
+				best_distance = distance;
+			}
+		}
+		if (best_index < 0) {
+			return resolution;
+		}
+		resolution.ok = true;
+		resolution.snapshot = matches[best_index];
+		resolution.screen_position = _resolve_target_screen_position(resolution.snapshot);
+		return resolution;
+	}
+
+	if (matches.size() > 1) {
+		resolution.ambiguous = true;
+		resolution.candidates = matches;
+		return resolution;
+	}
+
+	resolution.ok = true;
+	resolution.snapshot = matches[0];
+	if (p_require_screen_position && !_snapshot_has_screen_position(resolution.snapshot)) {
+		resolution.ok = true;
+		return resolution;
+	}
+	resolution.screen_position = _resolve_target_screen_position(resolution.snapshot);
+	return resolution;
+}
+
+Dictionary CLIAIInputServer::_build_viewport_summary(bool p_include_counts) const {
+	Dictionary summary;
+	SceneTree *scene_tree = _get_runtime_scene_tree();
+	if (!scene_tree || !scene_tree->get_root()) {
+		return summary;
+	}
+
+	Viewport *root = scene_tree->get_root();
+	Camera3D *camera = _get_effective_camera(root);
+	summary["windowSize"] = _vector2_to_array(root->get_visible_rect().size);
+	summary["rootPath"] = String(root->get_path());
+	summary["rootScene"] = scene_tree->get_current_scene() ? String(scene_tree->get_current_scene()->get_path()) : String();
+	summary["activeCamera"] = camera ? String(camera->get_path()) : String();
+
+	if (p_include_counts && _ensure_observation_frame_cache()) {
+		summary["uiTargets"] = observation_cache.ui_count;
+		summary["interactableUiTargets"] = observation_cache.ui_interactable_count;
+		summary["targets3D"] = observation_cache.count_3d;
+		summary["interactableTargets3D"] = observation_cache.interactable_count_3d;
+	}
+
+	return summary;
+}
+
+Dictionary CLIAIInputServer::_build_scene_digest() const {
+	return _build_viewport_summary(true);
+}
+
 void CLIAIInputServer::_process_line(const String &p_line) {
 	JSON json;
 	const Error err = json.parse(p_line);
 	if (err != OK) {
-		_send_response(_make_error_response(Variant(), false, "invalid_json", json.get_error_message()));
+		const Dictionary response = _make_error_response(Variant(), false, "invalid_json", json.get_error_message());
+		_record_last_error_bundle(response);
+		_send_response(response);
 		return;
 	}
 
 	const Variant parsed = json.get_data();
 	if (parsed.get_type() != Variant::DICTIONARY) {
-		_send_response(_make_error_response(Variant(), false, "invalid_json", "Request must be a JSON object."));
+		const Dictionary response = _make_error_response(Variant(), false, "invalid_json", "Request must be a JSON object.");
+		_record_last_error_bundle(response);
+		_send_response(response);
 		return;
 	}
 
 	bool deferred = false;
 	const Dictionary response = _handle_request(parsed, false, deferred);
 	if (!deferred) {
+		_record_last_error_bundle(response);
 		_send_response(response);
 	}
+}
+
+bool CLIAIInputServer::_get_root_image(Ref<Image> &r_image) const {
+	r_image.unref();
+	const uint64_t frame = _current_frame();
+	if (root_image_cache_populated && root_image_cache_frame == frame) {
+		if (!root_image_cache_available) {
+			return false;
+		}
+		r_image = root_image_cache;
+		return r_image.is_valid() && !r_image->is_empty();
+	}
+
+	root_image_cache_frame = frame;
+	root_image_cache_populated = true;
+	root_image_cache_available = false;
+	root_image_cache.unref();
+#ifdef TESTS_ENABLED
+	test_root_image_fetches++;
+#endif
+
+	SceneTree *scene_tree = _get_runtime_scene_tree();
+	if (!scene_tree || !scene_tree->get_root()) {
+		return false;
+	}
+	if (!RenderingServer::get_singleton()) {
+		return false;
+	}
+	const RID viewport_rid = scene_tree->get_root()->get_viewport_rid();
+	if (!viewport_rid.is_valid()) {
+		return false;
+	}
+	const RID texture_rid = RenderingServer::get_singleton()->viewport_get_texture(viewport_rid);
+	if (!texture_rid.is_valid()) {
+		return false;
+	}
+
+	root_image_cache = RenderingServer::get_singleton()->texture_2d_get(texture_rid);
+	root_image_cache_available = root_image_cache.is_valid() && !root_image_cache->is_empty();
+	if (!root_image_cache_available) {
+		root_image_cache.unref();
+		return false;
+	}
+
+	r_image = root_image_cache;
+	return true;
+}
+
+Error CLIAIInputServer::_capture_screenshot_result(const Dictionary &p_request, Dictionary &r_result, String &r_error_message) const {
+	r_result.clear();
+	r_error_message = String();
+
+	Ref<Image> image;
+	if (!_get_root_image(image)) {
+		r_error_message = "Root viewport image is unavailable.";
+		return ERR_UNAVAILABLE;
+	}
+
+	const String directory = _resolve_screenshot_directory();
+	const Error dir_err = DirAccess::make_dir_recursive_absolute(directory);
+	if (dir_err != OK) {
+		r_error_message = vformat("Unable to create screenshot directory \"%s\" (error code %d).", directory, (int)dir_err);
+		return dir_err;
+	}
+
+	const Variant id = p_request.has("id") ? p_request["id"] : Variant();
+	const bool has_id = p_request.has("id");
+	const String name = p_request.has("name") ? String(p_request["name"]) : String();
+	const String filename = vformat("godot-ai-agent-%d-%d-%s.png", OS::get_singleton()->get_process_id(), (int)_current_frame(), has_id ? id.stringify().validate_filename() : "request");
+	const String path = directory.path_join(filename);
+	const Error save_err = image->save_png(path);
+	if (save_err != OK) {
+		r_error_message = vformat("Unable to save screenshot \"%s\" (error code %d).", path, (int)save_err);
+		return save_err;
+	}
+
+	r_result["name"] = name;
+	r_result["path"] = path;
+	r_result["width"] = image->get_width();
+	r_result["height"] = image->get_height();
+	return OK;
+}
+
+double CLIAIInputServer::_compute_screenshot_diff_ratio(const Ref<Image> &p_a, const Ref<Image> &p_b) const {
+	if (p_a.is_null() || p_b.is_null()) {
+		return 1.0;
+	}
+	if (p_a->get_width() != p_b->get_width() || p_a->get_height() != p_b->get_height()) {
+		return 1.0;
+	}
+
+	Ref<Image> image_a = p_a->duplicate();
+	Ref<Image> image_b = p_b->duplicate();
+	if (image_a.is_null() || image_b.is_null()) {
+		return 1.0;
+	}
+	image_a->convert(Image::FORMAT_RGBA8);
+	image_b->convert(Image::FORMAT_RGBA8);
+
+	const int width = image_a->get_width();
+	const int height = image_a->get_height();
+	if (width <= 0 || height <= 0) {
+		return 0.0;
+	}
+
+	const int pixel_count = width * height;
+	const int step = MAX(1, pixel_count / 4096);
+	double total = 0.0;
+	int samples = 0;
+	for (int i = 0; i < pixel_count; i += step) {
+		const int x = i % width;
+		const int y = i / width;
+		const Color color_a = image_a->get_pixel(x, y);
+		const Color color_b = image_b->get_pixel(x, y);
+		total += Math::abs(color_a.r - color_b.r);
+		total += Math::abs(color_a.g - color_b.g);
+		total += Math::abs(color_a.b - color_b.b);
+		total += Math::abs(color_a.a - color_b.a);
+		samples++;
+	}
+
+	if (samples <= 0) {
+		return 0.0;
+	}
+	return total / ((double)samples * 4.0);
+}
+
+bool CLIAIInputServer::_normalize_wait_property_expected(const String &p_property_name, const Variant &p_value, Variant &r_value, String &r_error) const {
+	r_error = String();
+	if (p_property_name == "visible" || p_property_name == "disabled" || p_property_name == "selected") {
+		bool value = false;
+		if (!_variant_to_bool(p_value, value)) {
+			r_error = p_property_name + " expects a boolean equals value.";
+			return false;
+		}
+		r_value = value;
+		return true;
+	}
+	if (p_property_name == "text") {
+		String value;
+		if (!_variant_to_string(p_value, value)) {
+			r_error = "text expects a string equals value.";
+			return false;
+		}
+		r_value = value;
+		return true;
+	}
+	if (p_property_name == "value") {
+		double value = 0.0;
+		if (!_variant_to_double(p_value, value)) {
+			r_error = "value expects a numeric equals value.";
+			return false;
+		}
+		r_value = value;
+		return true;
+	}
+
+	r_error = "Unsupported wait property: " + p_property_name + ".";
+	return false;
+}
+
+bool CLIAIInputServer::_wait_property_matches(const Dictionary &p_snapshot, const String &p_property_name, const Variant &p_expected_value, Variant &r_current_value) const {
+	r_current_value = Variant();
+	if (!p_snapshot.has(p_property_name)) {
+		return false;
+	}
+
+	const Variant current_value = p_snapshot[p_property_name];
+	if (current_value.get_type() == Variant::NIL) {
+		return false;
+	}
+
+	if (p_property_name == "visible" || p_property_name == "disabled" || p_property_name == "selected") {
+		bool current_bool = false;
+		if (!_variant_to_bool(current_value, current_bool)) {
+			return false;
+		}
+		r_current_value = current_bool;
+		return current_bool == (bool)p_expected_value;
+	}
+	if (p_property_name == "text") {
+		const String current_text = String(current_value);
+		r_current_value = current_text;
+		return current_text == String(p_expected_value);
+	}
+	if (p_property_name == "value") {
+		double current_number = 0.0;
+		if (!_variant_to_double(current_value, current_number)) {
+			return false;
+		}
+		r_current_value = current_number;
+		return Math::is_equal_approx(current_number, (double)p_expected_value);
+	}
+	return false;
+}
+
+bool CLIAIInputServer::_extract_wait_request(const Dictionary &p_request, const String &p_condition_kind, const Variant &p_id, bool p_has_id, bool p_from_batch, PendingWait &r_wait, String &r_error_code, String &r_error_message) const {
+	r_error_code = String();
+	r_error_message = String();
+	r_wait = PendingWait();
+	r_wait.id = p_id;
+	r_wait.has_id = p_has_id;
+	r_wait.from_batch = p_from_batch;
+	r_wait.command = p_request.has("cmd") ? String(p_request["cmd"]) : p_condition_kind;
+	r_wait.spec.condition_kind = p_condition_kind;
+	r_wait.request = p_request;
+	r_wait.started_frame = _current_frame();
+	r_wait.capture_on_error = _should_capture_on_error(p_request);
+
+	int timeout_frames = options.default_wait_timeout_frames;
+	int poll_every_frames = options.default_poll_every_frames;
+	if (!_get_int(p_request, "timeoutFrames", timeout_frames, timeout_frames, r_error_message)) {
+		r_error_code = "invalid_wait";
+		return false;
+	}
+	if (!_get_int(p_request, "pollEveryFrames", poll_every_frames, poll_every_frames, r_error_message)) {
+		r_error_code = "invalid_wait";
+		return false;
+	}
+	if (timeout_frames < 1) {
+		r_error_code = "invalid_wait";
+		r_error_message = "timeoutFrames must be greater than or equal to 1.";
+		return false;
+	}
+	if (poll_every_frames < 1) {
+		r_error_code = "invalid_wait";
+		r_error_message = "pollEveryFrames must be greater than or equal to 1.";
+		return false;
+	}
+	r_wait.spec.timeout_frames = timeout_frames;
+	r_wait.spec.poll_every_frames = poll_every_frames;
+	r_wait.timeout_frame = r_wait.started_frame + (uint64_t)timeout_frames;
+	r_wait.next_poll_frame = r_wait.started_frame;
+
+	if (p_condition_kind == "node_exists" || p_condition_kind == "node_gone") {
+		SelectorSpec selector;
+		if (!_extract_selector_spec(p_request, "selector", "selector", selector, r_error_message) || selector.is_empty()) {
+			r_error_code = "invalid_wait";
+			if (r_error_message.is_empty()) {
+				r_error_message = "selector must not be empty.";
+			}
+			return false;
+		}
+		r_wait.spec.selector = selector;
+		return true;
+	}
+
+	if (p_condition_kind == "property") {
+		SelectorSpec selector;
+		if (!_extract_selector_spec(p_request, "selector", "selector", selector, r_error_message) || selector.is_empty()) {
+			r_error_code = "invalid_wait";
+			if (r_error_message.is_empty()) {
+				r_error_message = "selector must not be empty.";
+			}
+			return false;
+		}
+		String property_name;
+		if (!_get_string(p_request, "property", String(), property_name, r_error_message) || property_name.is_empty()) {
+			r_error_code = "invalid_wait";
+			if (r_error_message.is_empty()) {
+				r_error_message = "property must be a non-empty string.";
+			}
+			return false;
+		}
+		static const char *allowed_properties[] = { "visible", "disabled", "text", "value", "selected" };
+		bool allowed = false;
+		for (uint32_t i = 0; i < sizeof(allowed_properties) / sizeof(allowed_properties[0]); i++) {
+			if (property_name == allowed_properties[i]) {
+				allowed = true;
+				break;
+			}
+		}
+		if (!allowed) {
+			r_error_code = "invalid_wait";
+			r_error_message = "wait_property.property must be one of visible, disabled, text, value, selected.";
+			return false;
+		}
+		if (!p_request.has("equals")) {
+			r_error_code = "invalid_wait";
+			r_error_message = "wait_property requires an equals field.";
+			return false;
+		}
+		Variant normalized_value;
+		if (!_normalize_wait_property_expected(property_name, p_request["equals"], normalized_value, r_error_message)) {
+			r_error_code = "invalid_wait";
+			return false;
+		}
+		r_wait.spec.selector = selector;
+		r_wait.spec.property_name = property_name;
+		r_wait.spec.expected_value = normalized_value;
+		return true;
+	}
+
+	if (p_condition_kind == "scene_changed") {
+		String baseline_scene_path = p_request.has("fromScenePath") ? String(p_request["fromScenePath"]) : String();
+		if (baseline_scene_path.is_empty()) {
+			SceneTree *scene_tree = _get_runtime_scene_tree();
+			baseline_scene_path = scene_tree && scene_tree->get_current_scene() ? String(scene_tree->get_current_scene()->get_path()) : String();
+		}
+		r_wait.spec.baseline_scene_path = baseline_scene_path;
+		return true;
+	}
+
+	if (p_condition_kind == "screenshot_diff") {
+		double threshold = 0.05;
+		if (!_get_double(p_request, "threshold", threshold, threshold, r_error_message)) {
+			r_error_code = "invalid_wait";
+			return false;
+		}
+		if (threshold < 0.0 || threshold > 1.0) {
+			r_error_code = "invalid_wait";
+			r_error_message = "threshold must be between 0.0 and 1.0.";
+			return false;
+		}
+		Ref<Image> baseline_image;
+		if (!_get_root_image(baseline_image)) {
+			r_error_code = "screenshot_unavailable";
+			r_error_message = "Root viewport image is unavailable.";
+			return false;
+		}
+		r_wait.spec.baseline_image = baseline_image;
+		r_wait.spec.screenshot_diff_threshold = threshold;
+		return true;
+	}
+
+	r_error_code = "invalid_wait";
+	r_error_message = "Unsupported wait condition: " + p_condition_kind + ".";
+	return false;
+}
+
+bool CLIAIInputServer::_extract_wait_until_request(const Dictionary &p_request, const Variant &p_id, bool p_has_id, bool p_from_batch, PendingWait &r_wait, String &r_error_code, String &r_error_message) const {
+	if (!p_request.has("condition") || p_request["condition"].get_type() != Variant::DICTIONARY) {
+		r_error_code = "invalid_wait";
+		r_error_message = "wait_until requires a condition object.";
+		return false;
+	}
+
+	Dictionary merged = p_request.duplicate(true);
+	Dictionary condition = p_request["condition"];
+	if (!condition.has("kind") || condition["kind"].get_type() != Variant::STRING) {
+		r_error_code = "invalid_wait";
+		r_error_message = "wait_until.condition.kind must be a string.";
+		return false;
+	}
+	const String kind = condition["kind"];
+	condition.erase("kind");
+	Array keys = condition.keys();
+	for (int i = 0; i < keys.size(); i++) {
+		merged[keys[i]] = condition[keys[i]];
+	}
+	merged["cmd"] = "wait_until";
+	return _extract_wait_request(merged, kind, p_id, p_has_id, p_from_batch, r_wait, r_error_code, r_error_message);
+}
+
+bool CLIAIInputServer::_evaluate_wait_condition(PendingWait &r_wait, bool &r_finished, Dictionary &r_result, String &r_error_code, String &r_error_message) {
+	r_finished = false;
+	r_result.clear();
+	r_error_code = String();
+	r_error_message = String();
+
+	const uint64_t frame = _current_frame();
+	if (frame < r_wait.next_poll_frame) {
+		return true;
+	}
+
+	r_result["condition"] = r_wait.spec.condition_kind;
+	r_result["startedFrame"] = (int64_t)r_wait.started_frame;
+	r_result["endedFrame"] = (int64_t)frame;
+
+	if (r_wait.spec.condition_kind == "frames") {
+		if ((int)(frame - r_wait.started_frame) >= r_wait.spec.frames) {
+			r_result["frames"] = r_wait.spec.frames;
+			r_finished = true;
+		}
+		return true;
+	}
+
+	if (r_wait.spec.condition_kind == "node_exists") {
+		const TargetResolution resolution = _resolve_target(r_wait.spec.selector, false);
+		if (resolution.ambiguous) {
+			r_error_code = "ambiguous_target";
+			r_error_message = "selector resolved to multiple targets.";
+			return false;
+		}
+		if (resolution.ok) {
+			r_wait.last_resolved_target = resolution.snapshot;
+			r_result["node"] = resolution.snapshot;
+			r_finished = true;
+		}
+		return true;
+	}
+
+	if (r_wait.spec.condition_kind == "node_gone") {
+		const TargetResolution resolution = _resolve_target(r_wait.spec.selector, false);
+		if (!resolution.ok && !resolution.ambiguous) {
+			r_result["selector"] = r_wait.request["selector"];
+			r_finished = true;
+		}
+		return true;
+	}
+
+	if (r_wait.spec.condition_kind == "property") {
+		const TargetResolution resolution = _resolve_target(r_wait.spec.selector, false);
+		if (resolution.ambiguous) {
+			r_error_code = "ambiguous_target";
+			r_error_message = "selector resolved to multiple targets.";
+			return false;
+		}
+		if (!resolution.ok) {
+			return true;
+		}
+
+		r_wait.last_resolved_target = resolution.snapshot;
+		const Dictionary snapshot = resolution.snapshot;
+		Variant current_value;
+		if (_wait_property_matches(snapshot, r_wait.spec.property_name, r_wait.spec.expected_value, current_value)) {
+			r_result["node"] = snapshot;
+			r_result["property"] = r_wait.spec.property_name;
+			r_result["value"] = current_value;
+			r_finished = true;
+		}
+		return true;
+	}
+
+	if (r_wait.spec.condition_kind == "scene_changed") {
+		SceneTree *scene_tree = _get_runtime_scene_tree();
+		const String current_scene_path = scene_tree && scene_tree->get_current_scene() ? String(scene_tree->get_current_scene()->get_path()) : String();
+		if (current_scene_path != r_wait.spec.baseline_scene_path) {
+			r_result["fromScenePath"] = r_wait.spec.baseline_scene_path;
+			r_result["toScenePath"] = current_scene_path;
+			r_finished = true;
+		}
+		return true;
+	}
+
+	if (r_wait.spec.condition_kind == "screenshot_diff") {
+		Ref<Image> current_image;
+		if (!_get_root_image(current_image)) {
+			r_error_code = "screenshot_unavailable";
+			r_error_message = "Root viewport image is unavailable.";
+			return false;
+		}
+		const double diff_ratio = _compute_screenshot_diff_ratio(r_wait.spec.baseline_image, current_image);
+		if (diff_ratio >= r_wait.spec.screenshot_diff_threshold) {
+			r_result["threshold"] = r_wait.spec.screenshot_diff_threshold;
+			r_result["diffRatio"] = diff_ratio;
+			r_finished = true;
+		}
+		return true;
+	}
+
+	r_error_code = "invalid_wait";
+	r_error_message = "Unsupported wait condition: " + r_wait.spec.condition_kind + ".";
+	return false;
+}
+
+void CLIAIInputServer::_queue_wait(const PendingWait &p_wait, bool p_from_batch) {
+	PendingWait wait = p_wait;
+	if (p_from_batch) {
+		wait.from_batch = true;
+		wait.batch_step = MAX(0, active_batch.step - 1);
+		active_batch.waiting = true;
+	}
+	pending_waits.push_back(wait);
+}
+
+void CLIAIInputServer::_complete_batch_wait(const PendingWait &p_wait, const Dictionary &p_result) {
+	active_batch.waiting = false;
+	if (p_wait.request.has("internal") && p_wait.request["internal"].get_type() == Variant::BOOL && (bool)p_wait.request["internal"]) {
+		return;
+	}
+	Dictionary result;
+	result["step"] = p_wait.batch_step;
+	result["cmd"] = p_wait.command;
+	result["result"] = p_result;
+	active_batch.results.push_back(result);
+}
+
+void CLIAIInputServer::_fail_wait(const PendingWait &p_wait, const Dictionary &p_error_response) {
+	if (p_wait.from_batch) {
+		active_batch.waiting = false;
+		_fail_batch_step(p_wait.batch_step, p_error_response);
+		return;
+	}
+	_send_response(p_error_response);
 }
 
 void CLIAIInputServer::poll_commands() {
@@ -511,18 +1676,48 @@ void CLIAIInputServer::poll_commands() {
 }
 
 void CLIAIInputServer::_process_pending_waits() {
-	const uint64_t frame = _current_frame();
 	for (int i = pending_waits.size() - 1; i >= 0; i--) {
-		const PendingWait wait = pending_waits[i];
-		if (frame < wait.target_frame) {
+		PendingWait wait = pending_waits[i];
+		const uint64_t frame = _current_frame();
+		if (frame < wait.next_poll_frame) {
 			continue;
 		}
+
+		bool finished = false;
 		Dictionary result;
-		result["startedFrame"] = (int64_t)wait.started_frame;
-		result["endedFrame"] = (int64_t)frame;
-		result["frames"] = wait.frames;
-		_send_response(_make_success_response(wait.id, wait.has_id, result));
-		pending_waits.remove_at(i);
+		String error_code;
+		String error_message;
+		const bool ok = _evaluate_wait_condition(wait, finished, result, error_code, error_message);
+		if (!ok) {
+			Dictionary error_response = _make_contextual_error_response(wait.request, wait.id, wait.has_id, error_code, error_message, wait.last_resolved_target);
+			_record_last_error_bundle(error_response);
+			_fail_wait(wait, error_response);
+			pending_waits.remove_at(i);
+			continue;
+		}
+		if (finished) {
+			if (!wait.last_resolved_target.is_empty()) {
+				last_resolved_target = wait.last_resolved_target;
+			}
+			if (wait.from_batch) {
+				_complete_batch_wait(wait, result);
+			} else {
+				_send_response(_make_success_response(wait.id, wait.has_id, result));
+			}
+			pending_waits.remove_at(i);
+			continue;
+		}
+		if (frame >= wait.timeout_frame) {
+			const String timeout_message = vformat("%s timed out after %d frames.", wait.command, wait.spec.timeout_frames);
+			Dictionary error_response = _make_contextual_error_response(wait.request, wait.id, wait.has_id, "timeout", timeout_message, wait.last_resolved_target);
+			_record_last_error_bundle(error_response);
+			_fail_wait(wait, error_response);
+			pending_waits.remove_at(i);
+			continue;
+		}
+
+		wait.next_poll_frame = frame + (uint64_t)wait.spec.poll_every_frames;
+		pending_waits.write[i] = wait;
 	}
 }
 
@@ -544,7 +1739,10 @@ Dictionary CLIAIInputServer::_handle_request(const Dictionary &p_request, bool p
 		return Dictionary();
 	}
 
-	if (cmd == "click" || cmd == "double_click" || cmd == "hold" || cmd == "drag") {
+	if (cmd == "click" || cmd == "double_click" || cmd == "hold" || cmd == "drag" ||
+			cmd == "click_target" || cmd == "double_click_target" || cmd == "focus_target" || cmd == "hover_target" ||
+			cmd == "drag_target_to_target" || cmd == "type_text" || cmd == "scroll_view" ||
+			cmd == "click_target_and_wait" || cmd == "type_text_and_wait") {
 		Dictionary batch_request;
 		batch_request["id"] = id;
 		batch_request["cmd"] = "batch";
@@ -565,15 +1763,16 @@ Dictionary CLIAIInputServer::_handle_request(const Dictionary &p_request, bool p
 }
 
 Dictionary CLIAIInputServer::_execute_operation(const Dictionary &p_operation, bool p_from_batch, bool &r_deferred) {
-	String error;
+	String error_code;
+	String error_message;
+	Dictionary result;
 	Array expanded;
-	if (_expand_high_level_operation(p_operation, expanded, error)) {
-		Dictionary result;
+	if (_prepare_expanded_operation(p_operation, expanded, result, error_code, error_message)) {
+		if (!error_code.is_empty()) {
+			return _make_contextual_error_response(p_operation, p_operation.has("id") ? p_operation["id"] : Variant(), p_operation.has("id"), error_code, error_message, last_resolved_target);
+		}
 		result["expandedSteps"] = expanded.size();
 		return _make_success_response(p_operation.has("id") ? p_operation["id"] : Variant(), p_operation.has("id"), result);
-	}
-	if (!error.is_empty()) {
-		return _make_error_response(p_operation.has("id") ? p_operation["id"] : Variant(), p_operation.has("id"), "invalid_operation", error);
 	}
 
 	return _execute_immediate_operation(p_operation, p_from_batch, r_deferred);
@@ -605,11 +1804,44 @@ Dictionary CLIAIInputServer::_execute_immediate_operation(const Dictionary &p_op
 	if (cmd == "wait") {
 		return _cmd_wait(p_operation, p_from_batch, r_deferred);
 	}
+	if (cmd == "wait_until" || cmd == "expect") {
+		return _cmd_wait_until(p_operation, p_from_batch, r_deferred);
+	}
+	if (cmd == "wait_node_exists") {
+		return _cmd_wait_node_exists(p_operation, p_from_batch, r_deferred);
+	}
+	if (cmd == "wait_node_gone") {
+		return _cmd_wait_node_gone(p_operation, p_from_batch, r_deferred);
+	}
+	if (cmd == "wait_property") {
+		return _cmd_wait_property(p_operation, p_from_batch, r_deferred);
+	}
+	if (cmd == "wait_scene_changed") {
+		return _cmd_wait_scene_changed(p_operation, p_from_batch, r_deferred);
+	}
+	if (cmd == "wait_screenshot_diff") {
+		return _cmd_wait_screenshot_diff(p_operation, p_from_batch, r_deferred);
+	}
+	if (cmd == "get_interactables") {
+		return _cmd_get_interactables(p_operation);
+	}
+	if (cmd == "query_nodes") {
+		return _cmd_query_nodes(p_operation);
+	}
+	if (cmd == "get_node_snapshot") {
+		return _cmd_get_node_snapshot(p_operation);
+	}
+	if (cmd == "get_viewport_summary") {
+		return _cmd_get_viewport_summary(p_operation);
+	}
 	if (cmd == "get_screenshot") {
 		return _cmd_get_screenshot(p_operation);
 	}
 	if (cmd == "get_scene_tree") {
 		return _cmd_get_scene_tree(p_operation);
+	}
+	if (cmd == "type_text_commit") {
+		return _cmd_type_text_commit(p_operation);
 	}
 	if (cmd == "perf_start") {
 		return _cmd_perf_start(p_operation);
@@ -620,12 +1852,26 @@ Dictionary CLIAIInputServer::_execute_immediate_operation(const Dictionary &p_op
 	if (cmd == "perf_status") {
 		return _make_success_response(id, has_id, _cmd_perf_status());
 	}
+	if (cmd == "batch_status") {
+		return _make_success_response(id, has_id, _cmd_batch_status());
+	}
+	if (cmd == "cancel_batch") {
+		return _cmd_cancel_batch(p_operation);
+	}
+	if (cmd == "list_checkpoints") {
+		return _make_success_response(id, has_id, _cmd_list_checkpoints());
+	}
+	if (cmd == "get_last_error_bundle") {
+		return _make_success_response(id, has_id, _cmd_get_last_error_bundle());
+	}
 	if (cmd == "checkpoint") {
 		Dictionary event = _make_response_base(id, has_id, true);
 		event["event"] = "checkpoint";
 		event["name"] = p_operation.has("name") ? String(p_operation["name"]) : String();
 		event["step"] = active_batch.step;
 		_send_response(event);
+		checkpoint_history.push_back(event);
+		active_batch.checkpoints.push_back(event);
 
 		Dictionary result;
 		result["checkpoint"] = event["name"];
@@ -675,6 +1921,7 @@ bool CLIAIInputServer::_start_batch(const Dictionary &p_request, bool p_direct_o
 	active_batch.on_error = on_error;
 	active_batch.started_frame = _current_frame();
 	active_batch.direct_operation = p_direct_operation;
+	active_batch.checkpoints.clear();
 	return true;
 }
 
@@ -686,6 +1933,7 @@ void CLIAIInputServer::_finish_batch(bool p_completed) {
 	result["failedStep"] = active_batch.failed_step;
 	result["results"] = active_batch.results;
 	result["errors"] = active_batch.errors;
+	result["checkpoints"] = active_batch.checkpoints;
 
 	const bool ok = p_completed && active_batch.errors.is_empty();
 	Dictionary response = _make_response_base(active_batch.id, active_batch.has_id, ok);
@@ -693,6 +1941,7 @@ void CLIAIInputServer::_finish_batch(bool p_completed) {
 	if (!ok) {
 		response["error"] = _make_error_payload("batch_failed", "Batch did not complete successfully.");
 	}
+	_record_last_error_bundle(response);
 	_send_response(response);
 	active_batch = ActiveBatch();
 }
@@ -710,6 +1959,7 @@ void CLIAIInputServer::_fail_batch_step(int p_step, const Dictionary &p_error_re
 	if (active_batch.failed_step < 0) {
 		active_batch.failed_step = p_step;
 	}
+	_record_last_error_bundle(p_error_response);
 
 	if (active_batch.on_error == "stop") {
 		_release_held_inputs();
@@ -718,13 +1968,27 @@ void CLIAIInputServer::_fail_batch_step(int p_step, const Dictionary &p_error_re
 	}
 }
 
+void CLIAIInputServer::_cancel_active_batch(const String &p_error_code, const String &p_error_message, bool p_send_response) {
+	if (!active_batch.active) {
+		return;
+	}
+	_release_held_inputs();
+	_abort_runtime_perf(true);
+	active_batch.waiting = false;
+	pending_waits.clear();
+
+	if (p_send_response) {
+		Dictionary response = _make_error_response(active_batch.id, active_batch.has_id, p_error_code, p_error_message);
+		_record_last_error_bundle(response);
+		_send_response(response);
+	}
+	active_batch = ActiveBatch();
+}
+
 void CLIAIInputServer::_process_batch(int &r_budget) {
 	while (active_batch.active && r_budget > 0) {
 		if (active_batch.waiting) {
-			if (_current_frame() < active_batch.wait_target_frame) {
-				return;
-			}
-			active_batch.waiting = false;
+			return;
 		}
 
 		Dictionary op;
@@ -752,20 +2016,33 @@ void CLIAIInputServer::_process_batch(int &r_budget) {
 			}
 
 			op = active_batch.ops[active_batch.step];
-			String expansion_error;
+			String expansion_error_code;
+			String expansion_error_message;
 			Array expanded;
-			if (_expand_high_level_operation(op, expanded, expansion_error)) {
+			Dictionary expanded_result;
+			if (_prepare_expanded_operation(op, expanded, expanded_result, expansion_error_code, expansion_error_message)) {
+				if (!expansion_error_code.is_empty()) {
+					Dictionary error_response = _make_contextual_error_response(op, active_batch.id, active_batch.has_id, expansion_error_code, expansion_error_message, last_resolved_target);
+					_fail_batch_step(active_batch.step, error_response);
+					if (!active_batch.active) {
+						return;
+					}
+					active_batch.step++;
+					continue;
+				}
 				Dictionary result;
 				result["step"] = active_batch.step;
 				result["cmd"] = op["cmd"];
-				result["expandedSteps"] = expanded.size();
+				Dictionary expanded_result_with_meta = expanded_result.duplicate(true);
+				expanded_result_with_meta["expandedSteps"] = expanded.size();
+				result["result"] = expanded_result_with_meta;
 				active_batch.results.push_back(result);
 				active_batch.micro_ops = expanded;
 				active_batch.step++;
 				continue;
 			}
-			if (!expansion_error.is_empty()) {
-				Dictionary error_response = _make_error_response(active_batch.id, active_batch.has_id, "invalid_operation", expansion_error);
+			if (!expansion_error_message.is_empty()) {
+				Dictionary error_response = _make_contextual_error_response(op, active_batch.id, active_batch.has_id, "invalid_operation", expansion_error_message, last_resolved_target);
 				_fail_batch_step(active_batch.step, error_response);
 				if (!active_batch.active) {
 					return;
@@ -803,6 +2080,261 @@ void CLIAIInputServer::_process_batch(int &r_budget) {
 	}
 }
 
+bool CLIAIInputServer::_prepare_expanded_operation(const Dictionary &p_operation, Array &r_expanded, Dictionary &r_result, String &r_error_code, String &r_error_message) {
+	r_expanded.clear();
+	r_result.clear();
+	r_error_code = String();
+	r_error_message = String();
+
+	String expansion_error;
+	if (_expand_high_level_operation(p_operation, r_expanded, expansion_error)) {
+		return true;
+	}
+	if (!expansion_error.is_empty()) {
+		r_error_code = "invalid_operation";
+		r_error_message = expansion_error;
+		return true;
+	}
+
+	if (!p_operation.has("cmd") || p_operation["cmd"].get_type() != Variant::STRING) {
+		return false;
+	}
+
+	const String cmd = p_operation["cmd"];
+	auto resolve_action_target = [&](const SelectorSpec &selector, const String &not_found_message, bool require_screen = true) -> TargetResolution {
+		const TargetResolution resolution = _resolve_target(selector, require_screen);
+		if (resolution.ambiguous) {
+			r_error_code = "ambiguous_target";
+			r_error_message = "selector resolved to multiple targets.";
+			return resolution;
+		}
+		if (!resolution.ok) {
+			r_error_code = "target_not_found";
+			r_error_message = not_found_message;
+			return resolution;
+		}
+		if (require_screen && !_snapshot_has_screen_position(resolution.snapshot)) {
+			r_error_code = "target_not_clickable";
+			r_error_message = "Resolved target does not expose a usable screen position.";
+			return resolution;
+		}
+		last_resolved_target = resolution.snapshot;
+		return resolution;
+	};
+
+	auto resolve_selector = [&](const String &key, const String &fallback_error) -> SelectorSpec {
+		String selector_error;
+		SelectorSpec selector;
+		if (!_extract_selector_spec(p_operation, key, key, selector, selector_error)) {
+			r_error_code = "invalid_operation";
+			r_error_message = selector_error;
+			return SelectorSpec();
+		}
+		if (selector.is_empty()) {
+			r_error_code = "invalid_operation";
+			r_error_message = fallback_error;
+			return SelectorSpec();
+		}
+		return selector;
+	};
+
+	auto expand_from_dict = [&](const Dictionary &op) -> bool {
+		String nested_error;
+		Array expanded;
+		if (_expand_high_level_operation(op, expanded, nested_error)) {
+			for (int i = 0; i < expanded.size(); i++) {
+				r_expanded.push_back(expanded[i]);
+			}
+			return true;
+		}
+		r_error_code = "invalid_operation";
+		r_error_message = nested_error;
+		return false;
+	};
+
+	auto append_wait_condition = [&](const Dictionary &wait_request) -> bool {
+		if (wait_request.is_empty()) {
+			r_error_code = "invalid_operation";
+			r_error_message = "wait must be an object.";
+			return false;
+		}
+		Dictionary expect_op = wait_request.duplicate(true);
+		if (p_operation.has("captureOnError") && !expect_op.has("captureOnError")) {
+			expect_op["captureOnError"] = p_operation["captureOnError"];
+		}
+		expect_op["cmd"] = "expect";
+		r_expanded.push_back(expect_op);
+		return true;
+	};
+
+	if (cmd == "hover_target" || cmd == "click_target" || cmd == "double_click_target" || cmd == "focus_target" || cmd == "scroll_view" || cmd == "type_text" || cmd == "click_target_and_wait" || cmd == "type_text_and_wait") {
+		const SelectorSpec selector = resolve_selector("selector", "selector must not be empty.");
+		if (selector.is_empty()) {
+			return true;
+		}
+		const TargetResolution resolution = resolve_action_target(selector, "No target matched selector.");
+		if (!r_error_code.is_empty()) {
+			return true;
+		}
+		const Vector2 position = _resolve_target_screen_position(resolution.snapshot);
+		r_result["resolvedTarget"] = resolution.snapshot;
+		r_result["position"] = _vector2_to_array(position);
+
+		if (cmd == "hover_target") {
+			r_expanded.push_back(_make_mouse_motion_op(position));
+			return true;
+		}
+
+		if (cmd == "scroll_view") {
+			String direction = "down";
+			int steps = 1;
+			if (!_get_string(p_operation, "direction", "down", direction, r_error_message) || !_get_int(p_operation, "steps", 1, steps, r_error_message)) {
+				r_error_code = "invalid_operation";
+				return true;
+			}
+			if (steps < 1) {
+				r_error_code = "invalid_operation";
+				r_error_message = "scroll_view.steps must be greater than or equal to 1.";
+				return true;
+			}
+			MouseButton button = MouseButton::WHEEL_DOWN;
+			if (direction == "up") {
+				button = MouseButton::WHEEL_UP;
+			} else if (direction != "down") {
+				r_error_code = "invalid_operation";
+				r_error_message = "scroll_view.direction must be up or down.";
+				return true;
+			}
+			r_expanded.push_back(_make_mouse_motion_op(position));
+			for (int i = 0; i < steps; i++) {
+				r_expanded.push_back(_make_mouse_button_op(button, position, true));
+				r_expanded.push_back(_make_mouse_button_op(button, position, false));
+			}
+			r_result["steps"] = steps;
+			r_result["direction"] = direction;
+			return true;
+		}
+
+		if (cmd == "type_text" || cmd == "type_text_and_wait") {
+			String text;
+			if (!_get_string(p_operation, "text", String(), text, r_error_message)) {
+				r_error_code = "invalid_operation";
+				return true;
+			}
+			Dictionary click_op;
+			click_op["cmd"] = "click";
+			click_op["x"] = position.x;
+			click_op["y"] = position.y;
+			click_op["button"] = "left";
+			click_op["pressFrames"] = 1;
+			if (!expand_from_dict(click_op)) {
+				return true;
+			}
+			r_expanded.push_back(_make_wait_op(1));
+			r_expanded.push_back(_make_type_text_commit_op(text));
+			r_result["textLength"] = text.length();
+
+			if (cmd == "type_text_and_wait") {
+				if (!p_operation.has("wait") || p_operation["wait"].get_type() != Variant::DICTIONARY) {
+					r_error_code = "invalid_operation";
+					r_error_message = "type_text_and_wait.wait must be an object.";
+					return true;
+				}
+				if (!append_wait_condition(p_operation["wait"])) {
+					return true;
+				}
+			}
+			return true;
+		}
+
+		String base_cmd = cmd;
+		if (cmd == "focus_target") {
+			base_cmd = "click_target";
+		}
+
+		Dictionary high_level;
+		high_level["x"] = position.x;
+		high_level["y"] = position.y;
+
+		if (base_cmd == "click_target" || base_cmd == "click_target_and_wait") {
+			high_level["cmd"] = "click";
+			if (p_operation.has("button")) {
+				high_level["button"] = p_operation["button"];
+			}
+			if (p_operation.has("pressFrames")) {
+				high_level["pressFrames"] = p_operation["pressFrames"];
+			}
+		} else if (base_cmd == "double_click_target") {
+			high_level["cmd"] = "double_click";
+			if (p_operation.has("button")) {
+				high_level["button"] = p_operation["button"];
+			}
+			if (p_operation.has("pressFrames")) {
+				high_level["pressFrames"] = p_operation["pressFrames"];
+			}
+			if (p_operation.has("gapFrames")) {
+				high_level["gapFrames"] = p_operation["gapFrames"];
+			}
+		}
+
+		if (!expand_from_dict(high_level)) {
+			return true;
+		}
+
+		if (cmd == "click_target_and_wait") {
+			if (!p_operation.has("wait") || p_operation["wait"].get_type() != Variant::DICTIONARY) {
+				r_error_code = "invalid_operation";
+				r_error_message = "click_target_and_wait.wait must be an object.";
+				return true;
+			}
+			if (!append_wait_condition(p_operation["wait"])) {
+				return true;
+			}
+		}
+		return true;
+	}
+
+	if (cmd == "drag_target_to_target") {
+		const SelectorSpec from_selector = resolve_selector("fromSelector", "fromSelector must not be empty.");
+		if (from_selector.is_empty()) {
+			return true;
+		}
+		const SelectorSpec to_selector = resolve_selector("toSelector", "toSelector must not be empty.");
+		if (to_selector.is_empty()) {
+			return true;
+		}
+		const TargetResolution from_resolution = resolve_action_target(from_selector, "No source target matched selector.");
+		if (!r_error_code.is_empty()) {
+			return true;
+		}
+		const TargetResolution to_resolution = resolve_action_target(to_selector, "No destination target matched selector.");
+		if (!r_error_code.is_empty()) {
+			return true;
+		}
+
+		Dictionary drag_op;
+		drag_op["cmd"] = "drag";
+		drag_op["frames"] = p_operation.has("frames") ? Variant(p_operation["frames"]) : Variant(20);
+		if (p_operation.has("button")) {
+			drag_op["button"] = p_operation["button"];
+		}
+		Array from = _vector2_to_array(_resolve_target_screen_position(from_resolution.snapshot));
+		Array to = _vector2_to_array(_resolve_target_screen_position(to_resolution.snapshot));
+		drag_op["from"] = from;
+		drag_op["to"] = to;
+		if (!expand_from_dict(drag_op)) {
+			return true;
+		}
+		r_result["resolvedFromTarget"] = from_resolution.snapshot;
+		r_result["resolvedToTarget"] = to_resolution.snapshot;
+		r_result["from"] = from;
+		r_result["to"] = to;
+		return true;
+	}
+
+	return false;
+}
+
 Dictionary CLIAIInputServer::_make_mouse_motion_op(const Vector2 &p_position) {
 	Dictionary op;
 	op["cmd"] = "mouse_motion";
@@ -828,6 +2360,14 @@ Dictionary CLIAIInputServer::_make_wait_op(int p_frames) {
 	Dictionary op;
 	op["cmd"] = "wait";
 	op["frames"] = p_frames;
+	op["internal"] = true;
+	return op;
+}
+
+Dictionary CLIAIInputServer::_make_type_text_commit_op(const String &p_text) {
+	Dictionary op;
+	op["cmd"] = "type_text_commit";
+	op["text"] = p_text;
 	return op;
 }
 
@@ -988,6 +2528,8 @@ Dictionary CLIAIInputServer::_cmd_get_status() const {
 	result["heldActions"] = held_actions.size();
 	result["heldKeys"] = held_keys.size();
 	result["heldMouseButtons"] = held_mouse_buttons.size();
+	result["checkpointCount"] = checkpoint_history.size();
+	result["lastError"] = last_error_bundle;
 	return result;
 }
 
@@ -1171,6 +2713,36 @@ void CLIAIInputServer::_inject_mouse_motion(const Vector2 &p_position, const Vec
 	Input::get_singleton()->parse_input_event(event);
 }
 
+void CLIAIInputServer::_inject_text_input(const String &p_text) {
+	for (int i = 0; i < p_text.length(); i++) {
+		const char32_t codepoint = p_text.unicode_at(i);
+		Key keycode = Key::NONE;
+		if (codepoint == '\n' || codepoint == '\r') {
+			keycode = Key::ENTER;
+		} else if (codepoint == '\t') {
+			keycode = Key::TAB;
+		} else if (codepoint == '\b') {
+			keycode = Key::BACKSPACE;
+		}
+
+		Ref<InputEventKey> press_event;
+		press_event.instantiate();
+		press_event->set_keycode(keycode);
+		press_event->set_physical_keycode(keycode);
+		press_event->set_unicode(codepoint);
+		press_event->set_pressed(true);
+		Input::get_singleton()->parse_input_event(press_event);
+
+		Ref<InputEventKey> release_event;
+		release_event.instantiate();
+		release_event->set_keycode(keycode);
+		release_event->set_physical_keycode(keycode);
+		release_event->set_unicode(codepoint);
+		release_event->set_pressed(false);
+		Input::get_singleton()->parse_input_event(release_event);
+	}
+}
+
 Dictionary CLIAIInputServer::_cmd_mouse_button(const Dictionary &p_request) {
 	const Variant id = p_request.has("id") ? p_request["id"] : Variant();
 	const bool has_id = p_request.has("id");
@@ -1251,23 +2823,222 @@ Dictionary CLIAIInputServer::_cmd_wait(const Dictionary &p_request, bool p_from_
 		return _make_error_response(id, has_id, "invalid_wait", "wait.frames must be greater than or equal to 1.");
 	}
 
-	const uint64_t frame = _current_frame();
-	if (p_from_batch) {
-		active_batch.waiting = true;
-		active_batch.wait_target_frame = frame + (uint64_t)frames;
-		r_deferred = true;
-		return Dictionary();
-	}
-
 	PendingWait wait;
 	wait.id = id;
 	wait.has_id = has_id;
-	wait.started_frame = frame;
-	wait.target_frame = frame + (uint64_t)frames;
-	wait.frames = frames;
-	pending_waits.push_back(wait);
+	wait.command = "wait";
+	wait.spec.condition_kind = "frames";
+	wait.request = p_request;
+	wait.started_frame = _current_frame();
+	wait.timeout_frame = wait.started_frame + (uint64_t)frames;
+	wait.next_poll_frame = wait.started_frame + 1;
+	wait.spec.frames = frames;
+	wait.spec.timeout_frames = frames;
+	wait.spec.poll_every_frames = 1;
+	_queue_wait(wait, p_from_batch);
 	r_deferred = true;
 	return Dictionary();
+}
+
+Dictionary CLIAIInputServer::_cmd_wait_until(const Dictionary &p_request, bool p_from_batch, bool &r_deferred) {
+	const Variant id = p_request.has("id") ? p_request["id"] : Variant();
+	const bool has_id = p_request.has("id");
+	PendingWait wait;
+	String error_code;
+	String error_message;
+	if (!_extract_wait_until_request(p_request, id, has_id, p_from_batch, wait, error_code, error_message)) {
+		return _make_contextual_error_response(p_request, id, has_id, error_code, error_message, last_resolved_target);
+	}
+	_queue_wait(wait, p_from_batch);
+	r_deferred = true;
+	return Dictionary();
+}
+
+Dictionary CLIAIInputServer::_cmd_wait_node_exists(const Dictionary &p_request, bool p_from_batch, bool &r_deferred) {
+	const Variant id = p_request.has("id") ? p_request["id"] : Variant();
+	const bool has_id = p_request.has("id");
+	PendingWait wait;
+	String error_code;
+	String error_message;
+	if (!_extract_wait_request(p_request, "node_exists", id, has_id, p_from_batch, wait, error_code, error_message)) {
+		return _make_contextual_error_response(p_request, id, has_id, error_code, error_message, last_resolved_target);
+	}
+	_queue_wait(wait, p_from_batch);
+	r_deferred = true;
+	return Dictionary();
+}
+
+Dictionary CLIAIInputServer::_cmd_wait_node_gone(const Dictionary &p_request, bool p_from_batch, bool &r_deferred) {
+	const Variant id = p_request.has("id") ? p_request["id"] : Variant();
+	const bool has_id = p_request.has("id");
+	PendingWait wait;
+	String error_code;
+	String error_message;
+	if (!_extract_wait_request(p_request, "node_gone", id, has_id, p_from_batch, wait, error_code, error_message)) {
+		return _make_contextual_error_response(p_request, id, has_id, error_code, error_message, last_resolved_target);
+	}
+	_queue_wait(wait, p_from_batch);
+	r_deferred = true;
+	return Dictionary();
+}
+
+Dictionary CLIAIInputServer::_cmd_wait_property(const Dictionary &p_request, bool p_from_batch, bool &r_deferred) {
+	const Variant id = p_request.has("id") ? p_request["id"] : Variant();
+	const bool has_id = p_request.has("id");
+	PendingWait wait;
+	String error_code;
+	String error_message;
+	if (!_extract_wait_request(p_request, "property", id, has_id, p_from_batch, wait, error_code, error_message)) {
+		return _make_contextual_error_response(p_request, id, has_id, error_code, error_message, last_resolved_target);
+	}
+	_queue_wait(wait, p_from_batch);
+	r_deferred = true;
+	return Dictionary();
+}
+
+Dictionary CLIAIInputServer::_cmd_wait_scene_changed(const Dictionary &p_request, bool p_from_batch, bool &r_deferred) {
+	const Variant id = p_request.has("id") ? p_request["id"] : Variant();
+	const bool has_id = p_request.has("id");
+	PendingWait wait;
+	String error_code;
+	String error_message;
+	if (!_extract_wait_request(p_request, "scene_changed", id, has_id, p_from_batch, wait, error_code, error_message)) {
+		return _make_contextual_error_response(p_request, id, has_id, error_code, error_message, last_resolved_target);
+	}
+	_queue_wait(wait, p_from_batch);
+	r_deferred = true;
+	return Dictionary();
+}
+
+Dictionary CLIAIInputServer::_cmd_wait_screenshot_diff(const Dictionary &p_request, bool p_from_batch, bool &r_deferred) {
+	const Variant id = p_request.has("id") ? p_request["id"] : Variant();
+	const bool has_id = p_request.has("id");
+	PendingWait wait;
+	String error_code;
+	String error_message;
+	if (!_extract_wait_request(p_request, "screenshot_diff", id, has_id, p_from_batch, wait, error_code, error_message)) {
+		return _make_contextual_error_response(p_request, id, has_id, error_code, error_message, last_resolved_target);
+	}
+	_queue_wait(wait, p_from_batch);
+	r_deferred = true;
+	return Dictionary();
+}
+
+Dictionary CLIAIInputServer::_cmd_get_interactables(const Dictionary &p_request) {
+	const Variant id = p_request.has("id") ? p_request["id"] : Variant();
+	const bool has_id = p_request.has("id");
+	SelectorSpec filter;
+	String selector_error;
+	if (!_extract_selector_spec(p_request, "filter", "filter", filter, selector_error)) {
+		return _make_error_response(id, has_id, "invalid_query", selector_error);
+	}
+	int max_results = 0;
+	String limit_error;
+	if (!_resolve_query_limit(p_request, max_results, limit_error)) {
+		return _make_error_response(id, has_id, "invalid_query", limit_error);
+	}
+
+	SceneTree *scene_tree = _get_runtime_scene_tree();
+	if (!scene_tree || !scene_tree->get_root()) {
+		return _make_error_response(id, has_id, "scene_tree_unavailable", "SceneTree root is unavailable.");
+	}
+
+	Array nodes;
+	if (!filter.path.is_empty()) {
+		Dictionary snapshot;
+		if (_get_snapshot_for_selector_path(filter, snapshot) && _matches_selector_spec(snapshot, filter) && _is_interactable_snapshot(snapshot)) {
+			nodes.push_back(snapshot);
+		}
+	} else if (_ensure_observation_frame_cache()) {
+		for (int i = 0; i < observation_cache.entries.size() && nodes.size() < max_results; i++) {
+			const ObservationEntry &entry = observation_cache.entries[i];
+			if (entry.interactable && _matches_selector_spec(entry.snapshot, filter)) {
+				nodes.push_back(entry.snapshot);
+			}
+		}
+	}
+
+	Dictionary result;
+	result["maxResults"] = max_results;
+	result["count"] = nodes.size();
+	result["nodes"] = nodes;
+	return _make_success_response(id, has_id, result);
+}
+
+Dictionary CLIAIInputServer::_cmd_query_nodes(const Dictionary &p_request) {
+	const Variant id = p_request.has("id") ? p_request["id"] : Variant();
+	const bool has_id = p_request.has("id");
+	SelectorSpec filter;
+	String selector_error;
+	if (!_extract_selector_spec(p_request, "filter", "filter", filter, selector_error)) {
+		return _make_error_response(id, has_id, "invalid_query", selector_error);
+	}
+	int max_results = 0;
+	String limit_error;
+	if (!_resolve_query_limit(p_request, max_results, limit_error)) {
+		return _make_error_response(id, has_id, "invalid_query", limit_error);
+	}
+
+	SceneTree *scene_tree = _get_runtime_scene_tree();
+	if (!scene_tree || !scene_tree->get_root()) {
+		return _make_error_response(id, has_id, "scene_tree_unavailable", "SceneTree root is unavailable.");
+	}
+
+	Array nodes;
+	if (!filter.path.is_empty()) {
+		Dictionary snapshot;
+		if (_get_snapshot_for_selector_path(filter, snapshot) && _matches_selector_spec(snapshot, filter)) {
+			nodes.push_back(snapshot);
+		}
+	} else if (_ensure_observation_frame_cache()) {
+		for (int i = 0; i < observation_cache.entries.size() && nodes.size() < max_results; i++) {
+			const Dictionary &snapshot = observation_cache.entries[i].snapshot;
+			if (_matches_selector_spec(snapshot, filter)) {
+				nodes.push_back(snapshot);
+			}
+		}
+	}
+
+	Dictionary result;
+	result["maxResults"] = max_results;
+	result["count"] = nodes.size();
+	result["nodes"] = nodes;
+	return _make_success_response(id, has_id, result);
+}
+
+Dictionary CLIAIInputServer::_cmd_get_node_snapshot(const Dictionary &p_request) {
+	const Variant id = p_request.has("id") ? p_request["id"] : Variant();
+	const bool has_id = p_request.has("id");
+	String selector_error;
+	SelectorSpec selector;
+	if (!_extract_selector_spec(p_request, "selector", "selector", selector, selector_error) || selector.is_empty()) {
+		return _make_contextual_error_response(p_request, id, has_id, "invalid_query", selector_error.is_empty() ? "selector must not be empty." : selector_error);
+	}
+
+	const TargetResolution resolution = _resolve_target(selector, false);
+	if (resolution.ambiguous) {
+		Dictionary response = _make_contextual_error_response(p_request, id, has_id, "ambiguous_target", "selector resolved to multiple targets.");
+		response["candidates"] = resolution.candidates;
+		return response;
+	}
+	if (!resolution.ok) {
+		return _make_contextual_error_response(p_request, id, has_id, "target_not_found", "No target matched selector.");
+	}
+
+	last_resolved_target = resolution.snapshot;
+	Dictionary result;
+	result["node"] = resolution.snapshot;
+	return _make_success_response(id, has_id, result);
+}
+
+Dictionary CLIAIInputServer::_cmd_get_viewport_summary(const Dictionary &p_request) {
+	const Variant id = p_request.has("id") ? p_request["id"] : Variant();
+	const bool has_id = p_request.has("id");
+	const Dictionary result = _build_viewport_summary(true);
+	if (result.is_empty()) {
+		return _make_error_response(id, has_id, "scene_tree_unavailable", "SceneTree root viewport is unavailable.");
+	}
+	return _make_success_response(id, has_id, result);
 }
 
 String CLIAIInputServer::_resolve_screenshot_directory() const {
@@ -1284,40 +3055,12 @@ String CLIAIInputServer::_resolve_screenshot_directory() const {
 Dictionary CLIAIInputServer::_cmd_get_screenshot(const Dictionary &p_request) {
 	const Variant id = p_request.has("id") ? p_request["id"] : Variant();
 	const bool has_id = p_request.has("id");
-	SceneTree *scene_tree = Object::cast_to<SceneTree>(OS::get_singleton()->get_main_loop());
-	if (!scene_tree || !scene_tree->get_root()) {
-		return _make_error_response(id, has_id, "screenshot_unavailable", "SceneTree root viewport is unavailable.");
-	}
-
-	Ref<ViewportTexture> texture = scene_tree->get_root()->get_texture();
-	if (texture.is_null()) {
-		return _make_error_response(id, has_id, "screenshot_unavailable", "Root viewport texture is unavailable.");
-	}
-
-	Ref<Image> image = texture->get_image();
-	if (image.is_null() || image->is_empty()) {
-		return _make_error_response(id, has_id, "screenshot_unavailable", "Root viewport image is unavailable.");
-	}
-
-	const String directory = _resolve_screenshot_directory();
-	const Error dir_err = DirAccess::make_dir_recursive_absolute(directory);
-	if (dir_err != OK) {
-		return _make_error_response(id, has_id, "screenshot_failed", vformat("Unable to create screenshot directory \"%s\" (error code %d).", directory, (int)dir_err));
-	}
-
-	const String name = p_request.has("name") ? String(p_request["name"]) : String();
-	const String filename = vformat("godot-ai-agent-%d-%d-%s.png", OS::get_singleton()->get_process_id(), (int)_current_frame(), has_id ? id.stringify().validate_filename() : "request");
-	const String path = directory.path_join(filename);
-	const Error save_err = image->save_png(path);
-	if (save_err != OK) {
-		return _make_error_response(id, has_id, "screenshot_failed", vformat("Unable to save screenshot \"%s\" (error code %d).", path, (int)save_err));
-	}
-
 	Dictionary result;
-	result["name"] = name;
-	result["path"] = path;
-	result["width"] = image->get_width();
-	result["height"] = image->get_height();
+	String error_message;
+	const Error err = _capture_screenshot_result(p_request, result, error_message);
+	if (err != OK) {
+		return _make_error_response(id, has_id, err == ERR_UNAVAILABLE ? "screenshot_unavailable" : "screenshot_failed", error_message);
+	}
 	return _make_success_response(id, has_id, result);
 }
 
@@ -1360,7 +3103,7 @@ Dictionary CLIAIInputServer::_cmd_get_scene_tree(const Dictionary &p_request) {
 	}
 	max_depth = CLAMP(max_depth, 0, 128);
 
-	SceneTree *scene_tree = Object::cast_to<SceneTree>(OS::get_singleton()->get_main_loop());
+	SceneTree *scene_tree = _get_runtime_scene_tree();
 	if (!scene_tree || !scene_tree->get_root()) {
 		return _make_error_response(id, has_id, "scene_tree_unavailable", "SceneTree root is unavailable.");
 	}
@@ -1452,6 +3195,87 @@ Dictionary CLIAIInputServer::_cmd_perf_status() const {
 	result["capturedFrames"] = runtime_perf_recorder ? (int64_t)runtime_perf_recorder->get_captured_frames() : 0;
 	result["lastSampledFrame"] = runtime_perf_recorder && runtime_perf_recorder->get_captured_frames() > 0 ? (int64_t)runtime_perf_recorder->get_last_sampled_frame() : -1;
 	result["pendingStop"] = pending_perf_stop;
+	return result;
+}
+
+Dictionary CLIAIInputServer::_cmd_type_text_commit(const Dictionary &p_request) {
+	const Variant id = p_request.has("id") ? p_request["id"] : Variant();
+	const bool has_id = p_request.has("id");
+	String text;
+	String error;
+	if (!_get_string(p_request, "text", String(), text, error)) {
+		return _make_error_response(id, has_id, "invalid_text", error);
+	}
+	_inject_text_input(text);
+
+	Dictionary result;
+	result["textLength"] = text.length();
+	return _make_success_response(id, has_id, result);
+}
+
+Dictionary CLIAIInputServer::_cmd_batch_status() const {
+	Dictionary result;
+	result["active"] = active_batch.active;
+	result["step"] = active_batch.step;
+	result["waiting"] = active_batch.waiting;
+	result["startedFrame"] = (int64_t)active_batch.started_frame;
+	result["resultsCount"] = active_batch.results.size();
+	result["errorsCount"] = active_batch.errors.size();
+	result["checkpoints"] = active_batch.checkpoints;
+	result["recentError"] = last_error_bundle;
+	return result;
+}
+
+Dictionary CLIAIInputServer::_cmd_cancel_batch(const Dictionary &p_request) {
+	const Variant id = p_request.has("id") ? p_request["id"] : Variant();
+	const bool has_id = p_request.has("id");
+	if (!active_batch.active) {
+		return _make_error_response(id, has_id, "batch_not_active", "No batch is currently active.");
+	}
+
+	Dictionary batch_result;
+	batch_result["startedFrame"] = (int64_t)active_batch.started_frame;
+	batch_result["endedFrame"] = (int64_t)_current_frame();
+	batch_result["completed"] = false;
+	batch_result["failedStep"] = active_batch.step;
+	batch_result["results"] = active_batch.results;
+	Array errors = active_batch.errors;
+	Dictionary cancel_error;
+	cancel_error["step"] = active_batch.step;
+	cancel_error["error"] = _make_error_payload("batch_cancelled", "Batch was cancelled by cancel_batch.");
+	errors.push_back(cancel_error);
+	batch_result["errors"] = errors;
+	batch_result["checkpoints"] = active_batch.checkpoints;
+
+	Dictionary batch_response = _make_error_response(active_batch.id, active_batch.has_id, "batch_cancelled", "Batch was cancelled by cancel_batch.");
+	batch_response["result"] = batch_result;
+	_record_last_error_bundle(batch_response);
+	_send_response(batch_response);
+
+	_release_held_inputs();
+	_abort_runtime_perf(true);
+	for (int i = pending_waits.size() - 1; i >= 0; i--) {
+		if (pending_waits[i].from_batch) {
+			pending_waits.remove_at(i);
+		}
+	}
+	active_batch = ActiveBatch();
+
+	Dictionary result;
+	result["cancelled"] = true;
+	return _make_success_response(id, has_id, result);
+}
+
+Dictionary CLIAIInputServer::_cmd_list_checkpoints() const {
+	Dictionary result;
+	result["count"] = checkpoint_history.size();
+	result["checkpoints"] = checkpoint_history;
+	return result;
+}
+
+Dictionary CLIAIInputServer::_cmd_get_last_error_bundle() const {
+	Dictionary result;
+	result["errorBundle"] = last_error_bundle;
 	return result;
 }
 
@@ -1565,4 +3389,9 @@ void CLIAIInputServer::shutdown() {
 	pending_client_bytes.clear();
 	pending_waits.clear();
 	active_batch = ActiveBatch();
+	observation_cache = ObservationFrameCache();
+	root_image_cache_frame = UINT64_MAX;
+	root_image_cache_populated = false;
+	root_image_cache_available = false;
+	root_image_cache.unref();
 }

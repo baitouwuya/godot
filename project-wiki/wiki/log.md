@@ -50,3 +50,9 @@ wiki 活动的追加式记录。
 - 重写 `project-wiki/wiki/components/runtime-ai-agent-control.md`。
 - 补充语义观察层、结构化 selector、条件等待原语、高层目标动作、`expect`、`batch_status`、`cancel_batch`、`get_last_error_bundle`、失败证据和新的项目设置默认值。
 - 更新 `project-wiki/wiki/index.md`，将 Runtime AI Agent Control 描述同步到“语义观察 + 条件等待 + 高层动作”版本。
+
+## [2026-04-24] docs | 按当前代码实现重新同步自定义 wiki
+
+- 更新 `project-wiki/wiki/index.md`，将“自定义功能”列表改为当前能力总览表。
+- 更新 `project-wiki/wiki/components/runtime-ai-agent-control.md`，补充根窗口坐标口径、`viewportPath`、`hasScreenPosition`、`invalid_query`、`invalid_wait`、`target_not_clickable`、观察缓存、截图缓存、Run Bar 参数一致性、最新验证覆盖和 `SubViewport` 相关 warning 限制。
+- 复核 `project-wiki/wiki/components/gdscript-lsp-cli.md`、`project-wiki/wiki/components/cli-performance-recorder.md`、`project-wiki/wiki/components/latest-log-cli.md` 与当前代码实现一致，本轮未改动。

@@ -2,12 +2,14 @@
 
 这个 wiki 保存 Godot 自定义分支的本地知识，避免把自用功能说明混入官方 `doc/` 文档树。
 
-## 自定义功能
+## 当前定制功能总览
 
-- [GDScript LSP CLI](components/gdscript-lsp-cli.md) - 面向自动化的一次性 GDScript LSP 查询和全项目诊断。
-- [CLI 性能录制器](components/cli-performance-recorder.md) - CLI 项目运行时的逐帧性能摘要、分位数、慢帧快照和可选 JSONL 样本导出。
-- [最新日志 CLI](components/latest-log-cli.md) - 一次性输出最新项目日志，默认给出语义压缩文本摘要，并支持 `json`、`both` 和 `raw`。
-- [Runtime AI Agent Control Mode](components/runtime-ai-agent-control.md) - 本机 TCP JSONL 运行时 agent 桥，支持语义观察、条件等待、高层目标动作、batch 调试和 socket 返回的性能探针。
+| 功能 | 主要入口 | 当前能力 | 说明页 |
+| --- | --- | --- | --- |
+| GDScript LSP CLI | `--lsp-query` `--lsp-diagnostics` | 一次性 GDScript LSP 查询、全项目诊断、summary 输出、可控退出码、默认低副作用 editor 启动 | [GDScript LSP CLI](components/gdscript-lsp-cli.md) |
+| CLI 性能录制器 | `--perf-record` | CLI 项目运行时的逐帧性能摘要、分位数、慢帧快照、budget 统计和可选 JSONL 样本导出 | [CLI 性能录制器](components/cli-performance-recorder.md) |
+| 最新日志 CLI | `--latest-log` | 默认输出面向 AI 的语义压缩日志摘要，支持 `text`、`json`、`both`、`raw`，并带问题块、重复折叠、关键词和栈摘要 | [最新日志 CLI](components/latest-log-cli.md) |
+| Runtime AI Agent Control Mode | `--ai-agent-control`、Project Settings、Run Bar 开关 | 本机 TCP JSONL 运行时 agent 桥，支持语义观察、条件等待、高层目标动作、batch 调试、socket 返回的性能探针，并已补齐观察缓存、截图缓存和严格错误语义 | [Runtime AI Agent Control Mode](components/runtime-ai-agent-control.md) |
 
 ## 操作流程
 

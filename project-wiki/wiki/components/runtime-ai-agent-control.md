@@ -6,7 +6,7 @@
 
 Runtime AI Agent Control Mode 是默认关闭的本机 TCP JSONL 控制桥，面向普通项目运行态。
 
-当前版本已经从“低层输入桥”扩展到“可稳定自动化的运行时 agent 桥”，覆盖三层能力：
+当前版本已经从“低层输入桥”扩展到“可稳定自动化的运行时 agent 桥”，并在最新实现里补齐了观察口径、缓存复用和严格错误语义，覆盖三层能力：
 
 - 低层输入：`action`、`key`、`mouse_button`、`mouse_motion`、`wait`
 - 语义观察：`get_interactables`、`query_nodes`、`get_node_snapshot`、`get_viewport_summary`
@@ -88,6 +88,8 @@ CLI 运行项目时显式开启：
 
 编辑器 Run Bar 也有 AI Agent Control Mode 开关。这个开关保存为 editor project metadata，是运行便利覆盖项，不直接改写 `enabled`。
 
+当前实现还保证：Run Bar 开启 AI Agent Control 后，editor/plugin 能看到的 run args 与实际子进程启动参数保持一致。
+
 ## 协议基础
 
 传输规则：
@@ -153,12 +155,14 @@ CLI 运行项目时显式开启：
 - `is3D`
 - `visible`
 - `screenRect`
+- `nearestToScreenPoint`
 
 示例：
 
 ```json
 {"id":11,"cmd":"query_nodes","filter":{"group":"menu"},"maxResults":20}
 {"id":12,"cmd":"query_nodes","filter":{"name":"Turner","is3D":true}}
+{"id":13,"cmd":"query_nodes","filter":{"nearestToScreenPoint":[640,360],"is3D":true}}
 ```
 
 ### 3. `get_interactables`
@@ -168,17 +172,19 @@ CLI 运行项目时显式开启：
 示例：
 
 ```json
-{"id":13,"cmd":"get_interactables","maxResults":20}
+{"id":14,"cmd":"get_interactables","maxResults":20}
 ```
 
 ### 4. `get_node_snapshot`
 
 按 selector 解析单个目标，并返回白名单快照。
 
+当 selector 带 `path` 时，当前实现优先直接解析该节点，不先做全树扫描。
+
 示例：
 
 ```json
-{"id":14,"cmd":"get_node_snapshot","selector":{"name":"PlayButton"}}
+{"id":15,"cmd":"get_node_snapshot","selector":{"name":"PlayButton"}}
 ```
 
 ### 统一目标结构
@@ -194,13 +200,35 @@ CLI 运行项目时显式开启：
 - `is3D`
 - `screenRect`
 - `screenPoint`
+- `hasScreenPosition`
+- `viewportPath`
 - `worldPosition`
 - `text`
 - `value`
 - `selected`
 - `childCount`
 
+口径固定为：
+
+- `screenRect` / `screenPoint` 统一按根窗口坐标系返回
+- `viewportPath` 表示该快照来自哪个 viewport
+- `hasScreenPosition` 表示当前是否真的拿到了可用屏幕位置
+- 3D 目标允许返回近似 `screenRect`；如果无法稳定给出包围盒，至少返回 `screenPoint`
+
 取不到的字段返回 `null`，不会因为单个字段缺失让整个查询失败。
+
+## 观察口径与缓存
+
+当前实现的观察层已经做了稳定性与开销收敛：
+
+- 遍历场景树时会持续跟踪节点所属的有效 viewport 和 camera，而不是始终复用 root viewport / root camera
+- `screenRect` / `screenPoint` 先在节点本地 viewport 中求值，再统一映射到根窗口坐标系
+- `nearestToScreenPoint` 只会在 `hasScreenPosition=true` 的候选里参与匹配，没有屏幕坐标的节点会被排除
+- 同一帧最多构建一次 observation snapshot，`get_interactables`、`query_nodes`、`get_node_snapshot`、`wait_*`、高层 target 动作都会复用它
+- 同一帧最多做一次 root viewport 图像读回，`wait_screenshot_diff` 和 `captureOnError` 会共享截图缓存
+- 路径型查询和等待优先走直接节点查找，减少大场景下的整树扫描
+
+这些优化只改变稳定性和性能，不改变现有 JSONL 协议面。
 
 ## 条件同步
 
@@ -227,6 +255,12 @@ CLI 运行项目时显式开启：
 {"id":22,"cmd":"wait_scene_changed","fromScenePath":"/root/Menu"}
 {"id":23,"cmd":"wait_screenshot_diff","threshold":0.08}
 ```
+
+`wait_property` 的比较口径固定为：
+
+- `visible` / `disabled` / `selected` 使用 bool
+- `text` 使用 string
+- `value` 使用 int / float 数值
 
 ### 通用 `wait_until`
 
@@ -255,6 +289,16 @@ CLI 运行项目时显式开启：
 - `screenshot_diff`
 
 超时返回 `timeout`，不会阻塞主循环。
+
+## 参数校验与失败语义
+
+当前版本不再把参数类型错误静默折叠成“查不到目标”：
+
+- selector / filter 只接受 `path`、`name`、`type`、`group`、`text`、`is3D`、`visible`、`screenRect`、`nearestToScreenPoint`
+- selector / filter 字段类型错误、未知字段、`maxResults < 1` 等问题返回 `invalid_query`
+- wait 参数类型错误、非法 `timeoutFrames` / `pollEveryFrames`、不支持的 `wait_property.property`、`equals` 类型不匹配等问题返回 `invalid_wait`
+- `nearestToScreenPoint` 必须是 `[x, y]` 数组，`screenRect` 必须是对象
+- 错误响应仍可能附带 `lastResolvedTarget`、`sceneDigest`、`screenshotPath`
 
 ## 高层动作
 
@@ -303,7 +347,7 @@ CLI 运行项目时显式开启：
 - 实际使用的 `position` 或 `from` / `to`
 - `expandedSteps`
 
-找不到目标返回 `target_not_found`；匹配多个目标返回 `ambiguous_target`。
+找不到目标返回 `target_not_found`；匹配多个目标返回 `ambiguous_target`；命中了节点但没有可用屏幕坐标时返回 `target_not_clickable`。
 
 ## 动作后确认
 
@@ -406,7 +450,14 @@ runtime perf 仍复用现有 `CLIPerformanceRecorder`：
 自动化：
 
 - `tests/main/test_cli_ai_input_server.h`
-- 已覆盖参数校验、观察查询、selector 过滤、高层动作展开、等待成功/超时、batch 调试状态
+- 当前已覆盖 `SubViewport + secondary camera + root camera` 观察口径
+- 当前已覆盖 `nearestToScreenPoint` 稳定命中
+- 当前已覆盖 `invalid_query`
+- 当前已覆盖 `invalid_wait`
+- 当前已覆盖 `wait_property` 类型归一化
+- 当前已覆盖 observation / screenshot cache reuse
+- 当前已覆盖 batch 调试状态
+- 当前已覆盖 editor run args 接线一致性
 
 构建：
 
@@ -422,18 +473,23 @@ scons platform=windows target=editor dev_build=yes module_mono_enabled=no tests=
 
 本轮手工烟雾验证：
 
-- `E:\Godot Projects\VFX-sketchbook-Godot-4.x`
-- 已确认 `ping`、`get_status`、`get_viewport_summary`、`query_nodes`、`get_interactables` 正常返回
-- 已确认 `hover_target`、`click_target` 在真实 3D 目标上返回 `resolvedTarget` 和实际坐标
+- `E:\Godot Projects\view3d\project`
+- 已确认 `get_viewport_summary` 与 `query_nodes` 在真实项目中正常返回
 
 ## 排障
 
 - `busy`
   另一个 client 或 batch 正在运行
+- `invalid_query`
+  selector / filter 字段名、字段类型或 `maxResults` 非法
+- `invalid_wait`
+  wait 参数、`wait_property` 比较值或 `condition` 对象非法
 - `target_not_found`
   selector 没有命中目标
 - `ambiguous_target`
   selector 命中多个目标，需要更具体
+- `target_not_clickable`
+  selector 命中了节点，但当前没有可用屏幕坐标，无法安全注入点击
 - `timeout`
   等待条件在给定帧窗口内未满足
 - `screenshot_unavailable`
@@ -449,6 +505,7 @@ scons platform=windows target=editor dev_build=yes module_mono_enabled=no tests=
 - 仍然不开放任意节点方法调用
 - 仍然不开放任意属性写入
 - 3D `screenRect` 目前允许近似包围盒
+- 某些 `SubViewport` 如果不是 `SubViewportContainer` 的子节点，Godot 运行时仍可能出现 `get_screen_transform` 相关 warning；这是当前引擎布局限制，不是 AI bridge 新增错误
 - `pause / resume` 还没有实现
 - `type_text` 当前优先覆盖常见文本输入路径，不等同于完整 IME 仿真
 

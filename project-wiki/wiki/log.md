@@ -38,3 +38,9 @@ wiki 活动的追加式记录。
 
 - 创建 `project-wiki/wiki/components/latest-log-cli.md`。
 - 记录 `--latest-log`、`--latest-log-lines`、默认尾部压缩输出、路径解析和轮转日志选择规则。
+
+## [2026-04-24] docs | 最新日志 CLI 语义压缩增强 v2
+
+- 更新 `project-wiki/wiki/components/latest-log-cli.md`。
+- 补充 `--latest-log-format <text|json|both|raw>`、默认增强文本摘要、`raw` 兼容模式、问题块识别、保守模板化、数值压缩、相邻重复折叠、栈摘要与 JSON 契约。
+- 更新 `project-wiki/wiki/index.md`，将“最新日志 CLI”描述同步到增强版语义。

@@ -43,10 +43,19 @@ public:
 		EXIT_READ_FAILED = 3,
 	};
 
+	enum Format {
+		FORMAT_TEXT,
+		FORMAT_JSON,
+		FORMAT_BOTH,
+		FORMAT_RAW,
+	};
+
 	struct Options {
 		bool enabled = false;
 		int lines = 200;
 		bool lines_set = false;
+		Format format = FORMAT_TEXT;
+		bool format_set = false;
 	};
 
 	struct ReadResult {
@@ -63,6 +72,8 @@ public:
 	static String resolve_base_log_path(const String &p_log_file_override);
 	static Error find_latest_log_path(const String &p_base_log_path, String &r_latest_log_path);
 	static Error read_log(const String &p_log_path, int p_lines, ReadResult &r_result, String &r_error);
+	static String get_format_name(Format p_format);
+	static Error build_output(const String &p_log_path, const String &p_base_log_path, const Options &p_options, String &r_output, Dictionary &r_summary, String &r_error);
 	static int run(const Options &p_options, const String &p_log_file_override);
 
 private:

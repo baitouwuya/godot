@@ -630,8 +630,9 @@ void Main::print_help(const char *p_binary) {
 	print_help_option("--headless", "Enable headless mode (--display-driver headless --audio-driver Dummy). Useful for servers and with --script.\n");
 	print_help_option("--log-file <file>", "Write output/error log to the specified path instead of the default location defined by the project.\n");
 	print_help_option("", "<file> path should be absolute or relative to the project directory.\n");
-	print_help_option("--latest-log", "Print the latest project log path and a compact tail of its content.\n");
-	print_help_option("--latest-log-lines <int>", "Number of trailing log lines to print with --latest-log (default: 200, use 0 for the whole file).\n");
+	print_help_option("--latest-log", "Print the latest project log using AI-oriented semantic compression by default.\n");
+	print_help_option("--latest-log-lines <int>", "Tail window analyzed by --latest-log (default: 200, use 0 to analyze the whole file).\n");
+	print_help_option("--latest-log-format <text|json|both|raw>", "Output mode for --latest-log (default: text, use raw for the original tail reader).\n");
 	print_help_option("--write-movie <file>", "Write a video to the specified path (usually with .avi or .png extension).\n");
 	print_help_option("", "--fixed-fps is forced when enabled, but it can be used to change movie FPS.\n");
 	print_help_option("", "--disable-vsync can speed up movie writing but makes interaction more difficult.\n");

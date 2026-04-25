@@ -63,3 +63,11 @@ wiki 活动的追加式记录。
 - 更新 `project-wiki/wiki/index.md`，将共享埋点系统加入当前定制功能总览。
 - 更新 `project-wiki/wiki/components/gdscript-lsp-cli.md`、`project-wiki/wiki/components/cli-performance-recorder.md`、`project-wiki/wiki/components/latest-log-cli.md`、`project-wiki/wiki/components/runtime-ai-agent-control.md`，补充自动 tracing 行为、典型事件和 sidecar 规则。
 - 文档明确当前只有写入端，没有新的读取 CLI。
+
+## [2026-04-25] docs | Runtime AI Agent Control 输入语义修复同步
+
+- 更新 `project-wiki/wiki/components/runtime-ai-agent-control.md`，补充本地 `key` / `mouse_button` / `mouse_motion` 现在会同时驱动 scene-tree 输入分发和 `Input` singleton 的 gameplay 轮询状态。
+- 增补“修复了什么”说明，明确这次收敛的是“协议成功但 gameplay 轮询态不同步”的断点。
+- 更新验证章节，记录自动化覆盖的 `move_right`、`jump`、`aim`、`shoot`、`mouse_motion` 行为。
+- 补录 `E:\GitHub\tps-demo` 的最新手工验证结果，确认菜单进入、移动、跳跃、视角转动、瞄准和射击均已打通。
+- 更新 `project-wiki/wiki/index.md`，将 Runtime AI Agent Control 的能力摘要同步到“GUI + gameplay 输入状态同步”版本。

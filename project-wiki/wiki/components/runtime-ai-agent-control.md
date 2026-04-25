@@ -6,7 +6,7 @@
 
 Runtime AI Agent Control Mode 是默认关闭的本机 TCP JSONL 控制桥，面向普通项目运行态。
 
-当前版本已经从“低层输入桥”扩展到“可稳定自动化的运行时 agent 桥”，并在最新实现里补齐了观察口径、缓存复用和严格错误语义，覆盖三层能力：
+当前版本已经从“低层输入桥”扩展到“可稳定自动化的运行时 agent 桥”，并在最新实现里补齐了观察口径、缓存复用、严格错误语义，以及 GUI / gameplay 共用的输入状态同步，覆盖三层能力：
 
 - 低层输入：`action`、`key`、`mouse_button`、`mouse_motion`、`wait`
 - 语义观察：`get_interactables`、`query_nodes`、`get_node_snapshot`、`get_viewport_summary`
@@ -119,6 +119,35 @@ CLI 运行项目时显式开启：
 - `line_too_large`
 - `invalid_json`
 - `unknown_command`
+
+## 输入语义
+
+当前输入桥的低层语义已经分成两类：
+
+- `action`
+  继续定位为 `InputMap` 状态注入原语，适合 gameplay action 状态切换
+- `key`、`mouse_button`、`mouse_motion`
+  现在会进入根输入管线，而不是只做 scene-tree 事件投递；本地坐标事件会经 `Input::parse_input_event()` 分发，因此会同时更新：
+  - `_input` / `gui_input` / `_unhandled_input` 一侧能看到的真实输入事件
+  - `Input` singleton 上的 `is_action_pressed()`、`is_action_just_pressed()`、`is_action_just_released()`、`get_action_strength()` 等 gameplay 轮询状态
+
+这意味着 Runtime AI Agent Control 不再只适合 UI 自动化。对于依赖 `Input` 轮询的项目，例如 TPS、角色动作和射击类项目，远程注入的键鼠输入现在也能被 gameplay 层稳定消费。
+
+## 修复了什么
+
+这一版修复的核心，是补上“GUI 能收到事件，但 gameplay 轮询态没有同步”的断点。
+
+修复前的典型症状：
+
+- `click_target`、`focus_target`、`key` 等协议返回 `ok=true`
+- 菜单、按钮或部分 GUI 有响应
+- 但依赖 `InputMap` 轮询的项目逻辑仍然读不到稳定的按键 / 鼠标状态
+
+修复后的语义收敛为：
+
+- GUI 侧仍然保持真实事件分发，不回退到仅修改状态位
+- gameplay 侧可以直接从 `Input` 读取远程注入后的 action 强度和按下 / 抬起边沿
+- 同一套 `key` / `mouse_button` / `mouse_motion` 现在同时覆盖“看得见事件”和“轮询得到状态”这两层需求
 
 ## 语义观察
 
@@ -488,6 +517,12 @@ runtime perf 仍复用现有 `CLIPerformanceRecorder`：
 - 当前已覆盖 observation / screenshot cache reuse
 - 当前已覆盖 batch 调试状态
 - 当前已覆盖 editor run args 接线一致性
+- 当前已覆盖 `action ui_right` 按下 / 抬起同步更新 `Input` action 状态
+- 当前已覆盖 `key D` 驱动 `move_right` strength 从 `1.0` 回到 `0.0`
+- 当前已覆盖 `key Space` 命中 `jump just_pressed`
+- 当前已覆盖右键按下 / 抬起命中 `aim pressed / just_pressed / just_released`
+- 当前已覆盖左键按下 / 抬起命中 `shoot pressed / released`
+- 当前已覆盖 `mouse_motion` 绝对 / 相对模式都更新 `relative_screen_position`
 
 构建：
 
@@ -505,6 +540,14 @@ scons platform=windows target=editor dev_build=yes module_mono_enabled=no tests=
 
 - `E:\Godot Projects\view3d\project`
 - 已确认 `get_viewport_summary` 与 `query_nodes` 在真实项目中正常返回
+- `E:\GitHub\tps-demo`
+- 已用 `godot-dev --path "E:\GitHub\tps-demo" --ai-agent-control --ai-agent-port 7011` 验证主菜单可通过 `focus_target + action(ui_accept)` 进入 `Level`
+- 已确认 `activeCamera` 切换到 `/root/main/Level/SpawnedNodes/1/CameraBase/CameraRot/SpringArm3D/Camera3D`
+- 已确认角色 `worldPosition` 会随着移动发生变化，说明 `W/A/S/D` 类轮询输入恢复
+- 已确认 `Space` 触发跳跃后，角色 Y 坐标上升
+- 已确认 `mouse_motion(relativeX, relativeY)` 会改变相机并能通过 `wait_screenshot_diff` 观察到画面变化
+- 已确认右键瞄准、左键射击后会生成 `Bullet` 节点，说明鼠标按钮输入已能驱动实际 gameplay 逻辑
+- 当前这组手工验证证明桥已经打通菜单进入、移动、跳跃、视角转动、瞄准和射击；尚不代表更高层的整段战斗编排已完成
 
 ## 排障
 

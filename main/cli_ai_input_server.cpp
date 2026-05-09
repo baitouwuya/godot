@@ -56,6 +56,85 @@
 
 static const int MAX_OPS_PER_FRAME = 128;
 
+namespace {
+
+struct AIAgentCommandHelpEntry {
+	const char *name;
+	const char *aliases;
+	const char *category;
+	const char *summary;
+	const char *key_params;
+	bool may_defer;
+	const char *example;
+};
+
+static const AIAgentCommandHelpEntry AI_AGENT_COMMAND_HELP[] = {
+		{ "ping", "", "core", "Health-check request.", "id (optional)", false, "{\"id\":1,\"cmd\":\"ping\"}" },
+		{ "get_status", "", "core", "Returns runtime status and active operations.", "id (optional)", false, "{\"id\":2,\"cmd\":\"get_status\"}" },
+		{ "batch", "", "batch", "Runs multiple ops with stop/continue policy.", "ops[], onError", true, "{\"id\":3,\"cmd\":\"batch\",\"onError\":\"stop\",\"ops\":[{\"cmd\":\"ping\"}]}" },
+		{ "batch_status", "", "batch", "Returns active batch progress.", "id (optional)", false, "{\"id\":4,\"cmd\":\"batch_status\"}" },
+		{ "cancel_batch", "", "batch", "Cancels currently active batch.", "id (optional)", false, "{\"id\":5,\"cmd\":\"cancel_batch\"}" },
+		{ "list_checkpoints", "", "batch", "Lists checkpoint events emitted by batch ops.", "id (optional)", false, "{\"id\":6,\"cmd\":\"list_checkpoints\"}" },
+		{ "checkpoint", "", "batch", "Emits an in-band checkpoint event for current batch step.", "name (optional)", false, "{\"cmd\":\"checkpoint\",\"name\":\"after_menu\"}" },
+		{ "action", "", "input", "Press/release mapped Input action.", "action, pressed", false, "{\"cmd\":\"action\",\"action\":\"ui_accept\",\"pressed\":true}" },
+		{ "key", "", "input", "Injects key event with modifiers.", "keycode, pressed", false, "{\"cmd\":\"key\",\"keycode\":\"KEY_ENTER\",\"pressed\":true}" },
+		{ "mouse_button", "", "input", "Injects mouse button press/release.", "button, pressed, x, y", false, "{\"cmd\":\"mouse_button\",\"button\":\"left\",\"pressed\":true,\"x\":100,\"y\":120}" },
+		{ "mouse_motion", "", "input", "Injects mouse motion to screen position.", "x, y", false, "{\"cmd\":\"mouse_motion\",\"x\":100,\"y\":120}" },
+		{ "type_text_commit", "", "input", "Commits text directly to focused control.", "text", false, "{\"cmd\":\"type_text_commit\",\"text\":\"player01\"}" },
+		{ "wait", "", "wait", "Waits for N frames.", "frames", true, "{\"id\":7,\"cmd\":\"wait\",\"frames\":10}" },
+		{ "wait_until", "expect", "wait", "Waits until condition is satisfied.", "condition, timeoutFrames, pollEveryFrames", true, "{\"id\":8,\"cmd\":\"wait_until\",\"condition\":{\"kind\":\"node_exists\",\"selector\":{\"name\":\"PlayButton\"}}}" },
+		{ "wait_node_exists", "", "wait", "Waits until selector resolves to a node.", "selector", true, "{\"id\":9,\"cmd\":\"wait_node_exists\",\"selector\":{\"name\":\"PlayButton\"}}" },
+		{ "wait_node_gone", "", "wait", "Waits until selector no longer resolves.", "selector", true, "{\"id\":10,\"cmd\":\"wait_node_gone\",\"selector\":{\"name\":\"LoadingPanel\"}}" },
+		{ "wait_property", "", "wait", "Waits for node property to equal expected value.", "selector, property, equals", true, "{\"id\":11,\"cmd\":\"wait_property\",\"selector\":{\"name\":\"SpeedBar\"},\"property\":\"value\",\"equals\":10}" },
+		{ "wait_scene_changed", "", "wait", "Waits for scene/content scene change.", "timeoutFrames, pollEveryFrames", true, "{\"id\":12,\"cmd\":\"wait_scene_changed\"}" },
+		{ "wait_screenshot_diff", "", "wait", "Waits until screenshot differs from baseline.", "selector(optional), threshold", true, "{\"id\":13,\"cmd\":\"wait_screenshot_diff\",\"threshold\":0.02}" },
+		{ "get_interactables", "", "observation", "Lists interactable UI/3D targets.", "filter(optional)", false, "{\"id\":14,\"cmd\":\"get_interactables\"}" },
+		{ "query_nodes", "", "observation", "Queries snapshots by selector filters.", "filter", false, "{\"id\":15,\"cmd\":\"query_nodes\",\"filter\":{\"group\":\"menu\"}}" },
+		{ "get_node_snapshot", "", "observation", "Returns one node snapshot for selector.", "selector", false, "{\"id\":16,\"cmd\":\"get_node_snapshot\",\"selector\":{\"name\":\"PlayButton\"}}" },
+		{ "get_viewport_summary", "", "observation", "Returns viewport and camera summary.", "includeCounts(optional)", false, "{\"id\":17,\"cmd\":\"get_viewport_summary\"}" },
+		{ "get_scene_tree", "", "observation", "Returns bounded scene tree structure.", "maxDepth(optional)", false, "{\"id\":18,\"cmd\":\"get_scene_tree\",\"maxDepth\":4}" },
+		{ "get_screenshot", "", "observation", "Captures screenshot and returns path/metadata.", "path(optional), crop(optional)", false, "{\"id\":19,\"cmd\":\"get_screenshot\"}" },
+		{ "get_last_error_bundle", "", "diagnostics", "Returns most recent contextual error bundle.", "id(optional)", false, "{\"id\":20,\"cmd\":\"get_last_error_bundle\"}" },
+		{ "perf_start", "", "diagnostics", "Starts runtime perf recording.", "topFrames(optional)", false, "{\"id\":21,\"cmd\":\"perf_start\",\"topFrames\":10}" },
+		{ "perf_stop", "", "diagnostics", "Stops runtime perf recording and returns summary.", "id(optional)", true, "{\"id\":22,\"cmd\":\"perf_stop\"}" },
+		{ "perf_status", "", "diagnostics", "Returns runtime perf recorder status.", "id(optional)", false, "{\"id\":23,\"cmd\":\"perf_status\"}" },
+		{ "click", "", "high_level", "Expands to pointer move/press/wait/release.", "x, y, button(optional)", false, "{\"cmd\":\"click\",\"x\":100,\"y\":120}" },
+		{ "double_click", "", "high_level", "Expands to two click sequences.", "x, y, button(optional)", false, "{\"cmd\":\"double_click\",\"x\":100,\"y\":120}" },
+		{ "hold", "", "high_level", "Press-hold-release at screen position.", "x, y, frames, button(optional)", false, "{\"cmd\":\"hold\",\"x\":100,\"y\":120,\"frames\":6}" },
+		{ "drag", "", "high_level", "Drags pointer along a path.", "path[], frames(optional), button(optional)", false, "{\"cmd\":\"drag\",\"path\":[[100,120],[320,120]],\"frames\":12}" },
+		{ "hover_target", "", "high_level", "Moves pointer to selector target.", "selector", false, "{\"cmd\":\"hover_target\",\"selector\":{\"name\":\"PlayButton\"}}" },
+		{ "focus_target", "", "high_level", "Focuses Control or moves pointer to target.", "selector", false, "{\"cmd\":\"focus_target\",\"selector\":{\"name\":\"NameInput\"}}" },
+		{ "click_target", "", "high_level", "Clicks selector-resolved target.", "selector, button(optional)", false, "{\"cmd\":\"click_target\",\"selector\":{\"name\":\"PlayButton\"}}" },
+		{ "double_click_target", "", "high_level", "Double-clicks selector-resolved target.", "selector, button(optional)", false, "{\"cmd\":\"double_click_target\",\"selector\":{\"name\":\"PlayButton\"}}" },
+		{ "drag_target_to_target", "", "high_level", "Drags from source selector to destination selector.", "fromSelector, toSelector, frames(optional)", false, "{\"cmd\":\"drag_target_to_target\",\"fromSelector\":{\"name\":\"A\"},\"toSelector\":{\"name\":\"B\"}}" },
+		{ "scroll_view", "", "high_level", "Sends wheel input on selector target.", "selector, direction, steps(optional)", false, "{\"cmd\":\"scroll_view\",\"selector\":{\"name\":\"List\"},\"direction\":\"down\",\"steps\":2}" },
+		{ "type_text", "", "high_level", "Focuses target then commits text.", "selector, text", false, "{\"cmd\":\"type_text\",\"selector\":{\"name\":\"NameInput\"},\"text\":\"Player\"}" },
+		{ "click_target_and_wait", "", "high_level", "Clicks target then waits by condition.", "selector, wait", false, "{\"cmd\":\"click_target_and_wait\",\"selector\":{\"name\":\"PlayButton\"},\"wait\":{\"condition\":{\"kind\":\"scene_changed\"}}}" },
+		{ "type_text_and_wait", "", "high_level", "Types text then waits by condition.", "selector, text, wait", false, "{\"cmd\":\"type_text_and_wait\",\"selector\":{\"name\":\"NameInput\"},\"text\":\"Player\",\"wait\":{\"condition\":{\"kind\":\"node_exists\",\"selector\":{\"name\":\"LevelRoot\"}}}}" },
+};
+
+static String _command_aliases_or_none(const char *p_aliases) {
+	const String aliases = p_aliases;
+	return aliases.is_empty() ? "-" : aliases;
+}
+
+static bool _is_supported_immediate_command_name(const String &p_cmd) {
+	for (const AIAgentCommandHelpEntry &entry : AI_AGENT_COMMAND_HELP) {
+		if (p_cmd == String(entry.name)) {
+			return true;
+		}
+		const PackedStringArray aliases = String(entry.aliases).split(",", false);
+		for (const String &alias : aliases) {
+			if (p_cmd == alias.strip_edges()) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+} // namespace
+
 static String _trace_correlation_from_request(CustomFeatureTracer *p_tracer, const Dictionary &p_request) {
 	if (!p_tracer) {
 		return String();
@@ -144,6 +223,29 @@ bool CLIAIInputServer::parse_argument(const String &p_arg, List<String>::Element
 	String value;
 	r_error = String();
 
+	if (p_arg == "--ai-agent-help") {
+		r_options.help_enabled = true;
+		return true;
+	}
+
+	if (p_arg == "--ai-agent-help-format") {
+		if (!_consume_argument_value(p_arg, r_next, value, r_error)) {
+			return true;
+		}
+		if (value == "text") {
+			r_options.help_format = HELP_FORMAT_TEXT;
+		} else if (value == "json") {
+			r_options.help_format = HELP_FORMAT_JSON;
+		} else if (value == "both") {
+			r_options.help_format = HELP_FORMAT_BOTH;
+		} else {
+			r_error = "--ai-agent-help-format must be text, json or both.";
+			return true;
+		}
+		r_options.help_format_set = true;
+		return true;
+	}
+
 	if (p_arg == "--ai-agent-control") {
 		r_options.enabled = true;
 		r_options.enabled_set = true;
@@ -190,6 +292,132 @@ bool CLIAIInputServer::parse_argument(const String &p_arg, List<String>::Element
 	}
 
 	return false;
+}
+
+Error CLIAIInputServer::validate_help_options(const Options &p_options, String &r_error) {
+	r_error = String();
+	if (!p_options.help_enabled && p_options.help_format_set) {
+		r_error = "--ai-agent-help-format requires --ai-agent-help.";
+		return ERR_INVALID_PARAMETER;
+	}
+	return OK;
+}
+
+String CLIAIInputServer::get_help_format_name(HelpFormat p_format) {
+	switch (p_format) {
+		case HELP_FORMAT_TEXT:
+			return "text";
+		case HELP_FORMAT_JSON:
+			return "json";
+		case HELP_FORMAT_BOTH:
+			return "both";
+	}
+	return "text";
+}
+
+Error CLIAIInputServer::build_help_outputs(String &r_text_output, String &r_json_output, String &r_error) {
+	r_text_output = String();
+	r_json_output = String();
+	r_error = String();
+
+	String text;
+	text += "Runtime AI Agent Control Protocol Help\n";
+	text += "=====================================\n\n";
+	text += "Transport\n";
+	text += "- Localhost TCP JSONL stream.\n";
+	text += "- One JSON object per line.\n";
+	text += "- Default port: 7010 (override with --ai-agent-port).\n\n";
+	text += "Request Envelope\n";
+	text += "- Required: cmd (string).\n";
+	text += "- Optional: id (any JSON scalar/object), captureOnError (bool), and command-specific fields.\n";
+	text += "- High-level commands expand to low-level ops before execution.\n\n";
+	text += "Response Envelope\n";
+	text += "- ok (bool), frame (int64), result (on success), error { code, message } (on failure).\n";
+	text += "- id is echoed when provided.\n";
+	text += "- sceneDigest may be attached for top-level request responses.\n\n";
+	text += "Commands\n";
+	text += "--------\n";
+	for (const AIAgentCommandHelpEntry &entry : AI_AGENT_COMMAND_HELP) {
+		text += vformat("* %s", entry.name);
+		const String aliases = _command_aliases_or_none(entry.aliases);
+		text += vformat(" | category=%s | aliases=%s | deferred=%s\n", entry.category, aliases, entry.may_defer ? "yes" : "no");
+		text += vformat("  - %s\n", entry.summary);
+		text += vformat("  - key params: %s\n", entry.key_params);
+		text += vformat("  - example: %s\n", entry.example);
+	}
+	r_text_output = text;
+
+	Dictionary root;
+	Dictionary transport;
+	transport["type"] = "tcp_jsonl";
+	transport["host"] = "127.0.0.1";
+	transport["defaultPort"] = 7010;
+	transport["lineDelimitedJson"] = true;
+	root["transport"] = transport;
+
+	Dictionary request_envelope;
+	PackedStringArray required_fields;
+	required_fields.push_back("cmd");
+	PackedStringArray optional_fields;
+	optional_fields.push_back("id");
+	optional_fields.push_back("captureOnError");
+	request_envelope["required"] = required_fields;
+	request_envelope["optional"] = optional_fields;
+	request_envelope["note"] = "High-level commands expand to low-level ops before execution.";
+	root["requestEnvelope"] = request_envelope;
+
+	Dictionary response_envelope;
+	PackedStringArray success_fields;
+	success_fields.push_back("ok");
+	success_fields.push_back("frame");
+	success_fields.push_back("result");
+	PackedStringArray error_fields;
+	error_fields.push_back("ok");
+	error_fields.push_back("frame");
+	error_fields.push_back("error.code");
+	error_fields.push_back("error.message");
+	PackedStringArray response_optional_fields;
+	response_optional_fields.push_back("id");
+	response_optional_fields.push_back("sceneDigest");
+	response_optional_fields.push_back("lastResolvedTarget");
+	response_optional_fields.push_back("screenshotPath");
+	response_envelope["successFields"] = success_fields;
+	response_envelope["errorFields"] = error_fields;
+	response_envelope["optionalFields"] = response_optional_fields;
+	root["responseEnvelope"] = response_envelope;
+
+	Array commands;
+	for (const AIAgentCommandHelpEntry &entry : AI_AGENT_COMMAND_HELP) {
+		Dictionary cmd;
+		cmd["name"] = entry.name;
+		const PackedStringArray aliases = String(entry.aliases).split(",", false);
+		Array alias_array;
+		for (const String &alias : aliases) {
+			const String clean_alias = alias.strip_edges();
+			if (!clean_alias.is_empty()) {
+				alias_array.push_back(clean_alias);
+			}
+		}
+		cmd["aliases"] = alias_array;
+		cmd["category"] = entry.category;
+		cmd["summary"] = entry.summary;
+		cmd["keyParams"] = entry.key_params;
+		cmd["mayDefer"] = entry.may_defer;
+		cmd["example"] = entry.example;
+		commands.push_back(cmd);
+	}
+	root["commands"] = commands;
+
+	r_json_output = JSON::stringify(root);
+	return OK;
+}
+
+Vector<String> CLIAIInputServer::get_supported_command_names() {
+	Vector<String> names;
+	for (const AIAgentCommandHelpEntry &entry : AI_AGENT_COMMAND_HELP) {
+		names.push_back(entry.name);
+	}
+	return names;
 }
 
 void CLIAIInputServer::apply_project_settings(Options &r_options) {
@@ -469,6 +697,15 @@ Error CLIAIInputServer::initialize(String &r_error) {
 	CustomFeatureTracer *tracer = CustomFeatureTracer::get_singleton();
 	CustomFeatureTracer::ScopedEventContext trace_context(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL);
 
+	if (!options.listen_tcp) {
+		if (tracer) {
+			Dictionary data;
+			data["localOnly"] = true;
+			tracer->record_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "local_executor_started", "info", String(), data);
+		}
+		return OK;
+	}
+
 	server.instantiate();
 	const Error err = server->listen((uint16_t)options.port, IPAddress("127.0.0.1"));
 	if (err != OK) {
@@ -497,6 +734,10 @@ bool CLIAIInputServer::is_listening() const {
 }
 
 void CLIAIInputServer::_send_response(const Dictionary &p_response) {
+	if (local_response_capture_active) {
+		local_response_queue.push_back(p_response);
+		return;
+	}
 #ifdef TESTS_ENABLED
 	test_sent_responses.push_back(p_response);
 #endif
@@ -507,6 +748,48 @@ void CLIAIInputServer::_send_response(const Dictionary &p_response) {
 	const String line = JSON::stringify(p_response) + "\n";
 	const CharString utf8 = line.utf8();
 	client->put_data((const uint8_t *)utf8.get_data(), utf8.length());
+}
+
+Dictionary CLIAIInputServer::execute_local_request(const Dictionary &p_request) {
+	CustomFeatureTracer *tracer = CustomFeatureTracer::get_singleton();
+	const String correlation_id = _trace_correlation_from_request(tracer, p_request);
+	CustomFeatureTracer::ScopedEventContext trace_context(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, correlation_id);
+	if (tracer) {
+		Dictionary payloads;
+		tracer->add_json_payload(payloads, "request", p_request);
+		tracer->record_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "request_received", "info", correlation_id, _make_trace_request_data(p_request), payloads);
+	}
+
+	bool deferred = false;
+	local_response_capture_active = true;
+	const Dictionary response = _handle_request(p_request, false, deferred);
+	if (!deferred) {
+		local_response_capture_active = false;
+		_record_last_error_bundle(response);
+		if (tracer) {
+			Dictionary payloads;
+			tracer->add_json_payload(payloads, "response", response);
+			const Dictionary error = response.has("error") && response["error"].get_type() == Variant::DICTIONARY ? (Dictionary)response["error"] : Dictionary();
+			tracer->record_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "response_sent", error.is_empty() ? "info" : (error.get("code", String()) == "timeout" ? "warning" : "error"), correlation_id, _make_trace_response_data(response), payloads, error);
+		}
+		return response;
+	}
+
+	Dictionary deferred_response;
+	deferred_response["ok"] = true;
+	deferred_response["frame"] = (int64_t)_current_frame();
+	deferred_response["deferred"] = true;
+	return deferred_response;
+}
+
+bool CLIAIInputServer::pop_local_response(Dictionary &r_response) {
+	if (local_response_queue.is_empty()) {
+		r_response.clear();
+		return false;
+	}
+	r_response = local_response_queue[0];
+	local_response_queue.remove_at(0);
+	return true;
 }
 
 bool CLIAIInputServer::_dispatch_root_input(const Ref<InputEvent> &p_event, bool p_local_coords) const {
@@ -1995,13 +2278,15 @@ void CLIAIInputServer::_fail_wait(const PendingWait &p_wait, const Dictionary &p
 }
 
 void CLIAIInputServer::poll_commands() {
-	if (!is_listening()) {
+	if (options.listen_tcp && !is_listening()) {
 		return;
 	}
 
 	int budget = MAX_OPS_PER_FRAME;
-	_accept_new_clients();
-	_poll_client_lines(budget);
+	if (options.listen_tcp && !local_execution_owner) {
+		_accept_new_clients();
+		_poll_client_lines(budget);
+	}
 	_process_pending_waits();
 	_process_batch(budget);
 }
@@ -2137,6 +2422,16 @@ Dictionary CLIAIInputServer::_execute_immediate_operation(const Dictionary &p_op
 	const bool has_id = p_operation.has("id");
 	const String cmd = p_operation["cmd"];
 
+	ERR_FAIL_COND_V_MSG(!_is_supported_immediate_command_name(cmd), _make_error_response(id, has_id, "unknown_command", "Unknown AI agent command: " + cmd + "."), "Unknown AI agent command: " + cmd + ".");
+
+	if (cmd == "batch") {
+		Dictionary response;
+		if (!_start_batch(p_operation, false, response)) {
+			return response;
+		}
+		r_deferred = true;
+		return Dictionary();
+	}
 	if (cmd == "ping") {
 		return _make_success_response(id, has_id, _cmd_ping());
 	}
@@ -2969,6 +3264,7 @@ Dictionary CLIAIInputServer::_cmd_ping() const {
 Dictionary CLIAIInputServer::_cmd_get_status() const {
 	Dictionary result;
 	result["listening"] = is_listening();
+	result["localOnly"] = !options.listen_tcp;
 	result["port"] = options.port;
 	result["batchActive"] = active_batch.active;
 	result["runtimePerfActive"] = runtime_perf_recorder != nullptr;
@@ -3927,6 +4223,9 @@ void CLIAIInputServer::shutdown() {
 	pending_client_bytes.clear();
 	pending_waits.clear();
 	active_batch = ActiveBatch();
+	local_response_queue.clear();
+	local_response_capture_active = false;
+	local_execution_owner = false;
 	observation_cache = ObservationFrameCache();
 	root_image_cache_frame = UINT64_MAX;
 	root_image_cache_populated = false;

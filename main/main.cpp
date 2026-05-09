@@ -31,6 +31,7 @@
 #include "main.h"
 
 #include "main/cli_ai_input_server.h"
+#include "main/cli_harness_runner.h"
 #include "main/cli_latest_log_runner.h"
 #include "main/cli_performance_recorder.h"
 #include "main/custom_feature_tracer.h"
@@ -288,6 +289,10 @@ static bool disable_render_loop = false;
 static int fixed_fps = -1;
 static CLIAIInputServer::Options cli_ai_agent_options;
 static CLIAIInputServer *cli_ai_agent_server = nullptr;
+static CLIHarnessRunner::Options cli_harness_options;
+static CLIHarnessRunner *cli_harness_runner = nullptr;
+static Dictionary cli_harness_script;
+static int cli_harness_setup_exit_code = EXIT_FAILURE;
 static CLILatestLogRunner::Options cli_latest_log_options;
 static CLIPerformanceRecorder::Options cli_perf_options;
 static CLIPerformanceRecorder *cli_perf_recorder = nullptr;
@@ -350,9 +355,12 @@ static Dictionary _make_cli_perf_trace_options_data(const CLIPerformanceRecorder
 static Dictionary _make_ai_agent_trace_options_data(const CLIAIInputServer::Options &p_options) {
 	Dictionary data;
 	data["enabled"] = p_options.enabled;
+	data["listenTcp"] = p_options.listen_tcp;
 	data["port"] = p_options.port;
 	data["maxBatchOps"] = p_options.max_batch_ops;
 	data["maxLineBytes"] = p_options.max_line_bytes;
+	data["helpEnabled"] = p_options.help_enabled;
+	data["helpFormat"] = CLIAIInputServer::get_help_format_name(p_options.help_format);
 	data["defaultPerfTopFrames"] = p_options.default_perf_top_frames;
 	data["defaultSceneTreeMaxDepth"] = p_options.default_scene_tree_max_depth;
 	data["defaultWaitTimeoutFrames"] = p_options.default_wait_timeout_frames;
@@ -361,6 +369,37 @@ static Dictionary _make_ai_agent_trace_options_data(const CLIAIInputServer::Opti
 	data["defaultQueryMaxResults"] = p_options.default_query_max_results;
 	data["screenshotDirectory"] = p_options.screenshot_directory;
 	return data;
+}
+
+static Dictionary _make_harness_trace_options_data(const CLIHarnessRunner::Options &p_options) {
+	Dictionary data;
+	data["enabled"] = p_options.enabled;
+	data["runPath"] = p_options.run_path;
+	data["reportPath"] = p_options.report_path;
+	data["timeoutFrames"] = p_options.timeout_frames;
+	data["format"] = CLIHarnessRunner::get_format_name(p_options.format);
+	return data;
+}
+
+static Error _print_ai_agent_help(const CLIAIInputServer::Options &p_options, String &r_error) {
+	r_error = String();
+	String text_output;
+	String json_output;
+	if (CLIAIInputServer::build_help_outputs(text_output, json_output, r_error) != OK) {
+		return ERR_CANT_CREATE;
+	}
+
+	if (p_options.help_format == CLIAIInputServer::HELP_FORMAT_TEXT || p_options.help_format == CLIAIInputServer::HELP_FORMAT_BOTH) {
+		OS::get_singleton()->print("%s", text_output.utf8().get_data());
+	}
+	if (p_options.help_format == CLIAIInputServer::HELP_FORMAT_JSON || p_options.help_format == CLIAIInputServer::HELP_FORMAT_BOTH) {
+		if (p_options.help_format == CLIAIInputServer::HELP_FORMAT_BOTH) {
+			OS::get_singleton()->print("\n");
+		}
+		OS::get_singleton()->print("%s\n", json_output.utf8().get_data());
+	}
+
+	return OK;
 }
 
 static String _resolve_trace_artifact_path(const String &p_path) {
@@ -388,7 +427,8 @@ static bool _should_trace_custom_feature_post_project_setup() {
 	const bool latest_log_touched = cli_latest_log_options.enabled || cli_latest_log_options.lines_set || cli_latest_log_options.format_set;
 	const bool perf_touched = cli_perf_options.enabled || cli_perf_options.start_frame_set || cli_perf_options.end_frame_set || cli_perf_options.top_frames_set || cli_perf_options.samples_file_set;
 	const bool ai_touched = cli_ai_agent_options.enabled || cli_ai_agent_options.enabled_set || cli_ai_agent_options.port_set || cli_ai_agent_options.max_batch_ops_set || cli_ai_agent_options.max_line_bytes_set;
-	return _should_trace_custom_feature_pre_project_setup() || latest_log_touched || perf_touched || ai_touched;
+	const bool harness_touched = cli_harness_options.enabled || cli_harness_options.report_path_set || cli_harness_options.timeout_frames_set || cli_harness_options.format_set;
+	return _should_trace_custom_feature_pre_project_setup() || latest_log_touched || perf_touched || ai_touched || harness_touched;
 }
 
 static void _ensure_custom_feature_tracer_initialized(const String &p_project_path, bool p_include_post_project_features) {
@@ -822,6 +862,13 @@ void Main::print_help(const char *p_binary) {
 	print_help_option("--ai-agent-port <int>", "TCP port for Runtime AI Agent Control Mode (default: 7010).\n");
 	print_help_option("--ai-agent-max-ops <int>", "Maximum operation count accepted in one AI agent batch (default: 1024).\n");
 	print_help_option("--ai-agent-max-line-bytes <int>", "Maximum JSONL request line size for AI agent control (default: 1048576).\n");
+	print_help_option("--ai-agent-help", "Print Runtime AI Agent Control protocol help (commands, params, and examples).\n");
+	print_help_option("--ai-agent-help-format <text|json|both>", "Output format for --ai-agent-help (default: text).\n");
+	print_help_option("", "Use --ai-agent-help for the full command protocol reference.\n");
+	print_help_option("--harness-run <file>", "Run a project harness JSON script through Runtime AI Agent Control.\n");
+	print_help_option("--harness-report <file>", "Write the project harness JSON report to <file>.\n");
+	print_help_option("--harness-timeout-frames <int>", "Maximum frames before --harness-run times out (default: 3600).\n");
+	print_help_option("--harness-format <text|json|both>", "Output mode for --harness-run (default: text).\n");
 #ifdef TOOLS_ENABLED
 	print_help_option("--editor-pseudolocalization", "Enable pseudolocalization for the editor and the project manager.\n", CLI_OPTION_AVAILABILITY_EDITOR);
 #endif
@@ -1279,6 +1326,11 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 	cli_ai_agent_options = CLIAIInputServer::Options();
 	String cli_ai_agent_error;
 	String cli_ai_agent_validation_error;
+	cli_harness_options = CLIHarnessRunner::Options();
+	cli_harness_script.clear();
+	cli_harness_setup_exit_code = EXIT_FAILURE;
+	String cli_harness_error;
+	String cli_harness_validation_error;
 	cli_latest_log_options = CLILatestLogRunner::Options();
 	String cli_latest_log_error;
 	String cli_latest_log_validation_error;
@@ -2144,6 +2196,16 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 				OS::get_singleton()->print("Error: %s\n", cli_ai_agent_error.utf8().get_data());
 				goto error;
 			}
+			if (CLIAIInputServer::is_help_enabled(cli_ai_agent_options)) {
+				cmdline_tool = true;
+			}
+		} else if (CLIHarnessRunner::parse_argument(arg, N, cli_harness_options, cli_harness_error)) {
+			if (!cli_harness_error.is_empty()) {
+				OS::get_singleton()->print("Error: %s\n", cli_harness_error.utf8().get_data());
+				cli_harness_setup_exit_code = CLIHarnessRunner::EXIT_INVALID_ARGUMENTS;
+				OS::get_singleton()->set_exit_code(cli_harness_setup_exit_code);
+				goto error;
+			}
 		} else if (CLIPerformanceRecorder::parse_argument(arg, N, cli_perf_options, cli_perf_error)) {
 			if (!cli_perf_error.is_empty()) {
 				OS::get_singleton()->print("Error: %s\n", cli_perf_error.utf8().get_data());
@@ -2247,6 +2309,19 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 	}
 #endif // GDSCRIPT_LSP_CLI_ENABLED
 #endif
+
+	if (CLIAIInputServer::validate_help_options(cli_ai_agent_options, cli_ai_agent_error) != OK) {
+		OS::get_singleton()->print("Error: %s\n", cli_ai_agent_error.utf8().get_data());
+		goto error;
+	}
+	if (CLIAIInputServer::is_help_enabled(cli_ai_agent_options)) {
+		if (_print_ai_agent_help(cli_ai_agent_options, cli_ai_agent_error) != OK) {
+			OS::get_singleton()->print("Error: %s\n", cli_ai_agent_error.utf8().get_data());
+			goto error;
+		}
+		exit_err = ERR_HELP;
+		goto error;
+	}
 
 #if defined(DEBUG_ENABLED) || defined(TOOLS_ENABLED)
 	// Network file system needs to be configured before globals, since globals are based on the
@@ -2363,6 +2438,64 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 
 	CLIAIInputServer::apply_project_settings(cli_ai_agent_options);
 	_ensure_custom_feature_tracer_initialized(project_path, true);
+	if (CLIHarnessRunner::is_enabled(cli_harness_options)) {
+		String harness_read_error;
+		if (CLIHarnessRunner::read_script_file(cli_harness_options.run_path, cli_harness_script, harness_read_error) != OK) {
+			if (CustomFeatureTracer::has_singleton()) {
+				CustomFeatureTracer::get_singleton()->record_error_event(CustomFeatureTracer::FEATURE_PROJECT_HARNESS, "script_read_failed", String(), "script_read_failed", harness_read_error, _make_harness_trace_options_data(cli_harness_options));
+			}
+			OS::get_singleton()->print("Error: %s\n", harness_read_error.utf8().get_data());
+			cli_harness_setup_exit_code = CLIHarnessRunner::EXIT_INVALID_ARGUMENTS;
+			OS::get_singleton()->set_exit_code(cli_harness_setup_exit_code);
+			goto error;
+		}
+		if (CLIHarnessRunner::validate_script(cli_harness_script, cli_harness_validation_error) != OK) {
+			if (CustomFeatureTracer::has_singleton()) {
+				CustomFeatureTracer::get_singleton()->record_error_event(CustomFeatureTracer::FEATURE_PROJECT_HARNESS, "script_validation_failed", String(), "invalid_script", cli_harness_validation_error, _make_harness_trace_options_data(cli_harness_options));
+			}
+			OS::get_singleton()->print("Error: %s\n", cli_harness_validation_error.utf8().get_data());
+			cli_harness_setup_exit_code = CLIHarnessRunner::EXIT_INVALID_ARGUMENTS;
+			OS::get_singleton()->set_exit_code(cli_harness_setup_exit_code);
+			goto error;
+		}
+		CLIHarnessRunner::StartupOverrides startup_overrides;
+		if (CLIHarnessRunner::extract_startup_overrides(cli_harness_script, startup_overrides, cli_harness_validation_error) != OK) {
+			if (CustomFeatureTracer::has_singleton()) {
+				CustomFeatureTracer::get_singleton()->record_error_event(CustomFeatureTracer::FEATURE_PROJECT_HARNESS, "script_validation_failed", String(), "invalid_script", cli_harness_validation_error, _make_harness_trace_options_data(cli_harness_options));
+			}
+			OS::get_singleton()->print("Error: %s\n", cli_harness_validation_error.utf8().get_data());
+			cli_harness_setup_exit_code = CLIHarnessRunner::EXIT_INVALID_ARGUMENTS;
+			OS::get_singleton()->set_exit_code(cli_harness_setup_exit_code);
+			goto error;
+		}
+		cli_ai_agent_options.enabled = true;
+		const bool harness_tcp_explicitly_requested = cli_ai_agent_options.enabled_set;
+		if (!harness_tcp_explicitly_requested) {
+			cli_ai_agent_options.listen_tcp = false;
+		}
+		if (startup_overrides.has_ai_agent_port && !cli_ai_agent_options.port_set) {
+			cli_ai_agent_options.port = startup_overrides.ai_agent_port;
+			cli_ai_agent_options.port_set = true;
+		}
+		if (startup_overrides.perf && !cli_perf_options.enabled) {
+			cli_perf_options.enabled = true;
+			cli_perf_options.end_frame = cli_harness_options.timeout_frames;
+			cli_perf_options.end_frame_set = true;
+			cli_perf_options.recording_name = "harness:" + String(cli_harness_script.get("name", "harness"));
+		}
+	}
+	if (CLIHarnessRunner::validate_options(cli_harness_options, found_project, editor, project_manager, cmdline_tool, cli_harness_validation_error) != OK) {
+		if (CustomFeatureTracer::has_singleton()) {
+			CustomFeatureTracer::get_singleton()->record_error_event(CustomFeatureTracer::FEATURE_PROJECT_HARNESS, "options_validation_failed", String(), "invalid_arguments", cli_harness_validation_error, _make_harness_trace_options_data(cli_harness_options));
+		}
+		OS::get_singleton()->print("Error: %s\n", cli_harness_validation_error.utf8().get_data());
+		cli_harness_setup_exit_code = CLIHarnessRunner::EXIT_INVALID_ARGUMENTS;
+		OS::get_singleton()->set_exit_code(cli_harness_setup_exit_code);
+		goto error;
+	}
+	if (CustomFeatureTracer::has_singleton() && CLIHarnessRunner::is_enabled(cli_harness_options)) {
+		CustomFeatureTracer::get_singleton()->record_event(CustomFeatureTracer::FEATURE_PROJECT_HARNESS, "options_validated", "info", String(), _make_harness_trace_options_data(cli_harness_options));
+	}
 	if (CLIAIInputServer::validate_options(cli_ai_agent_options, editor, project_manager, cmdline_tool, cli_ai_agent_validation_error) != OK) {
 		if (CustomFeatureTracer::has_singleton()) {
 			CustomFeatureTracer::get_singleton()->record_error_event(CustomFeatureTracer::FEATURE_RUNTIME_AI_AGENT_CONTROL, "options_validation_failed", String(), "invalid_arguments", cli_ai_agent_validation_error, _make_ai_agent_trace_options_data(cli_ai_agent_options));
@@ -5084,6 +5217,20 @@ int Main::start() {
 		}
 	}
 
+	if (CLIHarnessRunner::is_enabled(cli_harness_options)) {
+		cli_harness_runner = memnew(CLIHarnessRunner(cli_harness_options, ProjectSettings::get_singleton()->get_resource_path(), cli_ai_agent_server, cli_perf_recorder));
+		String cli_harness_initialize_error;
+		if (cli_harness_runner->initialize(cli_harness_initialize_error) != OK) {
+			if (CustomFeatureTracer::has_singleton()) {
+				CustomFeatureTracer::get_singleton()->record_error_event(CustomFeatureTracer::FEATURE_PROJECT_HARNESS, "initialize_failed", String(), "initialize_failed", cli_harness_initialize_error, _make_harness_trace_options_data(cli_harness_options));
+			}
+			OS::get_singleton()->print("Error: %s\n", cli_harness_initialize_error.utf8().get_data());
+			memdelete(cli_harness_runner);
+			cli_harness_runner = nullptr;
+			return CLIHarnessRunner::EXIT_INITIALIZATION_FAILED;
+		}
+	}
+
 	return EXIT_SUCCESS;
 }
 
@@ -5160,6 +5307,16 @@ bool Main::iteration() {
 
 	if (cli_ai_agent_server) {
 		cli_ai_agent_server->poll_commands();
+	}
+	if (cli_harness_runner) {
+		cli_harness_runner->poll();
+		if (cli_harness_runner->is_finished()) {
+			OS::get_singleton()->set_exit_code(cli_harness_runner->get_exit_code());
+			if (SceneTree::get_singleton()) {
+				SceneTree::get_singleton()->quit(cli_harness_runner->get_exit_code());
+			}
+			exit = true;
+		}
 	}
 
 	// process all our active interfaces
@@ -5336,6 +5493,16 @@ bool Main::iteration() {
 				navigation_process_ticks,
 				physics_step);
 	}
+	if (cli_harness_runner) {
+		cli_harness_runner->poll();
+		if (cli_harness_runner->is_finished()) {
+			OS::get_singleton()->set_exit_code(cli_harness_runner->get_exit_code());
+			if (SceneTree::get_singleton()) {
+				SceneTree::get_singleton()->quit(cli_harness_runner->get_exit_code());
+			}
+			exit = true;
+		}
+	}
 	Engine::get_singleton()->_process_frames++;
 
 	if (frame > 1000000) {
@@ -5374,7 +5541,7 @@ bool Main::iteration() {
 #ifdef TOOLS_ENABLED
 	bool quit_after_timeout = false;
 #endif
-	if ((quit_after > 0) && (Engine::get_singleton()->_process_frames >= quit_after)) {
+	if ((quit_after > 0) && !cli_harness_runner && (Engine::get_singleton()->_process_frames >= quit_after)) {
 #ifdef TOOLS_ENABLED
 		quit_after_timeout = true;
 #endif
@@ -5468,6 +5635,11 @@ void Main::cleanup(bool p_force) {
 		input->flush_frame_parsed_events();
 	}
 #endif
+
+	if (cli_harness_runner) {
+		memdelete(cli_harness_runner);
+		cli_harness_runner = nullptr;
+	}
 
 	if (cli_ai_agent_server) {
 		cli_ai_agent_server->shutdown();
@@ -5600,10 +5772,12 @@ void Main::cleanup(bool p_force) {
 			}
 			tracer->record_event(CustomFeatureTracer::FEATURE_CLI_PERF_RECORDER, "summary", "info", String(), data, payloads);
 		}
-		const bool stdout_was_enabled = OS::get_singleton()->is_stdout_enabled();
-		OS::get_singleton()->set_stdout_enabled(true);
-		OS::get_singleton()->print("%s\n", JSON::stringify(cli_perf_summary).utf8().get_data());
-		OS::get_singleton()->set_stdout_enabled(stdout_was_enabled);
+		if (!CLIHarnessRunner::is_enabled(cli_harness_options)) {
+			const bool stdout_was_enabled = OS::get_singleton()->is_stdout_enabled();
+			OS::get_singleton()->set_stdout_enabled(true);
+			OS::get_singleton()->print("%s\n", JSON::stringify(cli_perf_summary).utf8().get_data());
+			OS::get_singleton()->set_stdout_enabled(stdout_was_enabled);
+		}
 		memdelete(cli_perf_recorder);
 		cli_perf_recorder = nullptr;
 	}

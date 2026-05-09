@@ -42,6 +42,7 @@ public:
 	static constexpr const char *FEATURE_CLI_PERF_RECORDER = "cli_perf_recorder";
 	static constexpr const char *FEATURE_LATEST_LOG_CLI = "latest_log_cli";
 	static constexpr const char *FEATURE_RUNTIME_AI_AGENT_CONTROL = "runtime_ai_agent_control";
+	static constexpr const char *FEATURE_PROJECT_HARNESS = "project_harness";
 
 	struct StartupOptions {
 		String binary_path;
@@ -88,6 +89,7 @@ public:
 	bool add_existing_file_payload(Dictionary &r_payloads, const String &p_name, const String &p_mime, const String &p_path);
 
 	void capture_logger_error(const char *p_function, const char *p_file, int p_line, const char *p_code, const char *p_rationale, Logger::ErrorType p_type, const Vector<Ref<ScriptBacktrace>> &p_script_backtraces);
+	String get_session_dir() const;
 
 #ifdef TESTS_ENABLED
 	String get_session_dir_for_tests() const;

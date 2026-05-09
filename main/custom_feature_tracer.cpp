@@ -234,6 +234,10 @@ void CustomFeatureTracer::capture_logger_error(const char *p_function, const cha
 	record_event(feature, "engine_log_error", p_type == Logger::ERR_WARNING ? "warning" : "error", _get_thread_correlation_id(), data, payloads, error);
 }
 
+String CustomFeatureTracer::get_session_dir() const {
+	return writer.get_session_dir();
+}
+
 CustomFeatureTracer::ScopedEventContext::ScopedEventContext(const String &p_feature, const String &p_correlation_id) {
 	previous_feature = CustomFeatureTracer::_get_thread_feature();
 	previous_correlation_id = CustomFeatureTracer::_get_thread_correlation_id();

@@ -92,6 +92,9 @@ int widechar_main(int argc, wchar_t **argv) {
 		if (err == ERR_HELP) { // Returned by --help and --version, so success.
 			return EXIT_SUCCESS;
 		}
+		if (os.get_exit_code() != EXIT_SUCCESS) {
+			return os.get_exit_code();
+		}
 		return EXIT_FAILURE;
 	}
 

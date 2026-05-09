@@ -4,12 +4,13 @@
 
 ## 摘要
 
-定制功能埋点系统会在进程运行期间，自动为当前 4 个定制功能写入低开销结构化 trace：
+定制功能埋点系统会在进程运行期间，自动为当前定制功能写入低开销结构化 trace：
 
 - `gdscript_lsp_cli`
 - `cli_perf_recorder`
 - `latest_log_cli`
 - `runtime_ai_agent_control`
+- `project_harness`
 
 目标不是替代正常 stdout / socket 输出，而是额外保留：
 
@@ -116,7 +117,7 @@ custom_feature_traces/
 
 其中：
 
-- `feature` 用来区分 4 个定制功能
+- `feature` 用来区分不同定制功能
 - `correlationId` 用来串起同一次请求 / 操作链
 - `data` 放轻量结构化上下文
 - `payloads` 放较大文本 / JSON 的描述符
@@ -244,6 +245,19 @@ v1 不记录二进制原始内容。
 - `runtime_perf_summary`
 
 较大的 request / response / scene 查询结果 / perf summary 默认走 payload sidecar。
+
+### Godot 项目 Harness
+
+当前会记录：
+
+- `options_validated`
+- `harness_started`
+- `step_started`
+- `step_finished`
+- `assertion_failed`
+- `harness_finished`
+
+Harness report 会作为 JSON payload 写入；较大 report 会走 sidecar。
 
 ## 错误捕获
 

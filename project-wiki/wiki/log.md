@@ -71,3 +71,17 @@ wiki 活动的追加式记录。
 - 更新验证章节，记录自动化覆盖的 `move_right`、`jump`、`aim`、`shoot`、`mouse_motion` 行为。
 - 补录 `E:\GitHub\tps-demo` 的最新手工验证结果，确认菜单进入、移动、跳跃、视角转动、瞄准和射击均已打通。
 - 更新 `project-wiki/wiki/index.md`，将 Runtime AI Agent Control 的能力摘要同步到“GUI + gameplay 输入状态同步”版本。
+
+## [2026-04-25] docs | GDScript LSP CLI 默认允许插件启动
+
+- 更新 `project-wiki/wiki/components/gdscript-lsp-cli.md`，将默认启动语义改为完整 editor 初始化，不再描述为默认 recovery-mode 最小启动。
+- 补充说明：如果需要旧的隔离路径，继续直接复用全局 `--recovery-mode`。
+- 改写已知限制，移除把插件项目错误归因于默认最小启动路径的旧描述。
+- 更新 `project-wiki/wiki/index.md`，将 GDScript LSP CLI 的能力摘要同步到“默认允许插件参与初始化”版本。
+
+## [2026-04-27] ingest | Godot 项目 Harness v1
+
+- 创建 `project-wiki/wiki/components/project-harness.md`。
+- 记录 `--harness-run`、`--harness-report`、`--harness-timeout-frames`、`--harness-format`、脚本 schema、动作 alias、断言 alias、report 结构、trace 事件和已知限制。
+- 更新 `project-wiki/wiki/index.md`，将 Godot 项目 Harness 加入当前定制功能总览。
+- 收敛实现说明：harness 默认走同进程本地执行器，不打开 TCP 端口；`input_self_test` 可诊断 focus/key/click/action/mouse 链路；`expect` 结果写入 `assertions`。

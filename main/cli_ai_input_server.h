@@ -53,6 +53,12 @@ class Viewport;
 
 class CLIAIInputServer {
 public:
+	enum HelpFormat {
+		HELP_FORMAT_TEXT,
+		HELP_FORMAT_JSON,
+		HELP_FORMAT_BOTH,
+	};
+
 	struct Options {
 		bool enabled = false;
 		int port = 7010;
@@ -65,18 +71,27 @@ public:
 		bool default_capture_on_error = false;
 		int default_query_max_results = 128;
 		String screenshot_directory;
+		bool listen_tcp = true;
+		bool help_enabled = false;
+		HelpFormat help_format = HELP_FORMAT_TEXT;
 
 		bool enabled_set = false;
 		bool port_set = false;
 		bool max_batch_ops_set = false;
 		bool max_line_bytes_set = false;
+		bool help_format_set = false;
 	};
 
 	static void register_project_settings();
 	static bool parse_argument(const String &p_arg, List<String>::Element *&r_next, Options &r_options, String &r_error);
 	static void apply_project_settings(Options &r_options);
+	static Error validate_help_options(const Options &p_options, String &r_error);
 	static Error validate_options(const Options &p_options, bool p_editor, bool p_project_manager, bool p_cmdline_tool, String &r_error);
 	static bool is_enabled(const Options &p_options) { return p_options.enabled; }
+	static bool is_help_enabled(const Options &p_options) { return p_options.help_enabled; }
+	static String get_help_format_name(HelpFormat p_format);
+	static Error build_help_outputs(String &r_text_output, String &r_json_output, String &r_error);
+	static Vector<String> get_supported_command_names();
 
 	static bool parse_mouse_button(const Variant &p_value, MouseButton &r_button);
 	static bool expand_operation_for_tests(const Dictionary &p_operation, Array &r_expanded, String &r_error);
@@ -88,6 +103,16 @@ public:
 	void poll_commands();
 	void record_frame(uint64_t p_frame_index, uint64_t p_frame_time_usec, uint64_t p_process_time_usec, uint64_t p_physics_process_time_usec, uint64_t p_navigation_process_time_usec, double p_physics_frame_time_sec);
 	void shutdown();
+	Dictionary execute_local_request(const Dictionary &p_request);
+	bool pop_local_response(Dictionary &r_response);
+	void set_local_execution_owner(bool p_enabled) {
+		local_execution_owner = p_enabled;
+		if (!p_enabled) {
+			local_response_capture_active = false;
+			local_response_queue.clear();
+		}
+	}
+	bool has_local_pending_work() const { return active_batch.active || !pending_waits.is_empty() || pending_perf_stop; }
 
 	bool is_listening() const;
 	bool is_batch_active() const { return active_batch.active; }
@@ -408,6 +433,9 @@ private:
 	bool dropping_oversized_line = false;
 	Vector<PendingWait> pending_waits;
 	ActiveBatch active_batch;
+	Array local_response_queue;
+	bool local_response_capture_active = false;
+	bool local_execution_owner = false;
 	HashSet<StringName> held_actions;
 	HashSet<int> held_mouse_buttons;
 	HashMap<int64_t, HeldKey> held_keys;

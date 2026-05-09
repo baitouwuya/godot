@@ -470,6 +470,31 @@ TEST_SUITE("[Main][CLIAIInputServer][SceneTree]") {
 		CHECK(parsed.options.max_line_bytes_set);
 	}
 
+	TEST_CASE("Parses AI agent help CLI arguments") {
+		{
+			const ParsedOptionsResult parsed = parse_cli_options({ "--ai-agent-help", "--ai-agent-help-format", "json" });
+			CHECK(parsed.error.is_empty());
+			CHECK(parsed.options.help_enabled);
+			CHECK(parsed.options.help_format_set);
+			CHECK_EQ(parsed.options.help_format, CLIAIInputServer::HELP_FORMAT_JSON);
+		}
+		{
+			const ParsedOptionsResult parsed = parse_cli_options({ "--ai-agent-help", "--ai-agent-help-format", "both" });
+			CHECK(parsed.error.is_empty());
+			CHECK(parsed.options.help_enabled);
+			CHECK(parsed.options.help_format_set);
+			CHECK_EQ(parsed.options.help_format, CLIAIInputServer::HELP_FORMAT_BOTH);
+		}
+		{
+			const ParsedOptionsResult parsed = parse_cli_options({ "--ai-agent-help", "--ai-agent-help-format" });
+			CHECK(parsed.error.contains("Missing value after --ai-agent-help-format"));
+		}
+		{
+			const ParsedOptionsResult parsed = parse_cli_options({ "--ai-agent-help", "--ai-agent-help-format", "raw" });
+			CHECK(parsed.error.contains("--ai-agent-help-format must be text, json or both."));
+		}
+	}
+
 	TEST_CASE("Validates AI agent options") {
 		String error;
 
@@ -518,6 +543,213 @@ TEST_SUITE("[Main][CLIAIInputServer][SceneTree]") {
 			options.default_query_max_results = 0;
 			CHECK_EQ(CLIAIInputServer::validate_options(options, false, false, false, error), ERR_INVALID_PARAMETER);
 			CHECK(error.contains("default_query_max_results"));
+		}
+	}
+
+	TEST_CASE("Validates AI agent help options") {
+		String error;
+		{
+			CLIAIInputServer::Options options;
+			options.help_format_set = true;
+			options.help_format = CLIAIInputServer::HELP_FORMAT_JSON;
+			CHECK_EQ(CLIAIInputServer::validate_help_options(options, error), ERR_INVALID_PARAMETER);
+			CHECK(error.contains("--ai-agent-help-format requires --ai-agent-help."));
+		}
+		{
+			CLIAIInputServer::Options options;
+			options.help_enabled = true;
+			options.help_format = CLIAIInputServer::HELP_FORMAT_BOTH;
+			options.help_format_set = true;
+			CHECK_EQ(CLIAIInputServer::validate_help_options(options, error), OK);
+		}
+	}
+
+	TEST_CASE("Builds AI agent help outputs") {
+		String text_output;
+		String json_output;
+		String error;
+		REQUIRE_EQ(CLIAIInputServer::build_help_outputs(text_output, json_output, error), OK);
+		REQUIRE(error.is_empty());
+		CHECK(text_output.contains("Transport"));
+		CHECK(text_output.contains("Request Envelope"));
+		CHECK(text_output.contains("Commands"));
+		CHECK(text_output.contains("wait_until"));
+		CHECK(text_output.contains("focus_target"));
+		CHECK(text_output.contains("perf_start"));
+
+		Variant parsed = JSON::parse_string(json_output);
+		REQUIRE(parsed.get_type() == Variant::DICTIONARY);
+		Dictionary root = parsed;
+		REQUIRE(root.has("transport"));
+		REQUIRE(root.has("requestEnvelope"));
+		REQUIRE(root.has("commands"));
+		Array commands = root["commands"];
+		REQUIRE(commands.size() > 0);
+
+		bool has_ping = false;
+		bool has_batch = false;
+		bool has_wait_until = false;
+		bool has_focus_target = false;
+		bool has_perf_start = false;
+		for (int i = 0; i < commands.size(); i++) {
+			REQUIRE(commands[i].get_type() == Variant::DICTIONARY);
+			const Dictionary cmd = commands[i];
+			const String name = cmd.get("name", String());
+			if (name == "ping") {
+				has_ping = true;
+			} else if (name == "batch") {
+				has_batch = true;
+			} else if (name == "wait_until") {
+				has_wait_until = true;
+			} else if (name == "focus_target") {
+				has_focus_target = true;
+			} else if (name == "perf_start") {
+				has_perf_start = true;
+			}
+		}
+		CHECK(has_ping);
+		CHECK(has_batch);
+		CHECK(has_wait_until);
+		CHECK(has_focus_target);
+		CHECK(has_perf_start);
+	}
+
+	TEST_CASE("AI agent help command names stay in sync with dispatcher support") {
+		const Vector<String> supported = CLIAIInputServer::get_supported_command_names();
+		REQUIRE(supported.size() > 0);
+
+		TestSceneContext scene;
+		RouterSceneContext router;
+		CLIAIInputServer server{ CLIAIInputServer::Options() };
+		for (int i = 0; i < supported.size(); i++) {
+			const String cmd = supported[i];
+			Dictionary op;
+			op["cmd"] = cmd;
+			if (cmd == "batch" || cmd == "wait_screenshot_diff") {
+				continue;
+			}
+
+			if (cmd == "action") {
+				op["action"] = "ui_accept";
+				op["pressed"] = true;
+			} else if (cmd == "key") {
+				op["keycode"] = "KEY_ENTER";
+				op["pressed"] = true;
+			} else if (cmd == "mouse_button") {
+				op["button"] = "left";
+				op["pressed"] = true;
+				op["x"] = 1;
+				op["y"] = 1;
+			} else if (cmd == "mouse_motion") {
+				op["x"] = 1;
+				op["y"] = 1;
+			} else if (cmd == "wait") {
+				op["frames"] = 1;
+			} else if (cmd == "wait_until") {
+				Dictionary condition;
+				condition["kind"] = "frames";
+				condition["frames"] = 1;
+				op["condition"] = condition;
+			} else if (cmd == "wait_node_exists" || cmd == "get_node_snapshot" || cmd == "click_target" || cmd == "double_click_target" || cmd == "focus_target" || cmd == "hover_target" || cmd == "type_text") {
+				Dictionary selector;
+				selector["name"] = "PlayButton";
+				op["selector"] = selector;
+			} else if (cmd == "wait_property") {
+				Dictionary selector;
+				selector["name"] = "SpeedBar";
+				op["selector"] = selector;
+				op["property"] = "value";
+				op["equals"] = 5;
+			} else if (cmd == "wait_screenshot_diff") {
+				op["threshold"] = 0.0;
+			} else if (cmd == "query_nodes" || cmd == "get_interactables") {
+				Dictionary filter;
+				filter["name"] = "PlayButton";
+				op["filter"] = filter;
+			} else if (cmd == "get_scene_tree") {
+				op["maxDepth"] = 2;
+			} else if (cmd == "perf_start") {
+				op["topFrames"] = 1;
+			} else if (cmd == "type_text_commit") {
+				op["text"] = "abc";
+			} else if (cmd == "drag") {
+				Array path;
+				Array p0;
+				p0.push_back(1);
+				p0.push_back(1);
+				Array p1;
+				p1.push_back(2);
+				p1.push_back(2);
+				path.push_back(p0);
+				path.push_back(p1);
+				op["path"] = path;
+			} else if (cmd == "drag_target_to_target") {
+				Dictionary from_selector;
+				from_selector["name"] = "PlayButton";
+				Dictionary to_selector;
+				to_selector["name"] = "NameInput";
+				op["fromSelector"] = from_selector;
+				op["toSelector"] = to_selector;
+			} else if (cmd == "scroll_view") {
+				Dictionary selector;
+				selector["name"] = "PlayButton";
+				op["selector"] = selector;
+				op["direction"] = "down";
+				op["steps"] = 1;
+			} else if (cmd == "click_target_and_wait" || cmd == "type_text_and_wait") {
+				Dictionary selector;
+				selector["name"] = cmd == "click_target_and_wait" ? "PlayButton" : "NameInput";
+				op["selector"] = selector;
+				Dictionary wait;
+				Dictionary condition;
+				condition["kind"] = "frames";
+				condition["frames"] = 1;
+				wait["condition"] = condition;
+				op["wait"] = wait;
+				if (cmd == "type_text_and_wait") {
+					op["text"] = "abc";
+				}
+			} else if (cmd == "hold") {
+				op["x"] = 1;
+				op["y"] = 1;
+				op["frames"] = 1;
+			} else if (cmd == "click" || cmd == "double_click") {
+				op["x"] = 1;
+				op["y"] = 1;
+			} else if (cmd == "checkpoint") {
+				op["name"] = "test";
+				server.test_setup_active_batch(0, "continue");
+			} else if (cmd == "wait_node_gone") {
+				Dictionary selector;
+				selector["name"] = "MissingNode";
+				op["selector"] = selector;
+				op["timeoutFrames"] = 2;
+			} else if (cmd == "wait_scene_changed") {
+				op["timeoutFrames"] = 2;
+			}
+
+			Dictionary response = server.execute_local_request(op);
+			if (response.has("deferred") && (bool)response["deferred"]) {
+				Dictionary deferred_response;
+				if (server.pop_local_response(deferred_response)) {
+					response = deferred_response;
+				}
+			}
+			const String error_code = response.has("error") && ((Dictionary)response["error"]).has("code") ? String(((Dictionary)response["error"])["code"]) : String();
+			CHECK_MESSAGE(error_code != "unknown_command", vformat("Dispatcher rejected known command: %s", cmd));
+			if (cmd == "checkpoint") {
+				server.test_cancel_batch(Dictionary());
+			} else if (cmd == "perf_start") {
+				Dictionary stop_request;
+				stop_request["cmd"] = "perf_stop";
+				Dictionary stop_response = server.execute_local_request(stop_request);
+				if (stop_response.has("deferred") && (bool)stop_response["deferred"]) {
+					Dictionary deferred_stop_response;
+					if (server.pop_local_response(deferred_stop_response)) {
+						stop_response = deferred_stop_response;
+					}
+				}
+			}
 		}
 	}
 

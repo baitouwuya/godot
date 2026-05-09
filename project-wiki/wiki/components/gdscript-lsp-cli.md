@@ -11,7 +11,7 @@
 - 适合自动化读取的快速诊断摘要。
 - 可脚本化控制的诊断退出码策略。
 
-默认启动路径优先降低项目副作用，而不是追求完整 editor 环境一致性。
+默认启动路径优先保持与正常 editor 初始化一致，允许项目插件参与加载；如果需要旧的最小隔离路径，可显式加全局 `--recovery-mode`。
 
 ## 快速开始
 
@@ -131,9 +131,11 @@
 
 只有在需要维护或扩展功能时，才需要读这一节。
 
-### 为什么默认使用最小启动路径
+### 为什么默认允许插件启动
 
-CLI 默认使用基于 recovery-mode 语义的最小 editor 启动路径。这样能减少自动化运行时项目 editor plugin 的副作用。
+CLI 默认不再强制 recovery mode，而是使用完整的 editor 启动语义。这样插件项目、tool scripts 和 GDExtension 能按正常 editor 初始化路径参与加载，避免 `--lsp-query` / `--lsp-diagnostics` 因人为禁用插件而报错。
+
+如果确实需要旧的最小隔离路径，继续直接复用全局 `--recovery-mode` 即可。
 
 ### 为什么复用现有实现
 
@@ -154,7 +156,7 @@ CLI 默认使用基于 recovery-mode 语义的最小 editor 启动路径。这�
 - `references` 请求可以注入 `includeDeclaration`。
 - 诊断可以输出 summary 对象。
 - 诊断退出码由 `--diagnostics-fail-on` 控制。
-- recovery-mode 启动下跳过首次扫描阶段的插件初始化。
+- 默认会保留插件初始化；仅在显式传入全局 `--recovery-mode` 时才进入最小隔离路径。
 
 ## 埋点
 
@@ -200,7 +202,7 @@ scons platform=windows target=editor dev_build=yes module_mono_enabled=no tests=
 
 观察结果：
 
-- `3 passed`
+- `6 passed`
 - `0 failed`
 
 ### 真实项目冒烟测试
@@ -210,32 +212,26 @@ scons platform=windows target=editor dev_build=yes module_mono_enabled=no tests=
 - `E:\Godot Projects\view3d\project`
 - `E:\Godot Projects\rush-pet`
 - `E:\Godot Projects\mysterious-museum`
+- 带 editor plugin 的项目
 
 稳定观察到：
 
 - 诊断 summary 可用。
 - diagnostics fail-on 退出码行为可用。
 - 项目相对路径文件查询可用。
+- 默认模式下不再因为强制 recovery mode 禁用插件。
 - 这些项目上的输出保持机器友好。
 
 ## 已知限制
 
-`E:\Godot Projects\PluginTest` 仍暴露一个 editor 侧边界问题。
-
-当前观察到的行为：
-
-- 诊断 summary JSON 仍可能成功打印。
-- 查询 JSON 仍可能成功打印。
-- stderr 仍可能出现来自 `res://addons/tripo-godot/editor/*.tscn` 的 `Parse Error: Busy`。
-- 由于这些 editor 资源加载失败，进程退出码仍可能变为 `1`。
-
-这说明最小启动路径已经足够支持多个真实项目，但还没有完全隔离所有插件较重的 editor 资源路径。
+- 默认模式下不再人为屏蔽 editor plugins、tool scripts、GDExtension。
+- 如果项目插件本身存在真实初始化错误，LSP CLI 仍会像正常 editor 启动一样暴露这些错误，不做吞并。
+- 如果需要排除插件副作用或快速隔离问题，可以显式加全局 `--recovery-mode` 退回旧的最小启动路径。
 
 ## 后续优化目标
 
-- 追踪 `PluginTest` 中哪条 editor 资源加载路径仍会触达 `addons/tripo-godot/editor/*.tscn`。
-- 保持当前最小启动路径作为默认行为。
-- 如果未来需要 full-editor 模式，只作为显式 opt-in 增加。
+- 在真实插件项目上持续补充手动回归，避免后续把 LSP CLI 启动策略重新收窄回 recovery mode。
+- 如果后续需要更细的隔离粒度，再评估是否值得新增比全局 `--recovery-mode` 更窄的显式模式。
 
 ## 相关链接
 

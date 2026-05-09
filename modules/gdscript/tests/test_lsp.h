@@ -598,6 +598,63 @@ func f():
 			CHECK(validation_error.is_empty());
 		}
 
+		SUBCASE("Startup options keep plugins enabled by default") {
+			GDScriptLSPCLIRunner::Options options;
+			options.query = "document-symbol";
+			options.file = "res://lsp/local_variables.gd";
+
+			bool editor = false;
+			bool cmdline_tool = false;
+			bool wait_for_import = false;
+			bool quiet_stdout = false;
+			bool recovery_mode = false;
+
+			GDScriptLSPCLIRunner::apply_startup_options(options, editor, cmdline_tool, wait_for_import, quiet_stdout, recovery_mode);
+
+			CHECK(editor);
+			CHECK(cmdline_tool);
+			CHECK(wait_for_import);
+			CHECK(quiet_stdout);
+			CHECK_FALSE(recovery_mode);
+		}
+
+		SUBCASE("Startup options preserve explicit recovery mode") {
+			GDScriptLSPCLIRunner::Options options;
+			options.diagnostics = true;
+
+			bool editor = false;
+			bool cmdline_tool = false;
+			bool wait_for_import = false;
+			bool quiet_stdout = false;
+			bool recovery_mode = true;
+
+			GDScriptLSPCLIRunner::apply_startup_options(options, editor, cmdline_tool, wait_for_import, quiet_stdout, recovery_mode);
+
+			CHECK(editor);
+			CHECK(cmdline_tool);
+			CHECK(wait_for_import);
+			CHECK(quiet_stdout);
+			CHECK(recovery_mode);
+		}
+
+		SUBCASE("Startup options leave unrelated launches untouched") {
+			GDScriptLSPCLIRunner::Options options;
+
+			bool editor = false;
+			bool cmdline_tool = false;
+			bool wait_for_import = false;
+			bool quiet_stdout = false;
+			bool recovery_mode = false;
+
+			GDScriptLSPCLIRunner::apply_startup_options(options, editor, cmdline_tool, wait_for_import, quiet_stdout, recovery_mode);
+
+			CHECK_FALSE(editor);
+			CHECK_FALSE(cmdline_tool);
+			CHECK_FALSE(wait_for_import);
+			CHECK_FALSE(quiet_stdout);
+			CHECK_FALSE(recovery_mode);
+		}
+
 		SUBCASE("Rejects diagnostics format outside diagnostics mode") {
 			ParsedCLIOptionsResult parsed = parse_cli_options({
 					"--lsp-query",

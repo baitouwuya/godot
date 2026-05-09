@@ -426,7 +426,6 @@ void GDScriptLSPCLIRunner::apply_startup_options(const Options &p_options, bool 
 	r_cmdline_tool = true;
 	r_wait_for_import = true;
 	r_quiet_stdout = true;
-	r_recovery_mode = true;
 }
 
 String GDScriptLSPCLIRunner::normalize_file_path(const String &p_file) {

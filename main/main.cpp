@@ -2272,6 +2272,13 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 	GDScriptLanguageServer::cli_mode = GDScriptLSPCLIRunner::is_enabled(gdscript_lsp_cli_options);
 	GDScriptLSPCLIRunner::apply_startup_options(gdscript_lsp_cli_options, editor, cmdline_tool, wait_for_import, quiet_stdout, recovery_mode);
 	_ensure_custom_feature_tracer_initialized(project_path, false);
+	if (GDScriptLanguageServer::cli_mode) {
+		editor = false;
+		project_manager = false;
+		wait_for_import = false;
+		audio_driver = NULL_AUDIO_DRIVER;
+		display_driver = NULL_DISPLAY_DRIVER;
+	}
 	if (CustomFeatureTracer::has_singleton() && GDScriptLanguageServer::cli_mode) {
 		CustomFeatureTracer *tracer = CustomFeatureTracer::get_singleton();
 		Dictionary startup_data = _make_gdscript_lsp_trace_options_data(gdscript_lsp_cli_options);
@@ -4310,6 +4317,7 @@ int Main::start() {
 	String game_path;
 	String script;
 	String main_loop_type;
+	bool lsp_cli_run = false;
 	bool check_only = false;
 
 #ifdef TOOLS_ENABLED
@@ -4625,7 +4633,18 @@ int Main::start() {
 	main_loop_type = String();
 #endif // defined(OVERRIDE_PATH_ENABLED)
 
-	if (script.is_empty() && game_path.is_empty()) {
+#ifdef TOOLS_ENABLED
+#ifdef GDSCRIPT_LSP_CLI_ENABLED
+	if (GDScriptLSPCLIRunner::is_enabled(gdscript_lsp_cli_options)) {
+		lsp_cli_run = true;
+		game_path = String();
+		script = String();
+		main_loop_type = "SceneTree";
+	}
+#endif // GDSCRIPT_LSP_CLI_ENABLED
+#endif // TOOLS_ENABLED
+
+	if (!lsp_cli_run && script.is_empty() && game_path.is_empty()) {
 		const String main_scene = GLOBAL_GET("application/run/main_scene");
 		if (main_scene.begins_with("uid://")) {
 			ResourceUID::ID id = ResourceUID::get_singleton()->text_to_id(main_scene);
@@ -5268,6 +5287,23 @@ bool Main::iteration() {
 	GodotProfileZoneGroupedFirst(_profile_zone, "prepare");
 	iterating++;
 
+#ifdef TOOLS_ENABLED
+#ifdef GDSCRIPT_LSP_CLI_ENABLED
+	if (GDScriptLSPCLIRunner::is_enabled(gdscript_lsp_cli_options) && !gdscript_lsp_cli_executed) {
+		gdscript_lsp_cli_executed = true;
+		const int lsp_cli_exit_code = GDScriptLSPCLIRunner::run(gdscript_lsp_cli_options);
+		SceneTree *main_loop_scene_tree = SceneTree::get_singleton();
+		if (main_loop_scene_tree) {
+			main_loop_scene_tree->quit(lsp_cli_exit_code);
+		} else {
+			OS::get_singleton()->set_exit_code(lsp_cli_exit_code);
+		}
+		iterating--;
+		return true;
+	}
+#endif // GDSCRIPT_LSP_CLI_ENABLED
+#endif // TOOLS_ENABLED
+
 	const uint64_t ticks = OS::get_singleton()->get_ticks_usec();
 	Engine::get_singleton()->_frame_ticks = ticks;
 	main_timer_sync.set_cpu_ticks_usec(ticks);
@@ -5553,25 +5589,6 @@ bool Main::iteration() {
 		exit = false;
 	}
 
-#ifdef GDSCRIPT_LSP_CLI_ENABLED
-	if (GDScriptLSPCLIRunner::is_enabled(gdscript_lsp_cli_options) && !gdscript_lsp_cli_executed) {
-		exit = false;
-		EditorNode *editor_node = EditorNode::get_singleton();
-		EditorFileSystem *editor_file_system = EditorFileSystem::get_singleton();
-		const bool filesystem_ready = !editor_file_system || (!editor_file_system->is_scanning() && !editor_file_system->is_importing());
-		if (editor_node && editor_node->is_editor_ready() && filesystem_ready) {
-			gdscript_lsp_cli_executed = true;
-			int lsp_cli_exit_code = GDScriptLSPCLIRunner::run(gdscript_lsp_cli_options);
-			SceneTree *main_loop_scene_tree = SceneTree::get_singleton();
-			if (main_loop_scene_tree) {
-				main_loop_scene_tree->quit(lsp_cli_exit_code);
-			} else {
-				OS::get_singleton()->set_exit_code(lsp_cli_exit_code);
-			}
-			exit = true;
-		}
-	}
-#endif // GDSCRIPT_LSP_CLI_ENABLED
 #endif
 
 	if (fixed_fps != -1) {

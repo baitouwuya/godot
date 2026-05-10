@@ -81,7 +81,7 @@ void GDScriptTextDocument::willSaveWaitUntil(const Variant &p_param) {
 
 	String path = GDScriptLanguageProtocol::get_singleton()->get_workspace()->get_file_path(doc.uri);
 	Ref<Script> scr = ResourceLoader::load(path);
-	if (scr.is_valid()) {
+	if (scr.is_valid() && ScriptEditor::get_singleton()) {
 		ScriptEditor::get_singleton()->clear_docs_from_script(scr);
 	}
 }
@@ -112,6 +112,9 @@ void GDScriptTextDocument::didSave(const Variant &p_param) {
 }
 
 void GDScriptTextDocument::reload_script(Ref<GDScript> p_to_reload_script) {
+	if (!ScriptEditor::get_singleton()) {
+		return;
+	}
 	ScriptEditor::get_singleton()->reload_scripts(true);
 	ScriptEditor::get_singleton()->update_docs_from_script(p_to_reload_script);
 	ScriptEditor::get_singleton()->trigger_live_script_reload(p_to_reload_script->get_path());
@@ -333,7 +336,8 @@ Dictionary GDScriptTextDocument::resolve(const Dictionary &p_params) {
 
 	if (item.kind == LSP::CompletionItemKind::Event) {
 		if (params.context.triggerKind == LSP::CompletionTriggerKind::TriggerCharacter && (params.context.triggerCharacter == "(")) {
-			const String quote_style = EDITOR_GET("text_editor/completion/use_single_quotes") ? "'" : "\"";
+			const bool use_single_quotes = EditorSettings::get_singleton() && bool(EDITOR_GET("text_editor/completion/use_single_quotes"));
+			const String quote_style = use_single_quotes ? "'" : "\"";
 			item.insertText = item.label.quote(quote_style);
 		}
 	}
@@ -470,6 +474,9 @@ GDScriptTextDocument::GDScriptTextDocument() {
 }
 
 void GDScriptTextDocument::show_native_symbol_in_editor(const String &p_symbol_id) {
+	if (!ScriptEditor::get_singleton()) {
+		return;
+	}
 	callable_mp(ScriptEditor::get_singleton(), &ScriptEditor::goto_help).call_deferred(p_symbol_id);
 
 	DisplayServer::get_singleton()->window_move_to_foreground();

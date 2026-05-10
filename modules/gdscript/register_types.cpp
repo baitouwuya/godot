@@ -74,6 +74,9 @@ GDScriptCache *gdscript_cache = nullptr;
 #ifdef TOOLS_ENABLED
 
 Ref<GDScriptEditorTranslationParserPlugin> gdscript_translation_parser_plugin;
+#ifndef GDSCRIPT_NO_LSP
+static GDScriptLanguageProtocol *gdscript_lsp_cli_protocol = nullptr;
+#endif
 
 class EditorExportGDScript : public EditorExportPlugin {
 	GDCLASS(EditorExportGDScript, EditorExportPlugin);
@@ -127,7 +130,9 @@ static void _editor_init() {
 #endif
 
 #ifndef GDSCRIPT_NO_LSP
-	register_lsp_types();
+	if (GDScriptLanguageServer::cli_mode) {
+		return;
+	}
 	GDScriptLanguageServer *lsp_plugin = memnew(GDScriptLanguageServer);
 	EditorNode::get_singleton()->add_editor_plugin(lsp_plugin);
 	Engine::get_singleton()->add_singleton(Engine::Singleton("GDScriptLanguageProtocol", GDScriptLanguageProtocol::get_singleton()));
@@ -156,17 +161,42 @@ void initialize_gdscript_module(ModuleInitializationLevel p_level) {
 
 #ifdef TOOLS_ENABLED
 	if (p_level == MODULE_INITIALIZATION_LEVEL_SERVERS) {
-		EditorNode::add_init_callback(_editor_init);
+#ifndef GDSCRIPT_NO_LSP
+		if (!GDScriptLanguageServer::cli_mode) {
+#endif
+			EditorNode::add_init_callback(_editor_init);
+#ifndef GDSCRIPT_NO_LSP
+		}
+#endif
 
 		gdscript_translation_parser_plugin.instantiate();
 		EditorTranslationParser::get_singleton()->add_parser(gdscript_translation_parser_plugin, EditorTranslationParser::STANDARD);
 	} else if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR) {
 		GDREGISTER_CLASS(GDScriptSyntaxHighlighter);
+#ifndef GDSCRIPT_NO_LSP
+		register_lsp_types();
+		if (GDScriptLanguageServer::cli_mode) {
+			gdscript_lsp_cli_protocol = memnew(GDScriptLanguageProtocol);
+			Engine::get_singleton()->add_singleton(Engine::Singleton("GDScriptLanguageProtocol", GDScriptLanguageProtocol::get_singleton()));
+		}
+#endif // !GDSCRIPT_NO_LSP
 	}
 #endif // TOOLS_ENABLED
 }
 
 void uninitialize_gdscript_module(ModuleInitializationLevel p_level) {
+#ifdef TOOLS_ENABLED
+	if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR) {
+#ifndef GDSCRIPT_NO_LSP
+		if (gdscript_lsp_cli_protocol) {
+			Engine::get_singleton()->remove_singleton("GDScriptLanguageProtocol");
+			memdelete(gdscript_lsp_cli_protocol);
+			gdscript_lsp_cli_protocol = nullptr;
+		}
+#endif // !GDSCRIPT_NO_LSP
+	}
+#endif // TOOLS_ENABLED
+
 	if (p_level == MODULE_INITIALIZATION_LEVEL_SERVERS) {
 		ScriptServer::unregister_language(script_language_gd);
 

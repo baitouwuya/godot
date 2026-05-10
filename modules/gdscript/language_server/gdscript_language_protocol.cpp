@@ -142,13 +142,17 @@ Error GDScriptLanguageProtocol::on_client_connected() {
 	peer->connection = tcp_peer;
 	clients.insert(next_client_id, peer);
 	next_client_id++;
-	EditorNode::get_log()->add_message("[LSP] Connection Taken", EditorLog::MSG_TYPE_EDITOR);
+	if (EditorNode::get_singleton()) {
+		EditorNode::get_log()->add_message("[LSP] Connection Taken", EditorLog::MSG_TYPE_EDITOR);
+	}
 	return OK;
 }
 
 void GDScriptLanguageProtocol::on_client_disconnected(const int &p_client_id) {
 	clients.erase(p_client_id);
-	EditorNode::get_log()->add_message("[LSP] Disconnected", EditorLog::MSG_TYPE_EDITOR);
+	if (EditorNode::get_singleton()) {
+		EditorNode::get_log()->add_message("[LSP] Disconnected", EditorLog::MSG_TYPE_EDITOR);
+	}
 }
 
 String GDScriptLanguageProtocol::process_message(const String &p_text) {
@@ -238,7 +242,7 @@ Dictionary GDScriptLanguageProtocol::initialize(const Dictionary &p_params) {
 	}
 
 	if (!_initialized) {
-		workspace->initialize();
+		ERR_FAIL_COND_V_MSG(workspace->initialize() != OK, ret.to_json(), "GDScriptLanguageProtocol: Could not initialize workspace.");
 		text_document->initialize();
 		_initialized = true;
 	}
@@ -250,14 +254,16 @@ void GDScriptLanguageProtocol::initialized(const Variant &p_params) {
 	LSP::GodotCapabilities capabilities;
 
 	DocTools *doc = EditorHelp::get_doc_data();
-	for (const KeyValue<String, DocData::ClassDoc> &E : doc->class_list) {
-		LSP::GodotNativeClassInfo gdclass;
-		gdclass.name = E.value.name;
-		gdclass.class_doc = &(E.value);
-		if (ClassDB::ClassInfo *ptr = ClassDB::classes.getptr(StringName(E.value.name))) {
-			gdclass.class_info = ptr;
+	if (doc) {
+		for (const KeyValue<String, DocData::ClassDoc> &E : doc->class_list) {
+			LSP::GodotNativeClassInfo gdclass;
+			gdclass.name = E.value.name;
+			gdclass.class_doc = &(E.value);
+			if (ClassDB::ClassInfo *ptr = ClassDB::classes.getptr(StringName(E.value.name))) {
+				gdclass.class_info = ptr;
+			}
+			capabilities.native_classes.push_back(gdclass);
 		}
-		capabilities.native_classes.push_back(gdclass);
 	}
 
 	notify_client("gdscript/capabilities", capabilities.to_json());
@@ -361,10 +367,16 @@ void GDScriptLanguageProtocol::request_client(const String &p_method, const Vari
 }
 
 bool GDScriptLanguageProtocol::is_smart_resolve_enabled() const {
+	if (!EditorSettings::get_singleton()) {
+		return true;
+	}
 	return bool(_EDITOR_GET("network/language_server/enable_smart_resolve"));
 }
 
 bool GDScriptLanguageProtocol::is_goto_native_symbols_enabled() const {
+	if (!EditorSettings::get_singleton()) {
+		return false;
+	}
 	return bool(_EDITOR_GET("network/language_server/show_native_symbols_in_editor"));
 }
 

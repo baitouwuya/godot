@@ -87,7 +87,7 @@ void GDScriptWorkspace::apply_new_signal(Object *obj, String function, PackedStr
 		}
 	}
 	function_body += ")";
-	if (EditorSettings::get_singleton()->get_setting("text_editor/completion/add_type_hints")) {
+	if (EditorSettings::get_singleton() && EditorSettings::get_singleton()->get_setting("text_editor/completion/add_type_hints")) {
 		function_body += " -> void";
 	}
 	function_body += ":\n\tpass # Replace with function body.\n";
@@ -235,132 +235,134 @@ Error GDScriptWorkspace::initialize() {
 	}
 
 	DocTools *doc = EditorHelp::get_doc_data();
-	for (const KeyValue<String, DocData::ClassDoc> &E : doc->class_list) {
-		const DocData::ClassDoc &class_data = E.value;
-		const bool is_native = !class_data.is_script_doc;
-		LSP::DocumentSymbol class_symbol;
-		String class_name = E.key;
-		class_symbol.name = class_name;
-		class_symbol.native_class = class_name;
-		class_symbol.kind = LSP::SymbolKind::Class;
-		class_symbol.detail = String("<Native> class ") + class_name;
-		if (!class_data.inherits.is_empty()) {
-			class_symbol.detail += " extends " + class_data.inherits;
-		}
-		class_symbol.documentation = HANDLE_DOC(class_data.brief_description) + "\n" + HANDLE_DOC(class_data.description);
-
-		for (int i = 0; i < class_data.constants.size(); i++) {
-			const DocData::ConstantDoc &const_data = class_data.constants[i];
-			LSP::DocumentSymbol symbol;
-			symbol.name = const_data.name;
-			symbol.native_class = class_name;
-			symbol.kind = LSP::SymbolKind::Constant;
-			symbol.detail = "const " + class_name + "." + const_data.name;
-			if (const_data.enumeration.length()) {
-				symbol.detail += ": " + const_data.enumeration;
+	if (doc) {
+		for (const KeyValue<String, DocData::ClassDoc> &E : doc->class_list) {
+			const DocData::ClassDoc &class_data = E.value;
+			const bool is_native = !class_data.is_script_doc;
+			LSP::DocumentSymbol class_symbol;
+			String class_name = E.key;
+			class_symbol.name = class_name;
+			class_symbol.native_class = class_name;
+			class_symbol.kind = LSP::SymbolKind::Class;
+			class_symbol.detail = String("<Native> class ") + class_name;
+			if (!class_data.inherits.is_empty()) {
+				class_symbol.detail += " extends " + class_data.inherits;
 			}
-			symbol.detail += " = " + const_data.value;
-			symbol.documentation = HANDLE_DOC(const_data.description);
-			class_symbol.children.push_back(symbol);
-		}
+			class_symbol.documentation = HANDLE_DOC(class_data.brief_description) + "\n" + HANDLE_DOC(class_data.description);
 
-		for (int i = 0; i < class_data.properties.size(); i++) {
-			const DocData::PropertyDoc &data = class_data.properties[i];
-			LSP::DocumentSymbol symbol;
-			symbol.name = data.name;
-			symbol.native_class = class_name;
-			symbol.kind = LSP::SymbolKind::Property;
-			symbol.detail = "var " + class_name + "." + data.name;
-			if (data.enumeration.length()) {
-				symbol.detail += ": " + data.enumeration;
-			} else {
-				symbol.detail += ": " + data.type;
-			}
-			symbol.documentation = HANDLE_DOC(data.description);
-			class_symbol.children.push_back(symbol);
-		}
-
-		for (int i = 0; i < class_data.theme_properties.size(); i++) {
-			const DocData::ThemeItemDoc &data = class_data.theme_properties[i];
-			LSP::DocumentSymbol symbol;
-			symbol.name = data.name;
-			symbol.native_class = class_name;
-			symbol.kind = LSP::SymbolKind::Property;
-			symbol.detail = "<Theme> var " + class_name + "." + data.name + ": " + data.type;
-			symbol.documentation = HANDLE_DOC(data.description);
-			class_symbol.children.push_back(symbol);
-		}
-
-		Vector<DocData::MethodDoc> method_likes;
-		method_likes.append_array(class_data.methods);
-		method_likes.append_array(class_data.annotations);
-		const int constructors_start_idx = method_likes.size();
-		method_likes.append_array(class_data.constructors);
-		const int operator_start_idx = method_likes.size();
-		method_likes.append_array(class_data.operators);
-		const int signal_start_idx = method_likes.size();
-		method_likes.append_array(class_data.signals);
-
-		for (int i = 0; i < method_likes.size(); i++) {
-			const DocData::MethodDoc &data = method_likes[i];
-
-			LSP::DocumentSymbol symbol;
-			symbol.name = data.name;
-			symbol.native_class = class_name;
-
-			if (i >= signal_start_idx) {
-				symbol.kind = LSP::SymbolKind::Event;
-			} else if (i >= operator_start_idx) {
-				symbol.kind = LSP::SymbolKind::Operator;
-			} else if (i >= constructors_start_idx) {
-				symbol.kind = LSP::SymbolKind::Constructor;
-			} else {
-				symbol.kind = LSP::SymbolKind::Method;
-			}
-
-			String params = "";
-			bool arg_default_value_started = false;
-			for (int j = 0; j < data.arguments.size(); j++) {
-				const DocData::ArgumentDoc &arg = data.arguments[j];
-
-				LSP::DocumentSymbol symbol_arg;
-				symbol_arg.name = arg.name;
-				symbol_arg.kind = LSP::SymbolKind::Variable;
-				symbol_arg.detail = arg.type;
-
-				if (!arg_default_value_started && !arg.default_value.is_empty()) {
-					arg_default_value_started = true;
+			for (int i = 0; i < class_data.constants.size(); i++) {
+				const DocData::ConstantDoc &const_data = class_data.constants[i];
+				LSP::DocumentSymbol symbol;
+				symbol.name = const_data.name;
+				symbol.native_class = class_name;
+				symbol.kind = LSP::SymbolKind::Constant;
+				symbol.detail = "const " + class_name + "." + const_data.name;
+				if (const_data.enumeration.length()) {
+					symbol.detail += ": " + const_data.enumeration;
 				}
-				String arg_str = arg.name + ": " + arg.type;
-				if (arg_default_value_started) {
-					arg_str += " = " + arg.default_value;
-				}
-				if (j < data.arguments.size() - 1) {
-					arg_str += ", ";
-				}
-				params += arg_str;
-
-				symbol.children.push_back(symbol_arg);
-			}
-			if (data.qualifiers.contains("vararg")) {
-				params += params.is_empty() ? "..." : ", ...";
+				symbol.detail += " = " + const_data.value;
+				symbol.documentation = HANDLE_DOC(const_data.description);
+				class_symbol.children.push_back(symbol);
 			}
 
-			String return_type = data.return_type;
-			if (return_type.is_empty()) {
-				return_type = "void";
+			for (int i = 0; i < class_data.properties.size(); i++) {
+				const DocData::PropertyDoc &data = class_data.properties[i];
+				LSP::DocumentSymbol symbol;
+				symbol.name = data.name;
+				symbol.native_class = class_name;
+				symbol.kind = LSP::SymbolKind::Property;
+				symbol.detail = "var " + class_name + "." + data.name;
+				if (data.enumeration.length()) {
+					symbol.detail += ": " + data.enumeration;
+				} else {
+					symbol.detail += ": " + data.type;
+				}
+				symbol.documentation = HANDLE_DOC(data.description);
+				class_symbol.children.push_back(symbol);
 			}
-			symbol.detail = "func " + class_name + "." + data.name + "(" + params + ") -> " + return_type;
-			symbol.documentation = HANDLE_DOC(data.description);
-			class_symbol.children.push_back(symbol);
+
+			for (int i = 0; i < class_data.theme_properties.size(); i++) {
+				const DocData::ThemeItemDoc &data = class_data.theme_properties[i];
+				LSP::DocumentSymbol symbol;
+				symbol.name = data.name;
+				symbol.native_class = class_name;
+				symbol.kind = LSP::SymbolKind::Property;
+				symbol.detail = "<Theme> var " + class_name + "." + data.name + ": " + data.type;
+				symbol.documentation = HANDLE_DOC(data.description);
+				class_symbol.children.push_back(symbol);
+			}
+
+			Vector<DocData::MethodDoc> method_likes;
+			method_likes.append_array(class_data.methods);
+			method_likes.append_array(class_data.annotations);
+			const int constructors_start_idx = method_likes.size();
+			method_likes.append_array(class_data.constructors);
+			const int operator_start_idx = method_likes.size();
+			method_likes.append_array(class_data.operators);
+			const int signal_start_idx = method_likes.size();
+			method_likes.append_array(class_data.signals);
+
+			for (int i = 0; i < method_likes.size(); i++) {
+				const DocData::MethodDoc &data = method_likes[i];
+
+				LSP::DocumentSymbol symbol;
+				symbol.name = data.name;
+				symbol.native_class = class_name;
+
+				if (i >= signal_start_idx) {
+					symbol.kind = LSP::SymbolKind::Event;
+				} else if (i >= operator_start_idx) {
+					symbol.kind = LSP::SymbolKind::Operator;
+				} else if (i >= constructors_start_idx) {
+					symbol.kind = LSP::SymbolKind::Constructor;
+				} else {
+					symbol.kind = LSP::SymbolKind::Method;
+				}
+
+				String params = "";
+				bool arg_default_value_started = false;
+				for (int j = 0; j < data.arguments.size(); j++) {
+					const DocData::ArgumentDoc &arg = data.arguments[j];
+
+					LSP::DocumentSymbol symbol_arg;
+					symbol_arg.name = arg.name;
+					symbol_arg.kind = LSP::SymbolKind::Variable;
+					symbol_arg.detail = arg.type;
+
+					if (!arg_default_value_started && !arg.default_value.is_empty()) {
+						arg_default_value_started = true;
+					}
+					String arg_str = arg.name + ": " + arg.type;
+					if (arg_default_value_started) {
+						arg_str += " = " + arg.default_value;
+					}
+					if (j < data.arguments.size() - 1) {
+						arg_str += ", ";
+					}
+					params += arg_str;
+
+					symbol.children.push_back(symbol_arg);
+				}
+				if (data.qualifiers.contains("vararg")) {
+					params += params.is_empty() ? "..." : ", ...";
+				}
+
+				String return_type = data.return_type;
+				if (return_type.is_empty()) {
+					return_type = "void";
+				}
+				symbol.detail = "func " + class_name + "." + data.name + "(" + params + ") -> " + return_type;
+				symbol.documentation = HANDLE_DOC(data.description);
+				class_symbol.children.push_back(symbol);
+			}
+
+			native_symbols.insert(class_name, class_symbol);
 		}
-
-		native_symbols.insert(class_name, class_symbol);
 	}
 
 	reload_all_workspace_scripts();
 
-	if (GDScriptLanguageProtocol::get_singleton()->is_smart_resolve_enabled()) {
+	if (doc && GDScriptLanguageProtocol::get_singleton()->is_smart_resolve_enabled()) {
 		for (const KeyValue<StringName, LSP::DocumentSymbol> &E : native_symbols) {
 			ClassMembers members;
 			const LSP::DocumentSymbol &class_symbol = E.value;
@@ -558,12 +560,14 @@ String GDScriptWorkspace::get_file_path(const String &p_uri) {
 		}
 	}
 
-	// Resolve the file inside of the project using EditorFileSystem.
-	EditorFileSystemDirectory *editor_dir;
-	int file_idx;
-	editor_dir = EditorFileSystem::get_singleton()->find_file(simple_path, &file_idx);
-	if (editor_dir) {
-		return editor_dir->get_file_path(file_idx);
+	// Resolve the file inside of the project using EditorFileSystem when running inside the editor.
+	if (EditorFileSystem::get_singleton()) {
+		EditorFileSystemDirectory *editor_dir;
+		int file_idx;
+		editor_dir = EditorFileSystem::get_singleton()->find_file(simple_path, &file_idx);
+		if (editor_dir) {
+			return editor_dir->get_file_path(file_idx);
+		}
 	}
 
 	return simple_path;
@@ -627,6 +631,9 @@ Node *GDScriptWorkspace::_get_owner_scene_node(String p_path) {
 	Node *owner_scene_node = nullptr;
 	List<String> owners;
 
+	if (!EditorFileSystem::get_singleton()) {
+		return nullptr;
+	}
 	_get_owners(EditorFileSystem::get_singleton()->get_filesystem(), p_path, owners);
 
 	for (const String &owner : owners) {

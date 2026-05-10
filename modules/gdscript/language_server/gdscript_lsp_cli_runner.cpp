@@ -422,9 +422,7 @@ void GDScriptLSPCLIRunner::apply_startup_options(const Options &p_options, bool 
 		return;
 	}
 
-	r_editor = true;
 	r_cmdline_tool = true;
-	r_wait_for_import = true;
 	r_quiet_stdout = true;
 }
 

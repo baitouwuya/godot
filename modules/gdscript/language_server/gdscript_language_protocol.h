@@ -159,5 +159,8 @@ public:
 	GDScriptLanguageProtocol();
 	~GDScriptLanguageProtocol() {
 		clients.clear();
+		if (singleton == this) {
+			singleton = nullptr;
+		}
 	}
 };

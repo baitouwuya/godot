@@ -598,7 +598,7 @@ func f():
 			CHECK(validation_error.is_empty());
 		}
 
-		SUBCASE("Startup options keep plugins enabled by default") {
+		SUBCASE("Startup options keep query runs headless by default") {
 			GDScriptLSPCLIRunner::Options options;
 			options.query = "document-symbol";
 			options.file = "res://lsp/local_variables.gd";
@@ -611,14 +611,33 @@ func f():
 
 			GDScriptLSPCLIRunner::apply_startup_options(options, editor, cmdline_tool, wait_for_import, quiet_stdout, recovery_mode);
 
-			CHECK(editor);
+			CHECK_FALSE(editor);
 			CHECK(cmdline_tool);
-			CHECK(wait_for_import);
+			CHECK_FALSE(wait_for_import);
 			CHECK(quiet_stdout);
 			CHECK_FALSE(recovery_mode);
 		}
 
-		SUBCASE("Startup options preserve explicit recovery mode") {
+		SUBCASE("Startup options keep diagnostics runs headless by default") {
+			GDScriptLSPCLIRunner::Options options;
+			options.diagnostics = true;
+
+			bool editor = false;
+			bool cmdline_tool = false;
+			bool wait_for_import = false;
+			bool quiet_stdout = false;
+			bool recovery_mode = false;
+
+			GDScriptLSPCLIRunner::apply_startup_options(options, editor, cmdline_tool, wait_for_import, quiet_stdout, recovery_mode);
+
+			CHECK_FALSE(editor);
+			CHECK(cmdline_tool);
+			CHECK_FALSE(wait_for_import);
+			CHECK(quiet_stdout);
+			CHECK_FALSE(recovery_mode);
+		}
+
+		SUBCASE("Startup options do not change recovery mode") {
 			GDScriptLSPCLIRunner::Options options;
 			options.diagnostics = true;
 
@@ -630,9 +649,9 @@ func f():
 
 			GDScriptLSPCLIRunner::apply_startup_options(options, editor, cmdline_tool, wait_for_import, quiet_stdout, recovery_mode);
 
-			CHECK(editor);
+			CHECK_FALSE(editor);
 			CHECK(cmdline_tool);
-			CHECK(wait_for_import);
+			CHECK_FALSE(wait_for_import);
 			CHECK(quiet_stdout);
 			CHECK(recovery_mode);
 		}
@@ -741,6 +760,50 @@ func f():
 
 		memdelete(proto);
 		memdelete(efs);
+		finish_language();
+	}
+
+	TEST_CASE("[cli_runner][no_editor_protocol]") {
+		GDScriptLanguageProtocol *proto = initialize(root);
+		REQUIRE(proto);
+		CHECK(GDScriptLanguageProtocol::get_singleton());
+		CHECK_FALSE(EditorNode::get_singleton());
+
+		String error;
+
+		GDScriptLSPCLIRunner::Options document_symbol_options;
+		document_symbol_options.query = "document-symbol";
+		document_symbol_options.file = "res://lsp/local_variables.gd";
+		Array document_symbols = GDScriptLSPCLIRunner::run_query_for_tests(document_symbol_options, error);
+		CHECK(error.is_empty());
+		CHECK_FALSE(document_symbols.is_empty());
+
+		GDScriptLSPCLIRunner::Options hover_options;
+		hover_options.query = "hover";
+		hover_options.file = "res://lsp/local_variables.gd";
+		hover_options.line = 7;
+		hover_options.column = 14;
+		Dictionary hover = GDScriptLSPCLIRunner::run_query_for_tests(hover_options, error);
+		CHECK(error.is_empty());
+		CHECK(hover.has("contents"));
+
+		GDScriptLSPCLIRunner::Options completion_options;
+		completion_options.query = "completion";
+		completion_options.file = "res://lsp/local_variables.gd";
+		completion_options.line = 7;
+		completion_options.column = 12;
+		Array completion = GDScriptLSPCLIRunner::run_query_for_tests(completion_options, error);
+		CHECK(error.is_empty());
+		CHECK(completion.is_empty());
+
+		GDScriptLSPCLIRunner::Options diagnostics_options;
+		diagnostics_options.diagnostics = true;
+		diagnostics_options.diagnostics_format = GDScriptLSPCLIRunner::DIAGNOSTICS_FORMAT_SUMMARY;
+		diagnostics_options.diagnostics_severity = GDScriptLSPCLIRunner::DIAGNOSTICS_SEVERITY_ALL;
+		diagnostics_options.diagnostics_fail_on = GDScriptLSPCLIRunner::DIAGNOSTICS_FAIL_ON_NEVER;
+		CHECK_EQ(GDScriptLSPCLIRunner::run_diagnostics_for_tests(diagnostics_options), GDScriptLSPCLIRunner::EXIT_OK);
+
+		memdelete(proto);
 		finish_language();
 	}
 

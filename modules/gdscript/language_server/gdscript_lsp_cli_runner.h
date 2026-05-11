@@ -82,7 +82,7 @@ public:
 
 	static bool has_entrypoint_argument(const List<String> &p_args);
 	static bool parse_argument(const String &p_arg, List<String>::Element *&r_next, bool p_has_entrypoint_argument, Options &r_options, String &r_error);
-	static void apply_startup_options(const Options &p_options, bool &r_editor, bool &r_cmdline_tool, bool &r_wait_for_import, bool &r_quiet_stdout, bool &r_recovery_mode);
+	static void apply_startup_options(const Options &p_options, bool &r_editor, bool &r_project_manager, bool &r_cmdline_tool, bool &r_wait_for_import, bool &r_quiet_stdout, bool &r_recovery_mode, String &r_audio_driver, String &r_display_driver, String &r_rendering_driver, String &r_rendering_method);
 	static String normalize_file_path(const String &p_file);
 	static Error build_query_params(const Options &p_options, const Ref<GDScriptWorkspace> &p_workspace, Dictionary &r_params, String &r_error);
 	static Dictionary summarize_diagnostics(const Array &p_diagnostics);

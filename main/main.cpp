@@ -2270,15 +2270,8 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 #ifdef TOOLS_ENABLED
 #ifdef GDSCRIPT_LSP_CLI_ENABLED
 	GDScriptLanguageServer::cli_mode = GDScriptLSPCLIRunner::is_enabled(gdscript_lsp_cli_options);
-	GDScriptLSPCLIRunner::apply_startup_options(gdscript_lsp_cli_options, editor, cmdline_tool, wait_for_import, quiet_stdout, recovery_mode);
+	GDScriptLSPCLIRunner::apply_startup_options(gdscript_lsp_cli_options, editor, project_manager, cmdline_tool, wait_for_import, quiet_stdout, recovery_mode, audio_driver, display_driver, rendering_driver, rendering_method);
 	_ensure_custom_feature_tracer_initialized(project_path, false);
-	if (GDScriptLanguageServer::cli_mode) {
-		editor = false;
-		project_manager = false;
-		wait_for_import = false;
-		audio_driver = NULL_AUDIO_DRIVER;
-		display_driver = NULL_DISPLAY_DRIVER;
-	}
 	if (CustomFeatureTracer::has_singleton() && GDScriptLanguageServer::cli_mode) {
 		CustomFeatureTracer *tracer = CustomFeatureTracer::get_singleton();
 		Dictionary startup_data = _make_gdscript_lsp_trace_options_data(gdscript_lsp_cli_options);
@@ -2287,6 +2280,10 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 		startup_data["waitForImport"] = wait_for_import;
 		startup_data["quietStdout"] = quiet_stdout;
 		startup_data["recoveryMode"] = recovery_mode;
+		startup_data["audioDriver"] = audio_driver;
+		startup_data["displayDriver"] = display_driver;
+		startup_data["renderingDriver"] = rendering_driver;
+		startup_data["renderingMethod"] = rendering_method;
 		tracer->record_event(CustomFeatureTracer::FEATURE_GDSCRIPT_LSP_CLI, "startup_options", "info", String(), startup_data);
 	}
 	if (GDScriptLanguageServer::cli_mode) {

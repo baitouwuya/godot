@@ -350,6 +350,19 @@ struct ParsedCLIOptionsResult {
 	String error;
 };
 
+struct LSPCLIStartupOptionsState {
+	bool editor = false;
+	bool project_manager = false;
+	bool cmdline_tool = false;
+	bool wait_for_import = false;
+	bool quiet_stdout = false;
+	bool recovery_mode = false;
+	String audio_driver;
+	String display_driver;
+	String rendering_driver;
+	String rendering_method;
+};
+
 ParsedCLIOptionsResult parse_cli_options(const std::initializer_list<const char *> &p_args) {
 	List<String> args;
 	for (const char *arg : p_args) {
@@ -370,6 +383,12 @@ ParsedCLIOptionsResult parse_cli_options(const std::initializer_list<const char 
 	}
 
 	return result;
+}
+
+LSPCLIStartupOptionsState apply_lsp_cli_startup_options(const GDScriptLSPCLIRunner::Options &p_options) {
+	LSPCLIStartupOptionsState state;
+	GDScriptLSPCLIRunner::apply_startup_options(p_options, state.editor, state.project_manager, state.cmdline_tool, state.wait_for_import, state.quiet_stdout, state.recovery_mode, state.audio_driver, state.display_driver, state.rendering_driver, state.rendering_method);
+	return state;
 }
 
 // Note:
@@ -603,75 +622,69 @@ func f():
 			options.query = "document-symbol";
 			options.file = "res://lsp/local_variables.gd";
 
-			bool editor = false;
-			bool cmdline_tool = false;
-			bool wait_for_import = false;
-			bool quiet_stdout = false;
-			bool recovery_mode = false;
+			LSPCLIStartupOptionsState state = apply_lsp_cli_startup_options(options);
 
-			GDScriptLSPCLIRunner::apply_startup_options(options, editor, cmdline_tool, wait_for_import, quiet_stdout, recovery_mode);
-
-			CHECK_FALSE(editor);
-			CHECK(cmdline_tool);
-			CHECK_FALSE(wait_for_import);
-			CHECK(quiet_stdout);
-			CHECK_FALSE(recovery_mode);
+			CHECK_FALSE(state.editor);
+			CHECK_FALSE(state.project_manager);
+			CHECK(state.cmdline_tool);
+			CHECK_FALSE(state.wait_for_import);
+			CHECK(state.quiet_stdout);
+			CHECK_FALSE(state.recovery_mode);
+			CHECK_EQ(state.audio_driver, String("Dummy"));
+			CHECK_EQ(state.display_driver, String("headless"));
+			CHECK_EQ(state.rendering_driver, String("dummy"));
+			CHECK_EQ(state.rendering_method, String("dummy"));
 		}
 
 		SUBCASE("Startup options keep diagnostics runs headless by default") {
 			GDScriptLSPCLIRunner::Options options;
 			options.diagnostics = true;
 
-			bool editor = false;
-			bool cmdline_tool = false;
-			bool wait_for_import = false;
-			bool quiet_stdout = false;
-			bool recovery_mode = false;
+			LSPCLIStartupOptionsState state = apply_lsp_cli_startup_options(options);
 
-			GDScriptLSPCLIRunner::apply_startup_options(options, editor, cmdline_tool, wait_for_import, quiet_stdout, recovery_mode);
-
-			CHECK_FALSE(editor);
-			CHECK(cmdline_tool);
-			CHECK_FALSE(wait_for_import);
-			CHECK(quiet_stdout);
-			CHECK_FALSE(recovery_mode);
+			CHECK_FALSE(state.editor);
+			CHECK_FALSE(state.project_manager);
+			CHECK(state.cmdline_tool);
+			CHECK_FALSE(state.wait_for_import);
+			CHECK(state.quiet_stdout);
+			CHECK_FALSE(state.recovery_mode);
+			CHECK_EQ(state.audio_driver, String("Dummy"));
+			CHECK_EQ(state.display_driver, String("headless"));
+			CHECK_EQ(state.rendering_driver, String("dummy"));
+			CHECK_EQ(state.rendering_method, String("dummy"));
 		}
 
-		SUBCASE("Startup options do not change recovery mode") {
+		SUBCASE("Startup options disable recovery mode") {
 			GDScriptLSPCLIRunner::Options options;
 			options.diagnostics = true;
 
-			bool editor = false;
-			bool cmdline_tool = false;
-			bool wait_for_import = false;
-			bool quiet_stdout = false;
-			bool recovery_mode = true;
+			LSPCLIStartupOptionsState state;
+			state.recovery_mode = true;
+			GDScriptLSPCLIRunner::apply_startup_options(options, state.editor, state.project_manager, state.cmdline_tool, state.wait_for_import, state.quiet_stdout, state.recovery_mode, state.audio_driver, state.display_driver, state.rendering_driver, state.rendering_method);
 
-			GDScriptLSPCLIRunner::apply_startup_options(options, editor, cmdline_tool, wait_for_import, quiet_stdout, recovery_mode);
-
-			CHECK_FALSE(editor);
-			CHECK(cmdline_tool);
-			CHECK_FALSE(wait_for_import);
-			CHECK(quiet_stdout);
-			CHECK(recovery_mode);
+			CHECK_FALSE(state.editor);
+			CHECK_FALSE(state.project_manager);
+			CHECK(state.cmdline_tool);
+			CHECK_FALSE(state.wait_for_import);
+			CHECK(state.quiet_stdout);
+			CHECK_FALSE(state.recovery_mode);
 		}
 
 		SUBCASE("Startup options leave unrelated launches untouched") {
 			GDScriptLSPCLIRunner::Options options;
 
-			bool editor = false;
-			bool cmdline_tool = false;
-			bool wait_for_import = false;
-			bool quiet_stdout = false;
-			bool recovery_mode = false;
+			LSPCLIStartupOptionsState state = apply_lsp_cli_startup_options(options);
 
-			GDScriptLSPCLIRunner::apply_startup_options(options, editor, cmdline_tool, wait_for_import, quiet_stdout, recovery_mode);
-
-			CHECK_FALSE(editor);
-			CHECK_FALSE(cmdline_tool);
-			CHECK_FALSE(wait_for_import);
-			CHECK_FALSE(quiet_stdout);
-			CHECK_FALSE(recovery_mode);
+			CHECK_FALSE(state.editor);
+			CHECK_FALSE(state.project_manager);
+			CHECK_FALSE(state.cmdline_tool);
+			CHECK_FALSE(state.wait_for_import);
+			CHECK_FALSE(state.quiet_stdout);
+			CHECK_FALSE(state.recovery_mode);
+			CHECK(state.audio_driver.is_empty());
+			CHECK(state.display_driver.is_empty());
+			CHECK(state.rendering_driver.is_empty());
+			CHECK(state.rendering_method.is_empty());
 		}
 
 		SUBCASE("Rejects diagnostics format outside diagnostics mode") {

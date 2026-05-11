@@ -417,13 +417,21 @@ bool GDScriptLSPCLIRunner::parse_argument(const String &p_arg, List<String>::Ele
 	return false;
 }
 
-void GDScriptLSPCLIRunner::apply_startup_options(const Options &p_options, bool &r_editor, bool &r_cmdline_tool, bool &r_wait_for_import, bool &r_quiet_stdout, bool &r_recovery_mode) {
+void GDScriptLSPCLIRunner::apply_startup_options(const Options &p_options, bool &r_editor, bool &r_project_manager, bool &r_cmdline_tool, bool &r_wait_for_import, bool &r_quiet_stdout, bool &r_recovery_mode, String &r_audio_driver, String &r_display_driver, String &r_rendering_driver, String &r_rendering_method) {
 	if (!is_enabled(p_options)) {
 		return;
 	}
 
+	r_editor = false;
+	r_project_manager = false;
 	r_cmdline_tool = true;
+	r_wait_for_import = false;
 	r_quiet_stdout = true;
+	r_recovery_mode = false;
+	r_audio_driver = "Dummy";
+	r_display_driver = "headless";
+	r_rendering_driver = "dummy";
+	r_rendering_method = "dummy";
 }
 
 String GDScriptLSPCLIRunner::normalize_file_path(const String &p_file) {

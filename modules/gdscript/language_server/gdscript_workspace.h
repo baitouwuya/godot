@@ -36,6 +36,8 @@
 #include "core/error/error_macros.h"
 #include "core/variant/variant.h"
 
+class GDScriptAnalysisSession;
+
 class GDScriptWorkspace : public RefCounted {
 	GDCLASS(GDScriptWorkspace, RefCounted);
 
@@ -62,6 +64,7 @@ protected:
 
 	const LSP::DocumentSymbol *get_native_symbol(const String &p_class, const String &p_member = "") const;
 	const LSP::DocumentSymbol *get_script_symbol(const String &p_path) const;
+	const LSP::DocumentSymbol *get_script_symbol(const Ref<GDScriptAnalysisSession> &p_session, const String &p_path) const;
 	const LSP::DocumentSymbol *get_parameter_symbol(const LSP::DocumentSymbol *p_parent, const String &symbol_identifier);
 	const LSP::DocumentSymbol *get_local_symbol_at(const ExtendGDScriptParser *p_parser, const String &p_symbol_identifier, const LSP::Position p_position);
 
@@ -84,18 +87,29 @@ public:
 	String get_file_uri(const String &p_path) const;
 
 	void publish_diagnostics(const String &p_path);
+	void publish_diagnostics(const String &p_path, const Array &p_diagnostics, int p_client_id = -1);
+	void publish_diagnostics(const Ref<GDScriptAnalysisSession> &p_session, const String &p_path, int p_client_id = -1);
 	void completion(const LSP::CompletionParams &p_params, List<ScriptLanguage::CodeCompletionOption> *r_options);
+	void completion(const Ref<GDScriptAnalysisSession> &p_session, const LSP::CompletionParams &p_params, List<ScriptLanguage::CodeCompletionOption> *r_options);
 
 	const LSP::DocumentSymbol *resolve_symbol(const LSP::TextDocumentPositionParams &p_doc_pos, const String &p_symbol_name = "", bool p_func_required = false);
+	const LSP::DocumentSymbol *resolve_symbol(const Ref<GDScriptAnalysisSession> &p_session, const LSP::TextDocumentPositionParams &p_doc_pos, const String &p_symbol_name = "", bool p_func_required = false);
 
 	const LSP::DocumentSymbol *resolve_native_symbol(const LSP::NativeSymbolInspectParams &p_params);
 	void resolve_document_links(const String &p_uri, List<LSP::DocumentLink> &r_list);
+	void resolve_document_links(const Ref<GDScriptAnalysisSession> &p_session, const String &p_uri, List<LSP::DocumentLink> &r_list);
 	Dictionary generate_script_api(const String &p_path);
+	Dictionary generate_script_api(const Ref<GDScriptAnalysisSession> &p_session, const String &p_path);
 	Error resolve_signature(const LSP::TextDocumentPositionParams &p_doc_pos, LSP::SignatureHelp &r_signature);
+	Error resolve_signature(const Ref<GDScriptAnalysisSession> &p_session, const LSP::TextDocumentPositionParams &p_doc_pos, LSP::SignatureHelp &r_signature);
 	Dictionary rename(const LSP::TextDocumentPositionParams &p_doc_pos, const String &new_name);
+	Dictionary rename(const Ref<GDScriptAnalysisSession> &p_session, const LSP::TextDocumentPositionParams &p_doc_pos, const String &new_name);
 	bool can_rename(const LSP::TextDocumentPositionParams &p_doc_pos, LSP::DocumentSymbol &r_symbol, LSP::Range &r_range);
+	bool can_rename(const Ref<GDScriptAnalysisSession> &p_session, const LSP::TextDocumentPositionParams &p_doc_pos, LSP::DocumentSymbol &r_symbol, LSP::Range &r_range);
 	Vector<LSP::Location> find_usages_in_file(const LSP::DocumentSymbol &p_symbol, const String &p_file_path);
+	Vector<LSP::Location> find_usages_in_file(const Ref<GDScriptAnalysisSession> &p_session, const LSP::DocumentSymbol &p_symbol, const String &p_file_path);
 	Vector<LSP::Location> find_all_usages(const LSP::DocumentSymbol &p_symbol);
+	Vector<LSP::Location> find_all_usages(const Ref<GDScriptAnalysisSession> &p_session, const LSP::DocumentSymbol &p_symbol);
 
 	GDScriptWorkspace();
 	~GDScriptWorkspace();

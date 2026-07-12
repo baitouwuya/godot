@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "gdscript_analysis_service.h"
 #include "gdscript_text_document.h"
 #include "gdscript_workspace.h"
 #include "scene_cache.h"
@@ -75,24 +76,8 @@ private:
 		 * This gets derived from client capabilities so the configured behavior is guaranteed to be supported by the client.
 		 */
 		ClientBehavior behavior;
-
-		/**
-		 * Tracks all files that the client claimed, however for files deemed not relevant
-		 * to the server the `text` might not be persisted.
-		 */
-		HashMap<String, LSP::TextDocumentItem> managed_files;
-		HashMap<String, ExtendGDScriptParser *> parse_results;
-
-		void remove_cached_parser(const String &p_path);
-		ExtendGDScriptParser *parse_script(const String &p_path);
-
-		~LSPeer();
-
-	private:
-		void clear_stale_parsers();
-		// Paths of parsers which we can't cache longterm.
-		// Can be cleared up using `clear_stale_parsers()`.
-		HashSet<String> stale_parsers;
+		uint64_t analysis_session_id = 0;
+		Ref<GDScriptAnalysisSession> analysis_session;
 	};
 
 	enum LSPErrorCode {
@@ -112,8 +97,10 @@ private:
 
 	Ref<GDScriptTextDocument> text_document;
 	Ref<GDScriptWorkspace> workspace;
+	Ref<GDScriptAnalysisService> analysis_service;
 
 	Error on_client_connected();
+	bool _remove_client(int p_client_id);
 	void on_client_disconnected(const int &p_client_id);
 
 	String process_message(const String &p_text);
@@ -131,6 +118,7 @@ public:
 	_FORCE_INLINE_ static GDScriptLanguageProtocol *get_singleton() { return singleton; }
 	_FORCE_INLINE_ Ref<GDScriptWorkspace> get_workspace() { return workspace; }
 	_FORCE_INLINE_ Ref<GDScriptTextDocument> get_text_document() { return text_document; }
+	_FORCE_INLINE_ Ref<GDScriptAnalysisService> get_analysis_service() { return analysis_service; }
 	_FORCE_INLINE_ SceneCache *get_scene_cache() { return &scene_cache; }
 
 	_FORCE_INLINE_ bool is_initialized() const { return _initialized; }
@@ -144,14 +132,19 @@ public:
 
 	bool is_smart_resolve_enabled() const;
 	bool is_goto_native_symbols_enabled() const;
+	Ref<GDScriptAnalysisSession> get_analysis_session(int p_client_id = LSP_NO_CLIENT) const;
 
 	// Text Document Synchronization
 	void lsp_did_open(const Dictionary &p_params);
 	void lsp_did_change(const Dictionary &p_params);
 	void lsp_did_close(const Dictionary &p_params);
+	Error lsp_did_open(const Ref<GDScriptAnalysisSession> &p_session, const Dictionary &p_params, int p_client_id = LSP_NO_CLIENT);
+	Error lsp_did_change(const Ref<GDScriptAnalysisSession> &p_session, const Dictionary &p_params, int p_client_id = LSP_NO_CLIENT);
+	Error lsp_did_close(const Ref<GDScriptAnalysisSession> &p_session, const Dictionary &p_params);
 
 	// Completion
 	Array lsp_completion(const Dictionary &p_params);
+	Array lsp_completion(const Ref<GDScriptAnalysisSession> &p_session, const ClientBehavior &p_behavior, const Dictionary &p_params);
 
 	/**
 	 * Returns a list of symbols that might be related to the document position.
@@ -160,15 +153,15 @@ public:
 	 * Should only be used for "smart resolve".
 	 */
 	void resolve_related_symbols(const LSP::TextDocumentPositionParams &p_doc_pos, List<const LSP::DocumentSymbol *> &r_list);
+	void resolve_related_symbols(const Ref<GDScriptAnalysisSession> &p_session, const LSP::TextDocumentPositionParams &p_doc_pos, List<const LSP::DocumentSymbol *> &r_list);
 
 	/**
 	 * Returns parse results for the given path, using the cache if available.
 	 * If no such file exists, or the file is not a GDScript file a `nullptr` is returned.
 	 */
 	ExtendGDScriptParser *get_parse_result(const String &p_path);
+	ExtendGDScriptParser *get_parse_result(const Ref<GDScriptAnalysisSession> &p_session, const String &p_path);
 
 	GDScriptLanguageProtocol();
-	~GDScriptLanguageProtocol() {
-		clients.clear();
-	}
+	~GDScriptLanguageProtocol();
 };

@@ -32,6 +32,7 @@
 
 #include "../gdscript.h"
 #include "../gdscript_parser.h"
+#include "gdscript_analysis_session.h"
 #include "gdscript_language_protocol.h"
 
 #include "core/config/project_settings.h"
@@ -48,13 +49,13 @@ void GDScriptWorkspace::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("apply_new_signal", "obj", "function", "args"), &GDScriptWorkspace::apply_new_signal);
 	ClassDB::bind_method(D_METHOD("get_file_path", "uri"), &GDScriptWorkspace::get_file_path);
 	ClassDB::bind_method(D_METHOD("get_file_uri", "path"), &GDScriptWorkspace::get_file_uri);
-	ClassDB::bind_method(D_METHOD("generate_script_api", "path"), &GDScriptWorkspace::generate_script_api);
+	ClassDB::bind_method(D_METHOD("generate_script_api", "path"), static_cast<Dictionary (GDScriptWorkspace::*)(const String &)>(&GDScriptWorkspace::generate_script_api));
 
 #ifndef DISABLE_DEPRECATED
 	ClassDB::bind_method(D_METHOD("didDeleteFiles", "params"), &GDScriptWorkspace::didDeleteFiles);
 	ClassDB::bind_method(D_METHOD("parse_script", "path", "content"), &GDScriptWorkspace::parse_script);
 	ClassDB::bind_method(D_METHOD("parse_local_script", "path"), &GDScriptWorkspace::parse_local_script);
-	ClassDB::bind_method(D_METHOD("publish_diagnostics", "path"), &GDScriptWorkspace::publish_diagnostics);
+	ClassDB::bind_method(D_METHOD("publish_diagnostics", "path"), static_cast<void (GDScriptWorkspace::*)(const String &)>(&GDScriptWorkspace::publish_diagnostics));
 #endif
 }
 
@@ -141,7 +142,11 @@ const LSP::DocumentSymbol *GDScriptWorkspace::get_native_symbol(const String &p_
 }
 
 const LSP::DocumentSymbol *GDScriptWorkspace::get_script_symbol(const String &p_path) const {
-	ExtendGDScriptParser *parser = GDScriptLanguageProtocol::get_singleton()->get_parse_result(p_path);
+	return get_script_symbol(GDScriptLanguageProtocol::get_singleton()->get_analysis_session(), p_path);
+}
+
+const LSP::DocumentSymbol *GDScriptWorkspace::get_script_symbol(const Ref<GDScriptAnalysisSession> &p_session, const String &p_path) const {
+	ExtendGDScriptParser *parser = p_session.is_valid() ? p_session->get_parse_result(p_path) : nullptr;
 	if (parser) {
 		return &(parser->get_symbols());
 	}
@@ -399,11 +404,15 @@ static bool is_valid_rename_target(const LSP::DocumentSymbol *p_symbol) {
 }
 
 Dictionary GDScriptWorkspace::rename(const LSP::TextDocumentPositionParams &p_doc_pos, const String &new_name) {
+	return rename(GDScriptLanguageProtocol::get_singleton()->get_analysis_session(), p_doc_pos, new_name);
+}
+
+Dictionary GDScriptWorkspace::rename(const Ref<GDScriptAnalysisSession> &p_session, const LSP::TextDocumentPositionParams &p_doc_pos, const String &new_name) {
 	LSP::WorkspaceEdit edit;
 
-	const LSP::DocumentSymbol *reference_symbol = resolve_symbol(p_doc_pos);
+	const LSP::DocumentSymbol *reference_symbol = resolve_symbol(p_session, p_doc_pos);
 	if (is_valid_rename_target(reference_symbol)) {
-		Vector<LSP::Location> usages = find_all_usages(*reference_symbol);
+		Vector<LSP::Location> usages = find_all_usages(p_session, *reference_symbol);
 		for (int i = 0; i < usages.size(); ++i) {
 			LSP::Location loc = usages[i];
 
@@ -415,13 +424,17 @@ Dictionary GDScriptWorkspace::rename(const LSP::TextDocumentPositionParams &p_do
 }
 
 bool GDScriptWorkspace::can_rename(const LSP::TextDocumentPositionParams &p_doc_pos, LSP::DocumentSymbol &r_symbol, LSP::Range &r_range) {
-	const LSP::DocumentSymbol *reference_symbol = resolve_symbol(p_doc_pos);
+	return can_rename(GDScriptLanguageProtocol::get_singleton()->get_analysis_session(), p_doc_pos, r_symbol, r_range);
+}
+
+bool GDScriptWorkspace::can_rename(const Ref<GDScriptAnalysisSession> &p_session, const LSP::TextDocumentPositionParams &p_doc_pos, LSP::DocumentSymbol &r_symbol, LSP::Range &r_range) {
+	const LSP::DocumentSymbol *reference_symbol = resolve_symbol(p_session, p_doc_pos);
 	if (!is_valid_rename_target(reference_symbol)) {
 		return false;
 	}
 
 	String path = get_file_path(p_doc_pos.textDocument.uri);
-	const ExtendGDScriptParser *parser = GDScriptLanguageProtocol::get_singleton()->get_parse_result(path);
+	const ExtendGDScriptParser *parser = p_session.is_valid() ? p_session->get_parse_result(path) : nullptr;
 	if (parser) {
 		_ALLOW_DISCARD_ parser->get_symbol_name_under_position(p_doc_pos.position, r_range);
 		r_symbol = *reference_symbol;
@@ -432,10 +445,14 @@ bool GDScriptWorkspace::can_rename(const LSP::TextDocumentPositionParams &p_doc_
 }
 
 Vector<LSP::Location> GDScriptWorkspace::find_usages_in_file(const LSP::DocumentSymbol &p_symbol, const String &p_file_path) {
+	return find_usages_in_file(GDScriptLanguageProtocol::get_singleton()->get_analysis_session(), p_symbol, p_file_path);
+}
+
+Vector<LSP::Location> GDScriptWorkspace::find_usages_in_file(const Ref<GDScriptAnalysisSession> &p_session, const LSP::DocumentSymbol &p_symbol, const String &p_file_path) {
 	Vector<LSP::Location> usages;
 
 	const String &identifier = p_symbol.name;
-	const ExtendGDScriptParser *parser = GDScriptLanguageProtocol::get_singleton()->get_parse_result(p_file_path);
+	const ExtendGDScriptParser *parser = p_session.is_valid() ? p_session->get_parse_result(p_file_path) : nullptr;
 	if (parser) {
 		const PackedStringArray &content = parser->get_lines();
 		for (int i = 0; i < content.size(); ++i) {
@@ -449,21 +466,18 @@ Vector<LSP::Location> GDScriptWorkspace::find_usages_in_file(const LSP::Document
 				text_doc.uri = get_file_uri(p_file_path);
 
 				params.textDocument = text_doc;
-				params.position.line = i;
-				params.position.character = character;
+				params.position = GDScriptAnalysisSession::codepoint_to_lsp_position(parser->get_source_text(), LSP::Position(i, character));
 
 				LSP::Range range;
 				String identifier_under_cursor = parser->get_symbol_name_under_position(params.position, range);
 
 				if (identifier_under_cursor == identifier) {
-					const LSP::DocumentSymbol *other_symbol = resolve_symbol(params);
+					const LSP::DocumentSymbol *other_symbol = resolve_symbol(p_session, params);
 
 					if (other_symbol == &p_symbol) {
 						LSP::Location loc;
 						loc.uri = text_doc.uri;
-						loc.range.start = params.position;
-						loc.range.end.line = params.position.line;
-						loc.range.end.character = params.position.character + identifier.length();
+						loc.range = range;
 						usages.append(loc);
 					}
 				}
@@ -474,7 +488,7 @@ Vector<LSP::Location> GDScriptWorkspace::find_usages_in_file(const LSP::Document
 					ERR_PRINT(vformat("LSP Bug, please report. \"get_symbol_name_under_position\" did not correctly resolve \"%s\"", identifier));
 					character = line.find(identifier, character + 1);
 				} else {
-					character = line.find(identifier, range.end.character);
+					character = line.find(identifier, character + MAX(1, identifier.length()));
 				}
 			}
 		}
@@ -484,9 +498,13 @@ Vector<LSP::Location> GDScriptWorkspace::find_usages_in_file(const LSP::Document
 }
 
 Vector<LSP::Location> GDScriptWorkspace::find_all_usages(const LSP::DocumentSymbol &p_symbol) {
+	return find_all_usages(GDScriptLanguageProtocol::get_singleton()->get_analysis_session(), p_symbol);
+}
+
+Vector<LSP::Location> GDScriptWorkspace::find_all_usages(const Ref<GDScriptAnalysisSession> &p_session, const LSP::DocumentSymbol &p_symbol) {
 	if (p_symbol.local) {
 		// Only search in current document.
-		return find_usages_in_file(p_symbol, p_symbol.script_path);
+		return find_usages_in_file(p_session, p_symbol, p_symbol.script_path);
 	}
 	// Search in all documents.
 	List<String> paths;
@@ -494,7 +512,7 @@ Vector<LSP::Location> GDScriptWorkspace::find_all_usages(const LSP::DocumentSymb
 
 	Vector<LSP::Location> usages;
 	for (const String &path : paths) {
-		usages.append_array(find_usages_in_file(p_symbol, path));
+		usages.append_array(find_usages_in_file(p_session, p_symbol, path));
 	}
 	return usages;
 }
@@ -566,12 +584,13 @@ String GDScriptWorkspace::get_file_path(const String &p_uri) {
 		}
 	}
 
-	// Resolve the file inside of the project using EditorFileSystem.
-	EditorFileSystemDirectory *editor_dir;
-	int file_idx;
-	editor_dir = EditorFileSystem::get_singleton()->find_file(simple_path, &file_idx);
-	if (editor_dir) {
-		return editor_dir->get_file_path(file_idx);
+	// Resolve the file inside of the project using EditorFileSystem when running inside the editor.
+	if (EditorFileSystem *editor_file_system = EditorFileSystem::get_singleton()) {
+		int file_idx;
+		EditorFileSystemDirectory *editor_dir = editor_file_system->find_file(simple_path, &file_idx);
+		if (editor_dir) {
+			return editor_dir->get_file_path(file_idx);
+		}
 	}
 
 	return simple_path;
@@ -589,30 +608,39 @@ String GDScriptWorkspace::get_file_uri(const String &p_path) const {
 }
 
 void GDScriptWorkspace::publish_diagnostics(const String &p_path) {
-	Dictionary params;
-	Array errors;
+	publish_diagnostics(GDScriptLanguageProtocol::get_singleton()->get_analysis_session(), p_path);
+}
 
-	const ExtendGDScriptParser *parser = GDScriptLanguageProtocol::get_singleton()->get_parse_result(p_path);
-	if (parser) {
-		const Vector<LSP::Diagnostic> &list = parser->get_diagnostics();
-		errors.resize(list.size());
-		for (int i = 0; i < list.size(); ++i) {
-			errors[i] = list[i].to_json();
-		}
+void GDScriptWorkspace::publish_diagnostics(const Ref<GDScriptAnalysisSession> &p_session, const String &p_path, int p_client_id) {
+	Array diagnostics;
+	if (p_session.is_valid()) {
+		diagnostics = p_session->get_diagnostics(p_path);
 	}
-	params["diagnostics"] = errors;
+	publish_diagnostics(p_path, diagnostics, p_client_id);
+}
+
+void GDScriptWorkspace::publish_diagnostics(const String &p_path, const Array &p_diagnostics, int p_client_id) {
+	Dictionary params;
+	params["diagnostics"] = p_diagnostics;
 	params["uri"] = get_file_uri(p_path);
-	GDScriptLanguageProtocol::get_singleton()->notify_client("textDocument/publishDiagnostics", params);
+	GDScriptLanguageProtocol::get_singleton()->notify_client("textDocument/publishDiagnostics", params, p_client_id);
 }
 
 void GDScriptWorkspace::completion(const LSP::CompletionParams &p_params, List<ScriptLanguage::CodeCompletionOption> *r_options) {
+	completion(GDScriptLanguageProtocol::get_singleton()->get_analysis_session(), p_params, r_options);
+}
+
+void GDScriptWorkspace::completion(const Ref<GDScriptAnalysisSession> &p_session, const LSP::CompletionParams &p_params, List<ScriptLanguage::CodeCompletionOption> *r_options) {
 	String path = get_file_path(p_params.textDocument.uri);
 	String call_hint;
 	bool forced = false;
 
-	const ExtendGDScriptParser *parser = GDScriptLanguageProtocol::get_singleton()->get_parse_result(path);
+	const ExtendGDScriptParser *parser = p_session.is_valid() ? p_session->get_parse_result(path) : nullptr;
 	if (parser) {
-		Node *owner_scene_node = GDScriptLanguageProtocol::get_singleton()->get_scene_cache()->get(path);
+		Node *owner_scene_node = nullptr;
+		if (GDScriptLanguageProtocol *protocol = GDScriptLanguageProtocol::get_singleton()) {
+			owner_scene_node = protocol->get_scene_cache()->get(path);
+		}
 
 		Array stack;
 		Node *current = nullptr;
@@ -642,11 +670,15 @@ void GDScriptWorkspace::completion(const LSP::CompletionParams &p_params, List<S
 }
 
 const LSP::DocumentSymbol *GDScriptWorkspace::resolve_symbol(const LSP::TextDocumentPositionParams &p_doc_pos, const String &p_symbol_name, bool p_func_required) {
+	return resolve_symbol(GDScriptLanguageProtocol::get_singleton()->get_analysis_session(), p_doc_pos, p_symbol_name, p_func_required);
+}
+
+const LSP::DocumentSymbol *GDScriptWorkspace::resolve_symbol(const Ref<GDScriptAnalysisSession> &p_session, const LSP::TextDocumentPositionParams &p_doc_pos, const String &p_symbol_name, bool p_func_required) {
 	const LSP::DocumentSymbol *symbol = nullptr;
 
 	String path = get_file_path(p_doc_pos.textDocument.uri);
 
-	const ExtendGDScriptParser *parser = GDScriptLanguageProtocol::get_singleton()->get_parse_result(path);
+	const ExtendGDScriptParser *parser = p_session.is_valid() ? p_session->get_parse_result(path) : nullptr;
 	if (parser) {
 		String symbol_name = p_symbol_name;
 		if (symbol_name.get_slice_count("(") > 0) {
@@ -663,7 +695,7 @@ const LSP::DocumentSymbol *GDScriptWorkspace::resolve_symbol(const LSP::TextDocu
 		if (!symbol_name.is_empty()) {
 			if (ScriptServer::is_global_class(symbol_name)) {
 				String class_path = ScriptServer::get_global_class_path(symbol_name);
-				symbol = get_script_symbol(class_path);
+				symbol = get_script_symbol(p_session, class_path);
 
 			} else {
 				ScriptLanguage::LookupResult ret;
@@ -680,7 +712,7 @@ const LSP::DocumentSymbol *GDScriptWorkspace::resolve_symbol(const LSP::TextDocu
 							target_script_path = ret.script_path;
 						}
 
-						const ExtendGDScriptParser *target_parser = GDScriptLanguageProtocol::get_singleton()->get_parse_result(target_script_path);
+						const ExtendGDScriptParser *target_parser = p_session.is_valid() ? p_session->get_parse_result(target_script_path) : nullptr;
 						if (target_parser) {
 							symbol = target_parser->get_symbol_defined_at_line(LINE_NUMBER_TO_INDEX(ret.location), symbol_name);
 
@@ -732,7 +764,11 @@ const LSP::DocumentSymbol *GDScriptWorkspace::resolve_native_symbol(const LSP::N
 }
 
 void GDScriptWorkspace::resolve_document_links(const String &p_uri, List<LSP::DocumentLink> &r_list) {
-	const ExtendGDScriptParser *parser = GDScriptLanguageProtocol::get_singleton()->get_parse_result(get_file_path(p_uri));
+	resolve_document_links(GDScriptLanguageProtocol::get_singleton()->get_analysis_session(), p_uri, r_list);
+}
+
+void GDScriptWorkspace::resolve_document_links(const Ref<GDScriptAnalysisSession> &p_session, const String &p_uri, List<LSP::DocumentLink> &r_list) {
+	const ExtendGDScriptParser *parser = p_session.is_valid() ? p_session->get_parse_result(get_file_path(p_uri)) : nullptr;
 	if (parser && parser->parse_result == Error::OK) {
 		const List<LSP::DocumentLink> &links = parser->get_document_links();
 		for (const LSP::DocumentLink &E : links) {
@@ -742,9 +778,13 @@ void GDScriptWorkspace::resolve_document_links(const String &p_uri, List<LSP::Do
 }
 
 Dictionary GDScriptWorkspace::generate_script_api(const String &p_path) {
+	return generate_script_api(GDScriptLanguageProtocol::get_singleton()->get_analysis_session(), p_path);
+}
+
+Dictionary GDScriptWorkspace::generate_script_api(const Ref<GDScriptAnalysisSession> &p_session, const String &p_path) {
 	Dictionary api;
 
-	const ExtendGDScriptParser *parser = GDScriptLanguageProtocol::get_singleton()->get_parse_result(p_path);
+	const ExtendGDScriptParser *parser = p_session.is_valid() ? p_session->get_parse_result(p_path) : nullptr;
 	if (parser) {
 		api = parser->generate_api();
 	}
@@ -752,7 +792,11 @@ Dictionary GDScriptWorkspace::generate_script_api(const String &p_path) {
 }
 
 Error GDScriptWorkspace::resolve_signature(const LSP::TextDocumentPositionParams &p_doc_pos, LSP::SignatureHelp &r_signature) {
-	const ExtendGDScriptParser *parser = GDScriptLanguageProtocol::get_singleton()->get_parse_result(get_file_path(p_doc_pos.textDocument.uri));
+	return resolve_signature(GDScriptLanguageProtocol::get_singleton()->get_analysis_session(), p_doc_pos, r_signature);
+}
+
+Error GDScriptWorkspace::resolve_signature(const Ref<GDScriptAnalysisSession> &p_session, const LSP::TextDocumentPositionParams &p_doc_pos, LSP::SignatureHelp &r_signature) {
+	const ExtendGDScriptParser *parser = p_session.is_valid() ? p_session->get_parse_result(get_file_path(p_doc_pos.textDocument.uri)) : nullptr;
 	if (parser) {
 		LSP::TextDocumentPositionParams text_pos;
 		text_pos.textDocument = p_doc_pos.textDocument;
@@ -760,10 +804,10 @@ Error GDScriptWorkspace::resolve_signature(const LSP::TextDocumentPositionParams
 		if (parser->get_left_function_call(p_doc_pos.position, text_pos.position, r_signature.activeParameter) == OK) {
 			List<const LSP::DocumentSymbol *> symbols;
 
-			if (const LSP::DocumentSymbol *symbol = resolve_symbol(text_pos)) {
+			if (const LSP::DocumentSymbol *symbol = resolve_symbol(p_session, text_pos)) {
 				symbols.push_back(symbol);
-			} else if (GDScriptLanguageProtocol::get_singleton()->is_smart_resolve_enabled()) {
-				GDScriptLanguageProtocol::get_singleton()->resolve_related_symbols(text_pos, symbols);
+			} else if (GDScriptLanguageProtocol *protocol = GDScriptLanguageProtocol::get_singleton(); protocol && protocol->is_smart_resolve_enabled()) {
+				protocol->resolve_related_symbols(p_session, text_pos, symbols);
 			}
 
 			for (const LSP::DocumentSymbol *const &symbol : symbols) {

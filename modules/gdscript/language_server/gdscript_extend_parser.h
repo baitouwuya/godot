@@ -35,6 +35,9 @@
 
 #include "core/variant/variant.h"
 
+class GDScriptAnalysisSession;
+class GDScriptWorkspace;
+
 #ifndef LINE_NUMBER_TO_INDEX
 #define LINE_NUMBER_TO_INDEX(p_line) ((p_line) - 1)
 #endif
@@ -104,7 +107,10 @@ struct GodotRange {
 
 class ExtendGDScriptParser : public GDScriptParser {
 	String path;
+	String source_text;
 	Vector<String> lines;
+	GDScriptAnalysisSession *analysis_session = nullptr;
+	Ref<GDScriptWorkspace> workspace;
 
 	LSP::DocumentSymbol class_symbol;
 	Vector<LSP::Diagnostic> diagnostics;
@@ -113,6 +119,7 @@ class ExtendGDScriptParser : public GDScriptParser {
 	HashMap<String, ClassMembers> inner_classes;
 
 	LSP::Range range_of_node(const GDScriptParser::Node *p_node) const;
+	String get_file_uri(const String &p_path) const;
 
 	void update_diagnostics();
 
@@ -128,6 +135,7 @@ class ExtendGDScriptParser : public GDScriptParser {
 
 public:
 	_FORCE_INLINE_ const String &get_path() const { return path; }
+	_FORCE_INLINE_ const String &get_source_text() const { return source_text; }
 	_FORCE_INLINE_ const Vector<String> &get_lines() const { return lines; }
 	_FORCE_INLINE_ const LSP::DocumentSymbol &get_symbols() const { return class_symbol; }
 	_FORCE_INLINE_ const Vector<LSP::Diagnostic> &get_diagnostics() const { return diagnostics; }
@@ -163,5 +171,10 @@ public:
 	const Array &get_member_completions();
 	Dictionary generate_api() const;
 
+	LSP::Position to_lsp_position(int p_line, int p_column) const;
+	LSP::Range to_lsp_range(int p_start_line, int p_start_column, int p_end_line, int p_end_column) const;
+	LSP::Position to_codepoint_position(const LSP::Position &p_position) const;
+
 	void parse(const String &p_code, const String &p_path);
+	void parse(const String &p_code, const String &p_path, GDScriptAnalysisSession *p_session, const Ref<GDScriptWorkspace> &p_workspace);
 };

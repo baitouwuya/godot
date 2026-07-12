@@ -35,6 +35,7 @@
 #ifndef GDSCRIPT_NO_LSP
 
 #include "../gdscript_analyzer.h"
+#include "../language_server/gdscript_analysis_service.h"
 #include "../language_server/gdscript_extend_parser.h"
 #include "../language_server/gdscript_language_protocol.h"
 #include "../language_server/gdscript_workspace.h"
@@ -51,12 +52,29 @@
 
 class TestGDScriptLanguageProtocolInitializer {
 public:
-	static void setup_client() {
+	static int setup_client() {
 		GDScriptLanguageProtocol *proto = GDScriptLanguageProtocol::get_singleton();
 		Ref<GDScriptLanguageProtocol::LSPeer> peer = memnew(GDScriptLanguageProtocol::LSPeer);
-		proto->clients.insert(proto->next_client_id, peer);
-		proto->latest_client_id = proto->next_client_id;
-		proto->next_client_id++;
+		peer->analysis_session = proto->analysis_service->create_session();
+		peer->analysis_session_id = peer->analysis_session->get_session_id();
+		const int client_id = proto->next_client_id++;
+		proto->clients.insert(client_id, peer);
+		proto->latest_client_id = client_id;
+		return client_id;
+	}
+
+	static Ref<GDScriptAnalysisSession> get_session(int p_client_id) {
+		GDScriptLanguageProtocol *proto = GDScriptLanguageProtocol::get_singleton();
+		const Ref<GDScriptLanguageProtocol::LSPeer> *peer = proto->clients.getptr(p_client_id);
+		return peer ? (*peer)->analysis_session : Ref<GDScriptAnalysisSession>();
+	}
+
+	static int get_latest_client_id() {
+		return GDScriptLanguageProtocol::get_singleton()->latest_client_id;
+	}
+
+	static bool remove_client(int p_client_id) {
+		return GDScriptLanguageProtocol::get_singleton()->_remove_client(p_client_id);
 	}
 };
 
@@ -103,6 +121,7 @@ GDScriptLanguageProtocol *initialize(const String &p_root) {
 
 	// Recreate the singleton for each test, to ensure a clean state.
 	memdelete_notnull(GDScriptLanguageProtocol::get_singleton());
+	CHECK(GDScriptLanguageProtocol::get_singleton() == nullptr);
 	GDScriptLanguageProtocol *proto = memnew(GDScriptLanguageProtocol);
 	TestGDScriptLanguageProtocolInitializer::setup_client();
 
@@ -330,6 +349,192 @@ void assert_no_errors_in(const String &p_path) {
 //   * LSP: both 0-based
 //   * Godot: both 1-based
 TEST_SUITE("[Modules][GDScript][LSP][Editor]") {
+	TEST_CASE("[analysis_session][utf16_positions]") {
+		const String text = "a" + String::chr(0x1f600) + "\tb\r\nlast";
+
+		CHECK_EQ(GDScriptAnalysisSession::position_to_offset(text, LSP::Position(0, 0)), 0);
+		CHECK_EQ(GDScriptAnalysisSession::position_to_offset(text, LSP::Position(0, 1)), 1);
+		CHECK_EQ(GDScriptAnalysisSession::position_to_offset(text, LSP::Position(0, 2)), 1); // Inside the surrogate pair.
+		CHECK_EQ(GDScriptAnalysisSession::position_to_offset(text, LSP::Position(0, 3)), 2);
+		CHECK_EQ(GDScriptAnalysisSession::position_to_offset(text, LSP::Position(0, 4)), 3); // A tab is one UTF-16 code unit.
+		CHECK_EQ(GDScriptAnalysisSession::position_to_offset(text, LSP::Position(0, 5)), 4); // CRLF starts after the line content.
+		CHECK_EQ(GDScriptAnalysisSession::position_to_offset(text, LSP::Position(0, 999)), 4);
+		CHECK_EQ(GDScriptAnalysisSession::position_to_offset(text, LSP::Position(1, 0)), 6);
+		CHECK_EQ(GDScriptAnalysisSession::position_to_offset(text, LSP::Position(1, 4)), 10);
+		CHECK_EQ(GDScriptAnalysisSession::position_to_offset(text, LSP::Position(1, 999)), 10);
+		CHECK_EQ(GDScriptAnalysisSession::position_to_offset(text, LSP::Position(999, 0)), text.length());
+		CHECK_EQ(GDScriptAnalysisSession::position_to_offset(text, LSP::Position(-1, -1)), 0);
+
+		CHECK_EQ(GDScriptAnalysisSession::offset_to_position(text, 1), LSP::Position(0, 1));
+		CHECK_EQ(GDScriptAnalysisSession::offset_to_position(text, 2), LSP::Position(0, 3));
+		CHECK_EQ(GDScriptAnalysisSession::offset_to_position(text, 3), LSP::Position(0, 4));
+		CHECK_EQ(GDScriptAnalysisSession::offset_to_position(text, 4), LSP::Position(0, 5));
+		CHECK_EQ(GDScriptAnalysisSession::offset_to_position(text, 5), LSP::Position(0, 5));
+		CHECK_EQ(GDScriptAnalysisSession::offset_to_position(text, 6), LSP::Position(1, 0));
+		CHECK_EQ(GDScriptAnalysisSession::offset_to_position(text, 999), LSP::Position(1, 4));
+		CHECK_EQ(GDScriptAnalysisSession::offset_to_position(text, -1), LSP::Position(0, 0));
+
+		CHECK_EQ(GDScriptAnalysisSession::lsp_to_codepoint_position(text, LSP::Position(0, 3)), LSP::Position(0, 2));
+		CHECK_EQ(GDScriptAnalysisSession::lsp_to_codepoint_position(text, LSP::Position(0, 2)), LSP::Position(0, 1));
+		CHECK_EQ(GDScriptAnalysisSession::lsp_to_codepoint_position(text, LSP::Position(1, 999)), LSP::Position(1, 4));
+		CHECK_EQ(GDScriptAnalysisSession::codepoint_to_lsp_position(text, LSP::Position(0, 2)), LSP::Position(0, 3));
+		CHECK_EQ(GDScriptAnalysisSession::codepoint_to_lsp_position(text, LSP::Position(1, 4)), LSP::Position(1, 4));
+		CHECK_EQ(GDScriptAnalysisSession::codepoint_to_lsp_position(text, LSP::Position(999, 0)), LSP::Position(1, 4));
+
+		for (int offset = 0; offset <= text.length(); offset++) {
+			const LSP::Position lsp_position = GDScriptAnalysisSession::offset_to_position(text, offset);
+			const int normalized_offset = GDScriptAnalysisSession::position_to_offset(text, lsp_position);
+			CHECK_EQ(normalized_offset, offset == 5 ? 4 : offset);
+		}
+	}
+
+	TEST_CASE("[analysis_session][tcp_client_isolation]") {
+		GDScriptLanguageProtocol *proto = initialize(root);
+		REQUIRE(proto);
+		const int first_client_id = TestGDScriptLanguageProtocolInitializer::get_latest_client_id();
+		const int second_client_id = TestGDScriptLanguageProtocolInitializer::setup_client();
+		Ref<GDScriptAnalysisSession> first = TestGDScriptLanguageProtocolInitializer::get_session(first_client_id);
+		Ref<GDScriptAnalysisSession> second = TestGDScriptLanguageProtocolInitializer::get_session(second_client_id);
+		REQUIRE(first.is_valid());
+		REQUIRE(second.is_valid());
+		const uint64_t first_session_id = first->get_session_id();
+		const uint64_t second_session_id = second->get_session_id();
+
+		Ref<GDScriptWorkspace> workspace = proto->get_workspace();
+		const String path = "res://lsp/tcp_session_isolation.gd";
+		const String uri = workspace->get_file_uri(path);
+		CHECK_EQ(workspace->get_file_path(uri), path);
+		const String valid_source = "extends Node\nvar value: int = 1\n";
+		const String invalid_source = "extends Node\nvar value: int =\n";
+
+		Dictionary first_document;
+		first_document["uri"] = uri;
+		first_document["languageId"] = "gdscript";
+		first_document["version"] = 1;
+		first_document["text"] = valid_source;
+		Dictionary first_open;
+		first_open["textDocument"] = first_document;
+		CHECK_EQ(proto->lsp_did_open(first, first_open, first_client_id), OK);
+		REQUIRE(first->get_document(path));
+		CHECK_EQ(first->get_document(path)->text, valid_source);
+		CHECK_EQ(first->get_document(path)->revision, first->get_revision());
+
+		Dictionary second_document;
+		second_document["uri"] = uri;
+		second_document["languageId"] = "gdscript";
+		second_document["version"] = 1;
+		second_document["text"] = invalid_source;
+		Dictionary second_open;
+		second_open["textDocument"] = second_document;
+		CHECK_EQ(proto->lsp_did_open(second, second_open, second_client_id), OK);
+		REQUIRE(second->get_document(path));
+		CHECK_EQ(second->get_document(path)->text, invalid_source);
+		CHECK_EQ(second->get_document(path)->revision, second->get_revision());
+		CHECK_NE(first->get_parse_result(path), second->get_parse_result(path));
+		CHECK(first->get_diagnostics(path).is_empty());
+		CHECK_FALSE(second->get_diagnostics(path).is_empty());
+
+		Dictionary change_document;
+		change_document["uri"] = uri;
+		change_document["version"] = 2;
+		Dictionary change_event;
+		change_event["text"] = invalid_source;
+		Array changes;
+		changes.push_back(change_event);
+		Dictionary change_params;
+		change_params["textDocument"] = change_document;
+		change_params["contentChanges"] = changes;
+		const uint64_t first_revision = first->get_revision();
+		CHECK_EQ(proto->lsp_did_change(first, change_params, first_client_id), OK);
+		REQUIRE(first->get_document(path));
+		CHECK_GT(first->get_revision(), first_revision);
+		CHECK_EQ(first->get_document(path)->revision, first->get_revision());
+		CHECK_FALSE(first->get_diagnostics(path).is_empty());
+		CHECK_EQ(second->get_document(path)->text, invalid_source);
+		CHECK_EQ(second->get_document(path)->revision, second->get_revision());
+
+		CHECK_EQ(proto->lsp_did_close(first, first_open), OK);
+		CHECK_FALSE(first->has_document(path));
+		CHECK(second->has_document(path));
+
+		CHECK(TestGDScriptLanguageProtocolInitializer::remove_client(first_client_id));
+		CHECK(proto->get_analysis_service()->get_session(first_session_id).is_null());
+		CHECK(TestGDScriptLanguageProtocolInitializer::remove_client(second_client_id));
+		CHECK(proto->get_analysis_service()->get_session(second_session_id).is_null());
+		first.unref();
+		second.unref();
+		finish_language();
+	}
+
+	TEST_CASE("[analysis_session][independent_document_lifecycle]") {
+		GDScriptLanguageProtocol *proto = initialize(root);
+		REQUIRE(proto);
+		Ref<GDScriptAnalysisService> service = proto->get_analysis_service();
+		Ref<GDScriptAnalysisSession> first = service->create_session();
+		Ref<GDScriptAnalysisSession> second = service->create_session();
+		const String path = "res://lsp/analysis_session_test.gd";
+		const String valid_source = "extends Node\nvar value: int = 1\n";
+		const String invalid_source = "extends Node\nvar value: int =\n";
+
+		Array diagnostics;
+		CHECK_EQ(service->open_document(first->get_session_id(), path, valid_source, LSP::LanguageId::GDSCRIPT, 7, diagnostics), OK);
+		CHECK(diagnostics.is_empty());
+		const GDScriptAnalysisSession::DocumentState *first_state = first->get_document(path);
+		REQUIRE(first_state);
+		CHECK_EQ(first_state->source_state, GDScriptAnalysisSession::SOURCE_STATE_OPEN_DOCUMENT);
+		CHECK_EQ(first_state->text, valid_source);
+		CHECK_EQ(first_state->sha256, valid_source.sha256_text());
+		CHECK_EQ(first_state->client_version, 7);
+		CHECK_EQ(first_state->revision, first->get_revision());
+		const uint64_t first_revision = first_state->revision;
+		ExtendGDScriptParser *first_parser = first->get_parse_result(path);
+		REQUIRE(first_parser);
+
+		CHECK_EQ(service->open_document(second->get_session_id(), path, invalid_source, LSP::LanguageId::GDSCRIPT, 1, diagnostics), OK);
+		CHECK_FALSE(diagnostics.is_empty());
+		ExtendGDScriptParser *second_parser = second->get_parse_result(path);
+		REQUIRE(second_parser);
+		CHECK_EQ(second->get_document(path)->revision, second->get_revision());
+		CHECK_NE(first_parser, second_parser);
+		CHECK_EQ(first->get_document(path)->sha256, valid_source.sha256_text());
+		CHECK_EQ(second->get_document(path)->sha256, invalid_source.sha256_text());
+
+		CHECK_EQ(service->change_document(first->get_session_id(), path, invalid_source, 3, diagnostics), OK);
+		CHECK_FALSE(diagnostics.is_empty());
+		first_state = first->get_document(path);
+		REQUIRE(first_state);
+		CHECK_GT(first_state->revision, first_revision);
+		CHECK_EQ(first_state->revision, first->get_revision());
+		CHECK_EQ(first_state->client_version, 3);
+		CHECK_EQ(first_state->sha256, invalid_source.sha256_text());
+
+		const uint64_t changed_revision = first->get_revision();
+		CHECK_EQ(service->close_document(first->get_session_id(), path), OK);
+		CHECK_GT(first->get_revision(), changed_revision);
+		CHECK_FALSE(first->has_document(path));
+		CHECK_EQ(first->get_cached_parser_count(), 0);
+
+		CHECK_EQ(service->open_document(first->get_session_id(), path, valid_source, LSP::LanguageId::GDSCRIPT, 8, diagnostics), OK);
+		CHECK_GT(first->get_document(path)->revision, changed_revision);
+
+		const String disk_path = "res://lsp/local_variables.gd";
+		const uint64_t revision_before_disk_parse = first->get_revision();
+		REQUIRE(first->get_parse_result(disk_path));
+		REQUIRE(first->get_document(disk_path));
+		CHECK_EQ(first->get_document(disk_path)->source_state, GDScriptAnalysisSession::SOURCE_STATE_DISK);
+		CHECK_EQ(first->get_revision(), revision_before_disk_parse);
+		CHECK_EQ(first->get_document(path)->revision, revision_before_disk_parse);
+		first->clear_transient_parsers();
+		CHECK_FALSE(first->has_document(disk_path));
+
+		CHECK(service->remove_session(first->get_session_id()));
+		CHECK(service->remove_session(second->get_session_id()));
+		first.unref();
+		second.unref();
+		service.unref();
+		finish_language();
+	}
+
 	TEST_CASE("[workspace][resolve_symbol]") {
 		EditorFileSystem *efs = memnew(EditorFileSystem);
 		GDScriptLanguageProtocol *proto = initialize(root);

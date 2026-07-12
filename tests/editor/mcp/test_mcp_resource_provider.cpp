@@ -442,6 +442,7 @@ TEST_CASE("[MCP][Provider] EditorFileSystem imports CSV resources with default a
 		artifacts.add(path);
 	}
 	REQUIRE(DirAccess::make_dir_recursive_absolute(default_target.get_base_dir()) == OK);
+	REQUIRE(DirAccess::make_dir_recursive_absolute(default_import_base.get_base_dir()) == OK);
 	REQUIRE(DirAccess::copy_absolute(default_source, default_target) == OK);
 	REQUIRE(DirAccess::copy_absolute(custom_source, custom_target) == OK);
 

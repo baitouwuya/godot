@@ -36,11 +36,18 @@ TEST_FORCE_LINK(test_mcp_cli_command_registry);
 
 namespace TestMCPCLICommandRegistry {
 
-class RecordingCommandHandler final : public MCPCLICommandHandler {
+class RecordingCommandProvider final : public MCPCLICommandProvider {
 public:
 	StringName command;
 	PackedStringArray arguments;
 	int exit_code = 17;
+
+	Error register_cli_commands(MCPCLICommandRegistry &, String *r_error = nullptr) override {
+		if (r_error) {
+			*r_error = String();
+		}
+		return OK;
+	}
 
 	int execute_cli_command(const StringName &p_command, const PackedStringArray &p_arguments) override {
 		command = p_command;
@@ -51,31 +58,60 @@ public:
 
 TEST_CASE("[MCP][CLICommandRegistry] Rejects duplicate names and invokes the registered handler") {
 	MCPCLICommandRegistry registry;
-	RecordingCommandHandler handler;
+	RecordingCommandProvider provider;
 	MCPCLICommandDefinition definition;
 	definition.name = "--mcp-test";
 	definition.usage = "--mcp-test <value>";
 	definition.description = "Test command.";
+	definition.flags = MCP_CLI_COMMAND_FLAG_REQUIRE_EXPLICIT_PROJECT_PATH | MCP_CLI_COMMAND_FLAG_FORCE_HEADLESS;
 
 	String error;
-	REQUIRE(registry.register_command(definition, &handler, &error) == OK);
-	CHECK(registry.register_command(definition, &handler, &error) == ERR_ALREADY_EXISTS);
+	REQUIRE(registry.register_command(definition, &provider, &error) == OK);
+	CHECK(registry.register_command(definition, &provider, &error) == ERR_ALREADY_EXISTS);
 	CHECK_FALSE(error.is_empty());
 	CHECK(registry.has_command(definition.name));
 	REQUIRE(registry.get_command(definition.name) != nullptr);
+	CHECK(registry.get_command(definition.name)->usage == definition.usage);
+	CHECK(registry.get_command(definition.name)->description == definition.description);
+	CHECK(registry.get_command(definition.name)->terminal);
+	CHECK(registry.get_command(definition.name)->has_flag(MCP_CLI_COMMAND_FLAG_REQUIRE_EXPLICIT_PROJECT_PATH));
+	CHECK(registry.get_command(definition.name)->has_flag(MCP_CLI_COMMAND_FLAG_FORCE_HEADLESS));
 	CHECK(registry.get_commands().size() == 1);
 
 	PackedStringArray arguments;
 	arguments.push_back("value");
 	int exit_code = 0;
 	REQUIRE(registry.invoke(definition.name, arguments, exit_code, &error) == OK);
-	CHECK(exit_code == handler.exit_code);
-	CHECK(handler.command == definition.name);
-	CHECK(handler.arguments == arguments);
+	CHECK(exit_code == provider.exit_code);
+	CHECK(provider.command == definition.name);
+	CHECK(provider.arguments == arguments);
 
-	CHECK(registry.unregister_command(definition.name));
+	CHECK(registry.unregister_commands_for_provider(&provider) == 1);
 	CHECK_FALSE(registry.has_command(definition.name));
 	CHECK(registry.invoke(definition.name, arguments, exit_code, &error) == ERR_DOES_NOT_EXIST);
+}
+
+TEST_CASE("[MCP][CLICommandRegistry] Rejects incomplete definitions and unregisters a provider batch") {
+	MCPCLICommandRegistry registry;
+	RecordingCommandProvider provider;
+	MCPCLICommandDefinition definition;
+	definition.name = "--mcp-first";
+
+	String error;
+	CHECK(registry.register_command(definition, &provider, &error) == ERR_INVALID_PARAMETER);
+	CHECK_FALSE(error.is_empty());
+
+	definition.usage = "--mcp-first";
+	CHECK(registry.register_command(definition, &provider, &error) == ERR_INVALID_PARAMETER);
+	definition.description = "First command.";
+	REQUIRE(registry.register_command(definition, &provider, &error) == OK);
+
+	definition.name = "--mcp-second";
+	definition.usage = "--mcp-second";
+	definition.description = "Second command.";
+	REQUIRE(registry.register_command(definition, &provider, &error) == OK);
+	CHECK(registry.unregister_commands_for_provider(&provider) == 2);
+	CHECK(registry.get_commands().is_empty());
 }
 
 } // namespace TestMCPCLICommandRegistry

@@ -42,15 +42,23 @@ void set_error(String *r_error, const String &p_error) {
 
 Error MCPCLICommandRegistry::register_command(
 		const MCPCLICommandDefinition &p_definition,
-		MCPCLICommandHandler *p_handler,
+		MCPCLICommandProvider *p_provider,
 		String *r_error) {
 	set_error(r_error, String());
 	if (p_definition.name == StringName()) {
 		set_error(r_error, "CLI command name cannot be empty.");
 		return ERR_INVALID_PARAMETER;
 	}
-	if (!p_handler) {
-		set_error(r_error, vformat("CLI command '%s' requires a handler.", p_definition.name));
+	if (p_definition.usage.is_empty()) {
+		set_error(r_error, vformat("CLI command '%s' requires usage text.", p_definition.name));
+		return ERR_INVALID_PARAMETER;
+	}
+	if (p_definition.description.is_empty()) {
+		set_error(r_error, vformat("CLI command '%s' requires a description.", p_definition.name));
+		return ERR_INVALID_PARAMETER;
+	}
+	if (!p_provider) {
+		set_error(r_error, vformat("CLI command '%s' requires a provider.", p_definition.name));
 		return ERR_INVALID_PARAMETER;
 	}
 	if (commands.has(p_definition.name)) {
@@ -60,7 +68,7 @@ Error MCPCLICommandRegistry::register_command(
 
 	CommandEntry entry;
 	entry.definition = p_definition;
-	entry.handler = p_handler;
+	entry.provider = p_provider;
 	commands.insert(p_definition.name, entry);
 	registration_order.push_back(p_definition.name);
 	return OK;
@@ -74,9 +82,27 @@ bool MCPCLICommandRegistry::unregister_command(const StringName &p_name) {
 	return true;
 }
 
+int MCPCLICommandRegistry::unregister_commands_for_provider(MCPCLICommandProvider *p_provider) {
+	if (!p_provider) {
+		return 0;
+	}
+
+	Vector<StringName> names_to_remove;
+	for (const StringName &name : registration_order) {
+		const CommandEntry *entry = commands.getptr(name);
+		if (entry && entry->provider == p_provider) {
+			names_to_remove.push_back(name);
+		}
+	}
+	for (const StringName &name : names_to_remove) {
+		unregister_command(name);
+	}
+	return names_to_remove.size();
+}
+
 bool MCPCLICommandRegistry::has_command(const StringName &p_name) const {
 	const CommandEntry *entry = commands.getptr(p_name);
-	return entry && entry->handler;
+	return entry && entry->provider;
 }
 
 const MCPCLICommandDefinition *MCPCLICommandRegistry::get_command(const StringName &p_name) const {
@@ -103,10 +129,10 @@ Error MCPCLICommandRegistry::invoke(
 	r_exit_code = 1;
 	set_error(r_error, String());
 	const CommandEntry *entry = commands.getptr(p_name);
-	if (!entry || !entry->handler) {
+	if (!entry || !entry->provider) {
 		set_error(r_error, vformat("CLI command '%s' is not registered.", p_name));
 		return ERR_DOES_NOT_EXIST;
 	}
-	r_exit_code = entry->handler->execute_cli_command(p_name, p_arguments);
+	r_exit_code = entry->provider->execute_cli_command(p_name, p_arguments);
 	return OK;
 }

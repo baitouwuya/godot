@@ -36,11 +36,23 @@
 #include "core/templates/vector.h"
 #include "core/variant/typed_array.h"
 
+enum MCPCLICommandFlag : uint32_t {
+	MCP_CLI_COMMAND_FLAG_NONE = 0,
+	MCP_CLI_COMMAND_FLAG_REQUIRE_EXPLICIT_PROJECT_PATH = 1 << 0,
+	MCP_CLI_COMMAND_FLAG_EXCLUSIVE_WITH_EDITOR = 1 << 1,
+	MCP_CLI_COMMAND_FLAG_JSON_STDOUT = 1 << 2,
+	MCP_CLI_COMMAND_FLAG_FORCE_HEADLESS = 1 << 3,
+	MCP_CLI_COMMAND_FLAG_PATH_ARGUMENT_ONLY = 1 << 4,
+};
+
 struct MCPCLICommandDefinition {
 	StringName name;
 	String usage;
 	String description;
 	bool terminal = true;
+	uint32_t flags = MCP_CLI_COMMAND_FLAG_NONE;
+
+	bool has_flag(MCPCLICommandFlag p_flag) const { return (flags & p_flag) != 0; }
 };
 
 class MCPCLICommandHandler {
@@ -49,10 +61,18 @@ public:
 	virtual ~MCPCLICommandHandler() = default;
 };
 
+class MCPCLICommandRegistry;
+
+class MCPCLICommandProvider : public MCPCLICommandHandler {
+public:
+	virtual Error register_cli_commands(MCPCLICommandRegistry &r_registry, String *r_error = nullptr) = 0;
+	~MCPCLICommandProvider() override = default;
+};
+
 class MCPCLICommandRegistry {
 	struct CommandEntry {
 		MCPCLICommandDefinition definition;
-		MCPCLICommandHandler *handler = nullptr;
+		MCPCLICommandProvider *provider = nullptr;
 	};
 
 	HashMap<StringName, CommandEntry> commands;
@@ -67,9 +87,10 @@ public:
 
 	Error register_command(
 			const MCPCLICommandDefinition &p_definition,
-			MCPCLICommandHandler *p_handler,
+			MCPCLICommandProvider *p_provider,
 			String *r_error = nullptr);
 	bool unregister_command(const StringName &p_name);
+	int unregister_commands_for_provider(MCPCLICommandProvider *p_provider);
 	bool has_command(const StringName &p_name) const;
 	const MCPCLICommandDefinition *get_command(const StringName &p_name) const;
 	Vector<MCPCLICommandDefinition> get_commands() const;

@@ -43,7 +43,13 @@ struct MCPCLIHTTPResponse {
 
 class MCPCLITransport {
 public:
-	virtual Error post(
+	enum RequestMethod {
+		REQUEST_POST,
+		REQUEST_DELETE,
+	};
+
+	virtual Error request(
+			RequestMethod p_method,
 			const String &p_endpoint,
 			const Vector<String> &p_headers,
 			const String &p_body,
@@ -71,7 +77,8 @@ public:
 
 class MCPHTTPCLITransport final : public MCPCLITransport {
 public:
-	Error post(
+	Error request(
+			RequestMethod p_method,
 			const String &p_endpoint,
 			const Vector<String> &p_headers,
 			const String &p_body,
@@ -91,7 +98,7 @@ public:
 	void write_stderr_line(const String &p_line) override;
 };
 
-class MCPCLI final : public MCPCLICommandHandler {
+class MCPCLI final : public MCPCLICommandProvider {
 public:
 	enum ExitCode {
 		EXIT_OK = 0,
@@ -137,7 +144,8 @@ public:
 	static String get_default_discovery_directory();
 	static Dictionary make_public_discovery_output(const MCPDiscoveryRecord &p_record);
 
-	Error register_commands(MCPCLICommandRegistry &r_registry, String *r_error = nullptr);
+	Error register_cli_commands(MCPCLICommandRegistry &r_registry, String *r_error = nullptr) override;
+	Error register_commands(MCPCLICommandRegistry &r_registry, String *r_error = nullptr) { return register_cli_commands(r_registry, r_error); }
 	Error resolve_discovery_record(
 			const String &p_project_path,
 			MCPProjectIdentity &r_identity,

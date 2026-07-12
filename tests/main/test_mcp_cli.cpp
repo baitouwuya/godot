@@ -36,6 +36,7 @@ TEST_FORCE_LINK(test_mcp_cli);
 #include "core/io/json.h"
 #include "core/mcp/mcp_protocol.h"
 #include "main/mcp_cli.h"
+#include "main/mcp_cli_runtime.h"
 
 namespace TestMCPCLI {
 
@@ -86,6 +87,7 @@ public:
 class QueueCLITransport final : public MCPCLITransport {
 public:
 	struct Request {
+		MCPCLITransport::RequestMethod method = MCPCLITransport::REQUEST_POST;
 		String endpoint;
 		Vector<String> headers;
 		String body;
@@ -97,7 +99,8 @@ public:
 	Vector<MCPCLIHTTPResponse> responses;
 	int next_response = 0;
 
-	Error post(
+	Error request(
+			MCPCLITransport::RequestMethod p_method,
 			const String &p_endpoint,
 			const Vector<String> &p_headers,
 			const String &p_body,
@@ -106,6 +109,7 @@ public:
 			MCPCLIHTTPResponse &r_response,
 			String &r_error) override {
 		Request request;
+		request.method = p_method;
 		request.endpoint = p_endpoint;
 		request.headers = p_headers;
 		request.body = p_body;
@@ -168,13 +172,14 @@ TEST_CASE("[MCP][CLI] Discover routes through the command registry without expos
 	MCPCLI::Options options;
 	options.discovery_directory = discovery_directory;
 	MCPCLI cli(options, &transport, &io);
-	MCPCLICommandRegistry registry;
-	REQUIRE(cli.register_commands(registry) == OK);
+	MCPCLIRuntime runtime;
+	REQUIRE(runtime.register_provider(&cli) == OK);
+	REQUIRE(runtime.select_command(MCPCLI::COMMAND_DISCOVER) == OK);
 
 	PackedStringArray arguments;
 	arguments.push_back(project_path);
 	int exit_code = -1;
-	REQUIRE(registry.invoke(MCPCLI::COMMAND_DISCOVER, arguments, exit_code) == OK);
+	REQUIRE(runtime.invoke_selected(arguments, exit_code) == OK);
 	CHECK(exit_code == MCPCLI::EXIT_OK);
 	REQUIRE(io.stdout_lines.size() == 1);
 	CHECK(io.stderr_lines.is_empty());
@@ -190,6 +195,27 @@ TEST_CASE("[MCP][CLI] Discover routes through the command registry without expos
 	CHECK(output.has("pid"));
 	CHECK_FALSE(output.has("authSecret"));
 	CHECK_FALSE(output.has("projectPath"));
+}
+
+TEST_CASE("[MCP][CLI] Unknown command arguments are preserved and rejected") {
+	MemoryCLIIO io;
+	QueueCLITransport transport;
+	MCPCLI::Options options;
+	MCPCLI cli(options, &transport, &io);
+	MCPCLIRuntime runtime;
+	REQUIRE(runtime.register_provider(&cli) == OK);
+	REQUIRE(runtime.select_command(MCPCLI::COMMAND_DISCOVER) == OK);
+	REQUIRE(runtime.append_raw_argument("--unknown-option") == OK);
+
+	PackedStringArray arguments;
+	arguments.push_back("C:/project");
+	int exit_code = -1;
+	REQUIRE(runtime.invoke_selected(arguments, exit_code) == OK);
+	CHECK(exit_code == MCPCLI::EXIT_INVALID_ARGUMENTS);
+	CHECK(io.stdout_lines.is_empty());
+	REQUIRE(io.stderr_lines.size() == 1);
+	CHECK(io.stderr_lines[0].contains("require one explicit project path"));
+	CHECK(transport.requests.is_empty());
 }
 
 TEST_CASE("[MCP][CLI] Stdio bridge keeps stdout JSON-RPC-only and carries the HTTP session") {
@@ -224,16 +250,18 @@ TEST_CASE("[MCP][CLI] Stdio bridge keeps stdout JSON-RPC-only and carries the HT
 			"session-abc"));
 	transport.responses.push_back(make_response(202));
 	transport.responses.push_back(make_response(200, R"({"jsonrpc":"2.0","id":2,"result":{"tools":[]}})"));
+	transport.responses.push_back(make_response(204));
 
 	MCPCLI::Options options;
 	options.discovery_directory = discovery_directory;
 	MCPCLI cli(options, &transport, &io);
 	CHECK(cli.run_stdio_bridge(project_path) == MCPCLI::EXIT_OK);
 	CHECK(io.stderr_lines.is_empty());
-	REQUIRE(transport.requests.size() == 3);
+	REQUIRE(transport.requests.size() == 4);
 	REQUIRE(io.stdout_lines.size() == 2);
 
-	for (int i = 0; i < transport.requests.size(); i++) {
+	for (int i = 0; i < 3; i++) {
+		CHECK(transport.requests[i].method == MCPCLITransport::REQUEST_POST);
 		CHECK(transport.requests[i].endpoint == record.endpoint);
 		CHECK(find_request_header(transport.requests[i].headers, "authorization") == "Bearer private-token");
 		CHECK(find_request_header(transport.requests[i].headers, "mcp-protocol-version") ==
@@ -245,6 +273,10 @@ TEST_CASE("[MCP][CLI] Stdio bridge keeps stdout JSON-RPC-only and carries the HT
 	CHECK(find_request_header(transport.requests[0].headers, "mcp-session-id").is_empty());
 	CHECK(find_request_header(transport.requests[1].headers, "mcp-session-id") == "session-abc");
 	CHECK(find_request_header(transport.requests[2].headers, "mcp-session-id") == "session-abc");
+	CHECK(transport.requests[3].method == MCPCLITransport::REQUEST_DELETE);
+	CHECK(find_request_header(transport.requests[3].headers, "authorization") == "Bearer private-token");
+	CHECK(find_request_header(transport.requests[3].headers, "mcp-protocol-version") == MCPProtocol::PROTOCOL_VERSION_2025_03_26);
+	CHECK(find_request_header(transport.requests[3].headers, "mcp-session-id") == "session-abc");
 
 	for (const String &stdout_line : io.stdout_lines) {
 		CHECK_FALSE(stdout_line.contains("\n"));
@@ -288,6 +320,47 @@ TEST_CASE("[MCP][CLI] Stdio bridge rejects unsafe HTTP session identifiers") {
 	MCPCLI cli(options, &transport, &io);
 	CHECK(cli.run_stdio_bridge(project_path) == MCPCLI::EXIT_PROTOCOL_FAILED);
 	CHECK(io.stdout_lines.is_empty());
+	CHECK_FALSE(io.stderr_lines.is_empty());
+}
+
+TEST_CASE("[MCP][CLI] Stdio bridge cleans up a session after a protocol error") {
+	Error error = OK;
+	Ref<DirAccess> temporary_directory = DirAccess::create_temp("mcp_cli_cleanup", false, &error);
+	REQUIRE(error == OK);
+
+	MCPProjectIdentity identity;
+	MCPDiscoveryRecord record;
+	String project_path;
+	String discovery_directory;
+	create_project_and_record(
+			temporary_directory,
+			"http://127.0.0.1:35302/mcp",
+			identity,
+			record,
+			project_path,
+			discovery_directory);
+	REQUIRE(MCPDiscovery::write_record(discovery_directory, record, true) == OK);
+
+	MemoryCLIIO io;
+	io.input_lines.push_back(
+			R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}})");
+	io.input_lines.push_back("not-json");
+	QueueCLITransport transport;
+	transport.responses.push_back(make_response(
+			200,
+			R"({"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18"}})",
+			"session-cleanup"));
+	transport.responses.push_back(make_response(204));
+
+	MCPCLI::Options options;
+	options.discovery_directory = discovery_directory;
+	MCPCLI cli(options, &transport, &io);
+	CHECK(cli.run_stdio_bridge(project_path) == MCPCLI::EXIT_PROTOCOL_FAILED);
+	REQUIRE(transport.requests.size() == 2);
+	CHECK(transport.requests[0].method == MCPCLITransport::REQUEST_POST);
+	CHECK(transport.requests[1].method == MCPCLITransport::REQUEST_DELETE);
+	CHECK(find_request_header(transport.requests[1].headers, "mcp-session-id") == "session-cleanup");
+	CHECK(io.stdout_lines.size() == 1);
 	CHECK_FALSE(io.stderr_lines.is_empty());
 }
 

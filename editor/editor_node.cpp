@@ -6615,8 +6615,7 @@ bool EditorNode::immediate_confirmation_dialog(const String &p_text, const Strin
 }
 
 bool EditorNode::is_cmdline_mode() {
-	ERR_FAIL_NULL_V(singleton, false);
-	return singleton->cmdline_mode;
+	return singleton && singleton->cmdline_mode;
 }
 
 void EditorNode::cleanup() {

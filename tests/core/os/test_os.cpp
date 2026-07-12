@@ -34,7 +34,48 @@ TEST_FORCE_LINK(test_os)
 
 #include "core/os/os.h"
 
+#ifdef WINDOWS_ENABLED
+#include <windows.h>
+#endif
+
 namespace TestOS {
+
+#ifdef WINDOWS_ENABLED
+class ScopedStdinPipe {
+	HANDLE original_handle = INVALID_HANDLE_VALUE;
+	HANDLE read_handle = INVALID_HANDLE_VALUE;
+	HANDLE write_handle = INVALID_HANDLE_VALUE;
+
+public:
+	bool open() {
+		original_handle = GetStdHandle(STD_INPUT_HANDLE);
+		if (!CreatePipe(&read_handle, &write_handle, nullptr, 0)) {
+			return false;
+		}
+		return SetStdHandle(STD_INPUT_HANDLE, read_handle) != 0;
+	}
+
+	bool write_and_close(const char *p_data, DWORD p_size) {
+		DWORD written = 0;
+		if (!WriteFile(write_handle, p_data, p_size, &written, nullptr) || written != p_size) {
+			return false;
+		}
+		CloseHandle(write_handle);
+		write_handle = INVALID_HANDLE_VALUE;
+		return true;
+	}
+
+	~ScopedStdinPipe() {
+		SetStdHandle(STD_INPUT_HANDLE, original_handle);
+		if (read_handle != INVALID_HANDLE_VALUE) {
+			CloseHandle(read_handle);
+		}
+		if (write_handle != INVALID_HANDLE_VALUE) {
+			CloseHandle(write_handle);
+		}
+	}
+};
+#endif
 
 TEST_CASE("[OS] Environment variables") {
 #ifdef WINDOWS_ENABLED
@@ -47,6 +88,19 @@ TEST_CASE("[OS] Environment variables") {
 			"The HOME environment variable should be present.");
 #endif
 }
+
+#ifdef WINDOWS_ENABLED
+TEST_CASE("[OS][Windows] Stdin buffer is sized to the bytes actually read") {
+	ScopedStdinPipe pipe;
+	REQUIRE(pipe.open());
+	const char payload[] = "mcp-stdio";
+	REQUIRE(pipe.write_and_close(payload, sizeof(payload) - 1));
+
+	const PackedByteArray data = OS::get_singleton()->get_stdin_buffer(8192);
+	REQUIRE(data.size() == (int)sizeof(payload) - 1);
+	CHECK(memcmp(data.ptr(), payload, sizeof(payload) - 1) == 0);
+}
+#endif
 
 TEST_CASE("[OS] UTF-8 environment variables") {
 	String value = String::utf8("hell\xc3\xb6"); // "hellö", UTF-8 encoded

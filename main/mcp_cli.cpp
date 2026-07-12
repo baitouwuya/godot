@@ -36,6 +36,8 @@
 #include "core/mcp/mcp_protocol.h"
 #include "core/os/os.h"
 
+#include <cstdio>
+
 #ifdef TOOLS_ENABLED
 #include "editor/file_system/editor_paths.h"
 #endif
@@ -109,6 +111,69 @@ bool is_jsonrpc_response(const Variant &p_value) {
 	return response.get("jsonrpc", String()) == "2.0" && (response.has("result") != response.has("error"));
 }
 
+Vector<String> make_mcp_request_headers(const MCPDiscoveryRecord &p_record, const String &p_protocol_version, const String &p_session_id, bool p_has_body) {
+	Vector<String> headers;
+	if (p_has_body) {
+		headers.push_back("Content-Type: application/json");
+	}
+	headers.push_back("Accept: application/json, text/event-stream");
+	headers.push_back("MCP-Protocol-Version: " + p_protocol_version);
+	if (!p_record.auth_secret.is_empty()) {
+		headers.push_back("Authorization: Bearer " + p_record.auth_secret);
+	}
+	if (!p_session_id.is_empty()) {
+		headers.push_back("Mcp-Session-Id: " + p_session_id);
+	}
+	return headers;
+}
+
+class MCPCLISessionGuard {
+	MCPCLITransport *transport = nullptr;
+	MCPCLIIO *io = nullptr;
+	const MCPDiscoveryRecord *record = nullptr;
+	const MCPCLI::Options *options = nullptr;
+	String *protocol_version = nullptr;
+	String *session_id = nullptr;
+
+public:
+	MCPCLISessionGuard(MCPCLITransport *p_transport, MCPCLIIO *p_io, const MCPDiscoveryRecord &p_record,
+			const MCPCLI::Options &p_options, String &r_protocol_version, String &r_session_id) {
+		transport = p_transport;
+		io = p_io;
+		record = &p_record;
+		options = &p_options;
+		protocol_version = &r_protocol_version;
+		session_id = &r_session_id;
+	}
+
+	~MCPCLISessionGuard() {
+		if (!transport || !io || !record || !options || !protocol_version || !session_id || session_id->is_empty()) {
+			return;
+		}
+
+		MCPCLIHTTPResponse response;
+		String cleanup_error;
+		const Vector<String> headers = make_mcp_request_headers(*record, *protocol_version, *session_id, false);
+		const Error error = transport->request(
+				MCPCLITransport::REQUEST_DELETE,
+				record->endpoint,
+				headers,
+				String(),
+				options->request_timeout_ms,
+				options->max_response_bytes,
+				response,
+				cleanup_error);
+		if (error != OK || (response.status_code != HTTPClient::RESPONSE_NO_CONTENT &&
+					response.status_code != HTTPClient::RESPONSE_NOT_FOUND &&
+					response.status_code != HTTPClient::RESPONSE_METHOD_NOT_ALLOWED)) {
+			const String detail = error != OK ? (cleanup_error.is_empty() ? error_names[error] : cleanup_error) :
+					vformat("HTTP endpoint returned status %d.", response.status_code);
+			io->write_stderr_line("MCP CLI: Session cleanup failed: " + detail);
+		}
+		session_id->clear();
+	}
+};
+
 Error parse_endpoint(
 		const String &p_endpoint,
 		String &r_scheme,
@@ -133,7 +198,8 @@ Error parse_endpoint(
 
 } // namespace
 
-Error MCPHTTPCLITransport::post(
+Error MCPHTTPCLITransport::request(
+		RequestMethod p_method,
 		const String &p_endpoint,
 		const Vector<String> &p_headers,
 		const String &p_body,
@@ -203,11 +269,24 @@ Error MCPHTTPCLITransport::post(
 	const String host_header = host.contains(":") ? "[" + host + "]" : host;
 	request_headers.push_back("Host: " + host_header + ":" + itos(port));
 	const CharString request_body = p_body.utf8();
+	HTTPClient::Method http_method = HTTPClient::METHOD_POST;
+	switch (p_method) {
+		case REQUEST_POST:
+			http_method = HTTPClient::METHOD_POST;
+			break;
+		case REQUEST_DELETE:
+			http_method = HTTPClient::METHOD_DELETE;
+			break;
+		default:
+			r_error = "Unsupported MCP HTTP request method.";
+			client->close();
+			return ERR_INVALID_PARAMETER;
+	}
 	error = client->request(
-			HTTPClient::METHOD_POST,
+			http_method,
 			path,
 			request_headers,
-			(const uint8_t *)request_body.get_data(),
+			request_body.length() > 0 ? (const uint8_t *)request_body.get_data() : nullptr,
 			request_body.length());
 	if (error != OK) {
 		r_error = "Cannot send MCP HTTP request.";
@@ -267,6 +346,9 @@ Error MCPHTTPCLITransport::post(
 			memcpy(r_response.body.ptrw() + old_size, chunk.ptr(), chunk.size());
 			continue;
 		}
+		if (client->get_status() != HTTPClient::STATUS_BODY) {
+			break;
+		}
 
 		if (has_timed_out(started_at_usec, p_timeout_ms)) {
 			r_error = "Timed out reading MCP HTTP response body.";
@@ -281,8 +363,13 @@ Error MCPHTTPCLITransport::post(
 		}
 		OS::get_singleton()->delay_usec(HTTP_POLL_DELAY_USEC);
 	}
+	const HTTPClient::Status final_status = client->get_status();
 	client->close();
 
+	if (is_http_failure_status(final_status) || final_status == HTTPClient::STATUS_DISCONNECTED) {
+		r_error = "MCP HTTP response ended with a connection error.";
+		return ERR_CONNECTION_ERROR;
+	}
 	if (response_length >= 0 && r_response.body.size() != response_length) {
 		r_error = "MCP HTTP response body ended before Content-Length bytes were received.";
 		return ERR_CONNECTION_ERROR;
@@ -351,11 +438,17 @@ MCPCLIIO::ReadStatus MCPOSCLIIO::read_line(String &r_line, uint64_t p_max_line_b
 }
 
 void MCPOSCLIIO::write_stdout_line(const String &p_line) {
-	OS::get_singleton()->print("%s\n", p_line.utf8().get_data());
+	const CharString line = p_line.utf8();
+	fwrite(line.get_data(), 1, line.length(), stdout);
+	fputc('\n', stdout);
+	fflush(stdout);
 }
 
 void MCPOSCLIIO::write_stderr_line(const String &p_line) {
-	OS::get_singleton()->printerr("%s\n", p_line.utf8().get_data());
+	const CharString line = p_line.utf8();
+	fwrite(line.get_data(), 1, line.length(), stderr);
+	fputc('\n', stderr);
+	fflush(stderr);
 }
 
 MCPCLI::MCPCLI() :
@@ -386,11 +479,16 @@ Dictionary MCPCLI::make_public_discovery_output(const MCPDiscoveryRecord &p_reco
 	return output;
 }
 
-Error MCPCLI::register_commands(MCPCLICommandRegistry &r_registry, String *r_error) {
+Error MCPCLI::register_cli_commands(MCPCLICommandRegistry &r_registry, String *r_error) {
 	MCPCLICommandDefinition discover;
 	discover.name = COMMAND_DISCOVER;
 	discover.usage = "--mcp-discover --path <directory>";
 	discover.description = "Print the running MCP endpoint for a Godot project.";
+	discover.flags = MCP_CLI_COMMAND_FLAG_REQUIRE_EXPLICIT_PROJECT_PATH |
+			MCP_CLI_COMMAND_FLAG_EXCLUSIVE_WITH_EDITOR |
+			MCP_CLI_COMMAND_FLAG_JSON_STDOUT |
+			MCP_CLI_COMMAND_FLAG_FORCE_HEADLESS |
+			MCP_CLI_COMMAND_FLAG_PATH_ARGUMENT_ONLY;
 	Error error = r_registry.register_command(discover, this, r_error);
 	if (error != OK) {
 		return error;
@@ -400,6 +498,7 @@ Error MCPCLI::register_commands(MCPCLICommandRegistry &r_registry, String *r_err
 	stdio.name = COMMAND_STDIO;
 	stdio.usage = "--mcp-stdio --path <directory>";
 	stdio.description = "Bridge newline-delimited MCP stdio to the project's HTTP endpoint.";
+	stdio.flags = discover.flags;
 	error = r_registry.register_command(stdio, this, r_error);
 	if (error != OK) {
 		r_registry.unregister_command(COMMAND_DISCOVER);
@@ -525,6 +624,7 @@ int MCPCLI::run_discover(const String &p_project_path) {
 int MCPCLI::_run_stdio_bridge(const MCPDiscoveryRecord &p_record) {
 	String session_id;
 	String protocol_version = p_record.protocol_version;
+	MCPCLISessionGuard session_guard(transport, io, p_record, options, protocol_version, session_id);
 	while (true) {
 		String line;
 		const MCPCLIIO::ReadStatus read_status = io->read_line(line, options.max_line_bytes);
@@ -559,20 +659,12 @@ int MCPCLI::_run_stdio_bridge(const MCPDiscoveryRecord &p_record) {
 		const bool initialize_request = request_data.get_type() == Variant::DICTIONARY &&
 				Dictionary(request_data).get("method", String()) == "initialize";
 
-		Vector<String> headers;
-		headers.push_back("Content-Type: application/json");
-		headers.push_back("Accept: application/json, text/event-stream");
-		headers.push_back("MCP-Protocol-Version: " + protocol_version);
-		if (!p_record.auth_secret.is_empty()) {
-			headers.push_back("Authorization: Bearer " + p_record.auth_secret);
-		}
-		if (!session_id.is_empty()) {
-			headers.push_back("Mcp-Session-Id: " + session_id);
-		}
+		const Vector<String> headers = make_mcp_request_headers(p_record, protocol_version, session_id, true);
 
 		MCPCLIHTTPResponse response;
 		String transport_error;
-		const Error post_error = transport->post(
+		const Error post_error = transport->request(
+				MCPCLITransport::REQUEST_POST,
 				p_record.endpoint,
 				headers,
 				JSON::stringify(request_json.get_data()),

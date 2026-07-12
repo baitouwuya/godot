@@ -125,10 +125,12 @@
 #include "editor/file_system/editor_file_system.h"
 #include "editor/file_system/editor_paths.h"
 #include "editor/gui/progress_dialog.h"
+#include "editor/mcp/mcp_editor_plugin.h"
 #include "editor/project_manager/project_manager.h"
 #include "editor/register_editor_types.h"
 #include "editor/settings/editor_settings.h"
 #include "editor/translations/editor_translation.h"
+#include "main/mcp_cli.h"
 
 #if defined(TOOLS_ENABLED) && !defined(NO_EDITOR_SPLASH)
 #include "main/splash_editor.gen.h"
@@ -228,6 +230,12 @@ static bool auto_build_solutions = false;
 static String debug_server_uri;
 static bool wait_for_import = false;
 static bool restore_editor_window_layout = true;
+static bool mcp_editor_requested = false;
+static bool mcp_port_overridden = false;
+static int mcp_port = 0;
+static StringName mcp_cli_command;
+static String mcp_project_path;
+static bool mcp_explicit_project_path = false;
 #ifndef DISABLE_DEPRECATED
 static int converter_max_kb_file = 4 * 1024; // 4MB
 static int converter_max_line_length = 100000;
@@ -565,6 +573,8 @@ void Main::print_help(const char *p_binary) {
 	print_help_option("--recovery-mode", "Start the editor in recovery mode, which disables features that can typically cause startup crashes, such as tool scripts, editor plugins, GDExtension addons, and others.\n", CLI_OPTION_AVAILABILITY_EDITOR);
 	print_help_option("--debug-server <uri>", "Start the editor debug server (<protocol>://<host/IP>[:port], e.g. tcp://127.0.0.1:6007)\n", CLI_OPTION_AVAILABILITY_EDITOR);
 	print_help_option("--dap-port <port>", "Use the specified port for the GDScript Debug Adapter Protocol. Recommended port range [1024, 49151].\n", CLI_OPTION_AVAILABILITY_EDITOR);
+	print_help_option("--mcp", "Start the project's MCP Streamable HTTP Host. Requires --editor and an explicit --path.\n", CLI_OPTION_AVAILABILITY_EDITOR);
+	print_help_option("--mcp-port <port>", "Use the specified MCP port. Port 0 selects an available loopback port.\n", CLI_OPTION_AVAILABILITY_EDITOR);
 #if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
 	print_help_option("--lsp-port <port>", "Use the specified port for the GDScript Language Server Protocol. Recommended port range [1024, 49151].\n", CLI_OPTION_AVAILABILITY_EDITOR);
 #endif // MODULE_GDSCRIPT_ENABLED && !GDSCRIPT_NO_LSP
@@ -698,6 +708,8 @@ void Main::print_help(const char *p_binary) {
 #endif // defined(OVERRIDE_PATH_ENABLED)
 #ifdef TOOLS_ENABLED
 	print_help_option("--import", "Starts the editor, waits for any resources to be imported, and then quits.\n", CLI_OPTION_AVAILABILITY_EDITOR);
+	print_help_option("--mcp-discover", "Print the MCP endpoint for the project selected by --path, without exposing its secret.\n", CLI_OPTION_AVAILABILITY_EDITOR);
+	print_help_option("--mcp-stdio", "Bridge standard MCP stdio to the HTTP Host for the project selected by --path.\n", CLI_OPTION_AVAILABILITY_EDITOR);
 	print_help_option("--export-release <preset> <path>", "Export the project in release mode using the given preset and output path. The preset name should match one defined in \"export_presets.cfg\".\n", CLI_OPTION_AVAILABILITY_EDITOR);
 	print_help_option("", "<path> should be absolute or relative to the project directory, and include the filename for the binary (e.g. \"builds/game.exe\").\n");
 	print_help_option("", "The target directory must exist.\n");
@@ -1035,6 +1047,16 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 	OS::get_singleton()->initialize();
 
 	CoreGlobals::print_ready = true;
+
+#ifdef TOOLS_ENABLED
+	mcp_editor_requested = false;
+	mcp_port_overridden = false;
+	mcp_port = 0;
+	mcp_cli_command = StringName();
+	mcp_project_path = String();
+	mcp_explicit_project_path = false;
+	MCPEditorPlugin::configure(false);
+#endif
 
 #if !defined(OVERRIDE_PATH_ENABLED) && !defined(TOOLS_ENABLED)
 	String old_cwd = OS::get_singleton()->get_cwd();
@@ -1597,6 +1619,33 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 			project_manager = true;
 		} else if (arg == "--recovery-mode") { // Enables recovery mode.
 			recovery_mode = true;
+		} else if (arg == "--mcp") {
+			mcp_editor_requested = true;
+		} else if (arg == "--mcp-port") {
+			if (!N || !N->get().is_valid_int()) {
+				OS::get_singleton()->printerr("Missing or invalid <port> argument for --mcp-port <port>.\n");
+				goto error;
+			}
+			const int64_t port = N->get().to_int();
+			if (port < 0 || port > 65535) {
+				OS::get_singleton()->printerr("<port> argument for --mcp-port <port> must be between 0 and 65535.\n");
+				goto error;
+			}
+			mcp_port = (int)port;
+			mcp_port_overridden = true;
+			N = N->next();
+		} else if (arg == MCPCLI::COMMAND_DISCOVER || arg == MCPCLI::COMMAND_STDIO) {
+			if (!mcp_cli_command.is_empty()) {
+				OS::get_singleton()->printerr("Only one MCP CLI command can be used at a time.\n");
+				goto error;
+			}
+			mcp_cli_command = arg;
+			cmdline_tool = true;
+			quiet_stdout = true;
+			CoreGlobals::print_line_enabled = false;
+			Engine::get_singleton()->_print_header = false;
+			audio_driver = NULL_AUDIO_DRIVER;
+			display_driver = NULL_DISPLAY_DRIVER;
 		} else if (arg == "--debug-server") {
 			if (N) {
 				debug_server_uri = N->get();
@@ -1768,6 +1817,8 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 					OS::get_singleton()->print("Invalid project path specified: \"%s\", aborting.\n", p.utf8().get_data());
 					goto error;
 				}
+				mcp_explicit_project_path = true;
+				mcp_project_path = OS::get_singleton()->get_cwd();
 				N = N->next();
 			} else {
 				OS::get_singleton()->print("Missing relative or absolute path, aborting.\n");
@@ -2071,6 +2122,24 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 	}
 
 #ifdef TOOLS_ENABLED
+	if ((mcp_editor_requested || !mcp_cli_command.is_empty()) && !mcp_explicit_project_path) {
+		OS::get_singleton()->printerr("MCP commands require an explicit --path <project> argument.\n");
+		goto error;
+	}
+	if (mcp_port_overridden && !mcp_editor_requested) {
+		OS::get_singleton()->printerr("--mcp-port can only be used together with --mcp.\n");
+		goto error;
+	}
+	if (mcp_editor_requested && !editor) {
+		OS::get_singleton()->printerr("--mcp can only be used together with --editor.\n");
+		goto error;
+	}
+	if (!mcp_cli_command.is_empty() && (editor || project_manager || mcp_editor_requested)) {
+		OS::get_singleton()->printerr("MCP CLI commands cannot be combined with editor or project manager mode.\n");
+		goto error;
+	}
+	MCPEditorPlugin::configure(mcp_editor_requested, mcp_port);
+
 	if (editor && project_manager) {
 		OS::get_singleton()->print(
 				"Error: Command line arguments implied opening both editor and project manager, which is not possible. Aborting.\n");
@@ -4040,6 +4109,27 @@ int Main::start() {
 
 	main_timer_sync.init(OS::get_singleton()->get_ticks_usec());
 	List<String> args = OS::get_singleton()->get_cmdline_args();
+
+#ifdef TOOLS_ENABLED
+	if (!mcp_cli_command.is_empty()) {
+		MCPCLI cli;
+		MCPCLICommandRegistry registry;
+		String error;
+		if (cli.register_commands(registry, &error) != OK) {
+			OS::get_singleton()->printerr("Unable to register MCP CLI commands: %s\n", error.utf8().get_data());
+			return EXIT_FAILURE;
+		}
+
+		PackedStringArray command_arguments;
+		command_arguments.push_back(mcp_project_path);
+		int exit_code = MCPCLI::EXIT_INVALID_ARGUMENTS;
+		if (registry.invoke(mcp_cli_command, command_arguments, exit_code, &error) != OK) {
+			OS::get_singleton()->printerr("Unable to run MCP CLI command '%s': %s\n", String(mcp_cli_command).utf8().get_data(), error.utf8().get_data());
+			return EXIT_FAILURE;
+		}
+		return exit_code;
+	}
+#endif
 
 	for (List<String>::Element *E = args.front(); E; E = E->next()) {
 		// First check parameters that do not have an argument to the right.

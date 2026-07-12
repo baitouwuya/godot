@@ -1,0 +1,84 @@
+/**************************************************************************/
+/*  test_mcp_tool_utils.cpp                                               */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including   */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
+
+#include "core/io/json.h"
+#include "editor/mcp/providers/mcp_tool_utils.h"
+#include "tests/test_macros.h"
+
+TEST_FORCE_LINK(test_mcp_tool_utils);
+
+namespace TestMCPToolUtils {
+
+TEST_CASE("[MCP][Provider] Success results expose matching text and structured content") {
+	Dictionary nested;
+	nested["enabled"] = true;
+
+	Dictionary structured_content;
+	structured_content["count"] = 3;
+	structured_content["nested"] = nested;
+
+	const Dictionary result = MCPToolUtils::make_success_result(structured_content);
+	CHECK_FALSE(result.has("isError"));
+	REQUIRE(result.get("structuredContent", Variant()).get_type() == Variant::DICTIONARY);
+	CHECK(Dictionary(result["structuredContent"]) == structured_content);
+
+	const Array content = result.get("content", Array());
+	REQUIRE(content.size() == 1);
+	const Dictionary text_content = content[0];
+	CHECK(text_content.get("type", String()) == "text");
+	const Variant parsed_text = JSON::parse_string(text_content.get("text", String()));
+	REQUIRE(parsed_text.get_type() == Variant::DICTIONARY);
+	const Dictionary parsed_dictionary = parsed_text;
+	CHECK(double(parsed_dictionary.get("count", 0.0)) == 3.0);
+	CHECK(bool(Dictionary(parsed_dictionary.get("nested", Dictionary())).get("enabled", false)));
+
+	structured_content["count"] = 9;
+	CHECK(int(Dictionary(result["structuredContent"]).get("count", 0)) == 3);
+}
+
+TEST_CASE("[MCP][Provider] Error results use a stable structured error shape") {
+	Dictionary details;
+	details["path"] = "res://example.txt";
+
+	const Dictionary result = MCPToolUtils::make_error_result("FILE_EXISTS", "The file exists.", details);
+	CHECK(bool(result.get("isError", false)));
+
+	const Dictionary structured_content = result.get("structuredContent", Dictionary());
+	const Dictionary error = structured_content.get("error", Dictionary());
+	CHECK(error.get("code", String()) == "FILE_EXISTS");
+	CHECK(error.get("message", String()) == "The file exists.");
+	CHECK(Dictionary(error.get("details", Dictionary())).get("path", String()) == "res://example.txt");
+
+	const Array content = result.get("content", Array());
+	REQUIRE(content.size() == 1);
+	CHECK(Dictionary(content[0]).get("text", String()) == "The file exists.");
+}
+
+} // namespace TestMCPToolUtils

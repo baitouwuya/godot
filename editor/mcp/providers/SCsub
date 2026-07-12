@@ -1,5 +1,23 @@
 #!/usr/bin/env python
 
+import glob
+
 Import("env")
 
-env.add_source_files(env.editor_sources, "*.cpp")
+sources = glob.glob("*.cpp")
+
+if not (
+    env["module_gdscript_enabled"]
+    and env["module_jsonrpc_enabled"]
+    and env["module_websocket_enabled"]
+):
+    gdscript_sources = {
+        "mcp_gdscript_provider.cpp",
+        "mcp_gdscript_session_manager.cpp",
+        "mcp_gdscript_tool_utils.cpp",
+        "mcp_script_analysis_sync.cpp",
+        "mcp_script_provider.cpp",
+    }
+    sources = [source for source in sources if source not in gdscript_sources]
+
+env.add_source_files(env.editor_sources, sources)

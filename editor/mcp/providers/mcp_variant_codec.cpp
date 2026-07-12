@@ -38,8 +38,6 @@
 
 namespace {
 
-static const StringName RESOURCE_PATH_MARKER("__godot_mcp_resource_path__");
-
 static Error _fail(const String &p_message, String *r_error, Error p_error = ERR_INVALID_DATA) {
 	if (r_error) {
 		*r_error = p_message;
@@ -72,7 +70,7 @@ static Error _sanitize_native(const Variant &p_value, Variant &r_value, String *
 			}
 
 			Dictionary resource_reference;
-			resource_reference[RESOURCE_PATH_MARKER] = resource_path;
+			resource_reference[SNAME("__godot_mcp_resource_path__")] = resource_path;
 			r_value = resource_reference;
 			return OK;
 		}
@@ -185,8 +183,8 @@ static Error _restore_resource_references(const Variant &p_value, Variant &r_val
 
 	if (p_value.get_type() == Variant::DICTIONARY) {
 		const Dictionary source = p_value;
-		if (source.size() == 1 && source.has(RESOURCE_PATH_MARKER)) {
-			const Variant path_value = source[RESOURCE_PATH_MARKER];
+		if (source.size() == 1 && source.has(SNAME("__godot_mcp_resource_path__"))) {
+			const Variant path_value = source[SNAME("__godot_mcp_resource_path__")];
 			if (path_value.get_type() != Variant::STRING) {
 				return _fail("Resource reference path must be a string.", r_error);
 			}

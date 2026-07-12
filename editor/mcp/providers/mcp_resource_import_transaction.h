@@ -1,16 +1,15 @@
 /**************************************************************************/
-/*  gdscript_language_server.h                                            */
+/*  mcp_resource_import_transaction.h                                     */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
-/*                        https://godotengine.org                         */
 /**************************************************************************/
 /* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
 /* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
 /*                                                                        */
 /* Permission is hereby granted, free of charge, to any person obtaining  */
 /* a copy of this software and associated documentation files (the        */
-/* "Software"), to deal in the Software without restriction, including    */
+/* "Software"), to deal in the Software without restriction, including   */
 /* without limitation the rights to use, copy, modify, merge, publish,    */
 /* distribute, sublicense, and/or sell copies of the Software, and to     */
 /* permit persons to whom the Software is furnished to do so, subject to  */
@@ -30,34 +29,38 @@
 
 #pragma once
 
-#include "core/templates/safe_refcount.h"
-#include "editor/plugins/editor_plugin.h"
+#include "core/io/dir_access.h"
+#include "core/templates/hash_map.h"
+#include "core/templates/hash_set.h"
 
-class GDScriptLanguageServer : public EditorPlugin {
-	GDCLASS(GDScriptLanguageServer, EditorPlugin);
+class MCPResourceImportTransaction {
+	struct ProtectedPath {
+		String backup_path;
+		bool existed = false;
+	};
 
-	Thread thread;
-	SafeFlag thread_running;
-	// There is no notification when the editor is initialized. We need to poll till we attempted to start the server.
-	bool start_attempted = false;
-	bool started = false;
+	Ref<DirAccess> backup_directory;
+	HashMap<String, ProtectedPath> protected_paths;
+	HashSet<String> created_paths;
+	HashSet<String> existing_paths;
+	HashSet<String> excluded_snapshot_roots;
+	String snapshot_root;
+	bool snapshot_captured = false;
+	bool active = false;
 
-	// Defaults located in editor_settings.cpp
-	bool use_thread = false;
-	String host;
-	int port = 0;
-	int poll_limit_usec = 0;
-
-	static void thread_main(void *p_userdata);
-
-private:
-	void _notification(int p_what);
+	static void _set_error(String *r_error, const String &p_message);
 
 public:
-	static int port_override;
-	GDScriptLanguageServer();
-	void start();
-	void stop();
-};
+	~MCPResourceImportTransaction();
 
-void register_lsp_types();
+	Error begin(String *r_error = nullptr);
+	Error capture_existing_files(const String &p_project_root, String *r_error = nullptr);
+	Error protect_path(const String &p_path, String *r_error = nullptr);
+	void track_created_path(const String &p_path);
+	bool is_path_protected(const String &p_path) const;
+	bool has_preimport_path_state(const String &p_path) const;
+	bool existed_before_import(const String &p_path) const;
+
+	void commit();
+	Error rollback(String *r_error = nullptr);
+};

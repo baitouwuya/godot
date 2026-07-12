@@ -31,6 +31,7 @@
 #pragma once
 
 #include "gdscript_analysis_session.h"
+#include "scene_cache.h"
 
 #include "core/object/ref_counted.h"
 #include "core/templates/hash_map.h"
@@ -41,12 +42,19 @@ class GDScriptAnalysisService : public RefCounted {
 	String project_root;
 	Ref<GDScriptWorkspace> workspace;
 	HashMap<uint64_t, Ref<GDScriptAnalysisSession>> sessions;
+	SceneCache scene_cache;
 	uint64_t next_session_id = 1;
 
 public:
 	void configure(const String &p_project_root, const Ref<GDScriptWorkspace> &p_workspace);
 	const String &get_project_root() const { return project_root; }
 	const Ref<GDScriptWorkspace> &get_workspace() const { return workspace; }
+	SceneCache *get_scene_cache() { return &scene_cache; }
+
+	void poll_scene_cache();
+	void clear_scene_cache();
+	void request_scene_load(const String &p_script_path);
+	void unload_scene(const String &p_script_path);
 
 	Ref<GDScriptAnalysisSession> create_session();
 	Ref<GDScriptAnalysisSession> get_session(uint64_t p_session_id) const;

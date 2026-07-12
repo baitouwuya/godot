@@ -40,8 +40,14 @@
 class ConfirmationDialog;
 class MCPEditorProvider;
 class MCPFileProvider;
+class MCPGDScriptProvider;
+class MCPGDScriptSessionManager;
+class MCPNodeProvider;
+class MCPResourceProvider;
+class MCPSceneProvider;
+class MCPScriptProvider;
 
-class MCPEditorPlugin : public EditorPlugin {
+class MCPEditorPlugin : public EditorPlugin, public MCPHostSessionObserver {
 	GDCLASS(MCPEditorPlugin, EditorPlugin);
 
 	enum StartupState {
@@ -72,6 +78,12 @@ class MCPEditorPlugin : public EditorPlugin {
 	MCPDiscoveryRecord conflicting_owner;
 	MCPEditorProvider *editor_provider = nullptr;
 	MCPFileProvider *file_provider = nullptr;
+	MCPSceneProvider *scene_provider = nullptr;
+	MCPNodeProvider *node_provider = nullptr;
+	MCPScriptProvider *script_provider = nullptr;
+	MCPResourceProvider *resource_provider = nullptr;
+	MCPGDScriptProvider *gdscript_provider = nullptr;
+	MCPGDScriptSessionManager *gdscript_session_manager = nullptr;
 
 	void _notification(int p_what);
 	Error _register_tools(String &r_error);
@@ -87,6 +99,7 @@ class MCPEditorPlugin : public EditorPlugin {
 	void _exit_after_conflict();
 	void _exit_with_error(const String &p_message);
 	bool _is_headless() const;
+	void on_mcp_session_removed(const String &p_session_id) override;
 
 public:
 	static void configure(bool p_requested, int p_port = 0);

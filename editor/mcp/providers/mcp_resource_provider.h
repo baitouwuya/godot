@@ -1,16 +1,15 @@
 /**************************************************************************/
-/*  gdscript_language_server.h                                            */
+/*  mcp_resource_provider.h                                               */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
-/*                        https://godotengine.org                         */
 /**************************************************************************/
 /* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
 /* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
 /*                                                                        */
 /* Permission is hereby granted, free of charge, to any person obtaining  */
 /* a copy of this software and associated documentation files (the        */
-/* "Software"), to deal in the Software without restriction, including    */
+/* "Software"), to deal in the Software without restriction, including   */
 /* without limitation the rights to use, copy, modify, merge, publish,    */
 /* distribute, sublicense, and/or sell copies of the Software, and to     */
 /* permit persons to whom the Software is furnished to do so, subject to  */
@@ -30,34 +29,32 @@
 
 #pragma once
 
-#include "core/templates/safe_refcount.h"
-#include "editor/plugins/editor_plugin.h"
+#include "core/object/object.h"
+#include "core/templates/hash_map.h"
+#include "core/variant/dictionary.h"
 
-class GDScriptLanguageServer : public EditorPlugin {
-	GDCLASS(GDScriptLanguageServer, EditorPlugin);
+class MCPToolRegistry;
 
-	Thread thread;
-	SafeFlag thread_running;
-	// There is no notification when the editor is initialized. We need to poll till we attempted to start the server.
-	bool start_attempted = false;
-	bool started = false;
+class MCPResourceProvider : public Object {
+public:
+	using ImportFunction = Error (*)(const String &p_target_path, const HashMap<StringName, Variant> &p_options, const String &p_importer);
+	using ScanFunction = void (*)();
 
-	// Defaults located in editor_settings.cpp
-	bool use_thread = false;
-	String host;
-	int port = 0;
-	int poll_limit_usec = 0;
+	explicit MCPResourceProvider(const String &p_project_root = String(), ImportFunction p_import_function = nullptr, ScanFunction p_scan_function = nullptr);
+	~MCPResourceProvider();
 
-	static void thread_main(void *p_userdata);
+	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr);
+	void unregister_tools();
+
+	Dictionary import_options(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary import_resource(const Dictionary &p_arguments, const Dictionary &p_context);
 
 private:
-	void _notification(int p_what);
+	MCPToolRegistry *tool_registry = nullptr;
+	String project_root;
+	ImportFunction import_function = nullptr;
+	ScanFunction scan_function = nullptr;
 
-public:
-	static int port_override;
-	GDScriptLanguageServer();
-	void start();
-	void stop();
+	Error _execute_import(const String &p_target_path, const HashMap<StringName, Variant> &p_options, const String &p_importer) const;
+	void _scan_changes() const;
 };
-
-void register_lsp_types();

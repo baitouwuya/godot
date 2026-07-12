@@ -401,6 +401,7 @@ public:
 
 	void reimport_files(const Vector<String> &p_files);
 	Error reimport_append(const String &p_file, const HashMap<StringName, Variant> &p_custom_options, const String &p_custom_importer, Variant p_generator_parameters);
+	Error import_file_with_custom_options(const String &p_file, const HashMap<StringName, Variant> &p_custom_options, const String &p_custom_importer);
 
 	void reimport_file_with_custom_parameters(const String &p_file, const String &p_importer, const HashMap<StringName, Variant> &p_custom_params);
 

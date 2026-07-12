@@ -2312,7 +2312,8 @@ void EditorFileSystem::_process_update_pending() {
 	_update_script_classes();
 	// Parse documentation second, as it requires the class names to be loaded
 	// because _update_script_documentation loads the scripts completely.
-	if (!EditorNode::is_cmdline_mode()) {
+	EditorNode *editor_node = EditorNode::get_singleton();
+	if (editor_node && !editor_node->is_cmdline_mode()) {
 		_update_script_documentation();
 		_update_pending_scene_groups();
 	}
@@ -3086,7 +3087,9 @@ Error EditorFileSystem::_reimport_file(const String &p_file, const HashMap<Strin
 		}
 	}
 
-	EditorResourcePreview::get_singleton()->check_for_invalidation(p_file);
+	if (EditorResourcePreview::get_singleton()) {
+		EditorResourcePreview::get_singleton()->check_for_invalidation(p_file);
+	}
 
 	print_verbose(vformat("EditorFileSystem: \"%s\" import took %d ms.", p_file, OS::get_singleton()->get_ticks_msec() - start_time));
 
@@ -3451,6 +3454,16 @@ Error EditorFileSystem::reimport_append(const String &p_file, const HashMap<Stri
 	Error ret = _reimport_file(p_file, p_custom_options, p_custom_importer, &p_generator_parameters);
 
 	// Emit the resource_reimported signal for the single file we just reimported.
+	emit_signal(SNAME("resources_reimported"), reloads);
+	return ret;
+}
+
+Error EditorFileSystem::import_file_with_custom_options(const String &p_file, const HashMap<StringName, Variant> &p_custom_options, const String &p_custom_importer) {
+	Vector<String> reloads;
+	reloads.append(p_file);
+
+	emit_signal(SNAME("resources_reimporting"), reloads);
+	const Error ret = _reimport_file(p_file, p_custom_options, p_custom_importer, nullptr, false);
 	emit_signal(SNAME("resources_reimported"), reloads);
 	return ret;
 }
@@ -3825,6 +3838,9 @@ EditorFileSystem::EditorFileSystem() {
 }
 
 EditorFileSystem::~EditorFileSystem() {
+	if (singleton == this) {
+		singleton = nullptr;
+	}
 	if (filesystem) {
 		memdelete(filesystem);
 	}

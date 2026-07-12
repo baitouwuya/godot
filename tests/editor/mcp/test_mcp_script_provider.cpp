@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  test_mcp_editor_provider.cpp                                          */
+/*  test_mcp_script_provider.cpp                                         */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,60 +28,58 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#include "core/mcp/mcp_tool_registry.h"
-#include "editor/mcp/providers/mcp_editor_provider.h"
 #include "tests/test_macros.h"
 
-TEST_FORCE_LINK(test_mcp_editor_provider);
+#include "modules/modules_enabled.gen.h"
 
-namespace TestMCPEditorProvider {
+#if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
 
-TEST_CASE("[MCP][Provider] Editor tools register as MCP-only composable handlers") {
+#include "core/mcp/mcp_tool_registry.h"
+#include "editor/mcp/providers/mcp_script_provider.h"
+
+#endif
+
+TEST_FORCE_LINK(test_mcp_script_provider);
+
+#if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
+
+namespace TestMCPScriptProvider {
+
+TEST_CASE("[MCP][Provider] Script tools register with optimistic edit requirements") {
+	CHECK(String(MCPScriptProvider::STALE_REVISION_ERROR_CODE) == "stale_revision");
+
 	MCPToolRegistry registry;
-	MCPEditorProvider *provider = memnew(MCPEditorProvider);
+	MCPScriptProvider *provider = memnew(MCPScriptProvider);
 	REQUIRE(provider->register_tools(&registry) == OK);
 	CHECK(provider->register_tools(&registry) == ERR_ALREADY_IN_USE);
 
 	const PackedStringArray names = registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_MCP);
-	REQUIRE(names.size() == 3);
-	CHECK(names[0] == "godot.editor.get_state");
-	CHECK(names[1] == "godot.editor.undo");
-	CHECK(names[2] == "godot.editor.redo");
+	REQUIRE(names.size() == 4);
+	CHECK(names[0] == "godot.script.create");
+	CHECK(names[1] == "godot.script.get");
+	CHECK(names[2] == "godot.script.edit");
+	CHECK(names[3] == "godot.script.save");
 	CHECK(registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_CLI).is_empty());
+
 	const Array definitions = registry.get_tool_definitions(MCPToolRegistry::TOOL_SURFACE_MCP);
-	REQUIRE(definitions.size() == 3);
-	const Dictionary state_output_schema = Dictionary(definitions[0]).get("outputSchema", Dictionary());
-	const Dictionary state_properties = state_output_schema.get("properties", Dictionary());
-	CHECK(state_properties.has("unsavedScenes"));
-	CHECK(PackedStringArray(state_output_schema.get("required", PackedStringArray())).has("unsavedScenes"));
+	REQUIRE(definitions.size() == 4);
+	const Dictionary edit_schema = Dictionary(definitions[2]).get("inputSchema", Dictionary());
+	const Dictionary properties = edit_schema.get("properties", Dictionary());
+	CHECK(properties.has("expected_revision"));
+	CHECK(properties.has("expected_sha256"));
+	CHECK(Array(edit_schema.get("anyOf", Array())).size() == 2);
 
 	MCPToolCallContext context;
 	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
-	const MCPToolRegistry::CallResult call_result = registry.call_tool("godot.editor.get_state", Dictionary(), context);
-	REQUIRE(call_result.status == MCPToolRegistry::CALL_OK);
-	CHECK_FALSE(bool(call_result.result.get("isError", false)));
-
-	const Dictionary state = call_result.result.get("structuredContent", Dictionary());
-	CHECK(state.get("currentScene", Variant()).get_type() == Variant::STRING);
-	CHECK(state.get("unsavedScenes", Variant()).get_type() == Variant::PACKED_STRING_ARRAY);
-	CHECK(state.get("openScripts", Variant()).get_type() == Variant::PACKED_STRING_ARRAY);
-	CHECK(state.get("unsavedScripts", Variant()).get_type() == Variant::PACKED_STRING_ARRAY);
-	CHECK(state.get("canUndo", Variant()).get_type() == Variant::BOOL);
-	CHECK(state.get("canRedo", Variant()).get_type() == Variant::BOOL);
-
-	Dictionary unexpected_arguments;
-	unexpected_arguments["unexpected"] = true;
-	const MCPToolRegistry::CallResult invalid_call =
-			registry.call_tool("godot.editor.get_state", unexpected_arguments, context);
+	const MCPToolRegistry::CallResult invalid_call = registry.call_tool("godot.script.create", Dictionary(), context);
 	REQUIRE(invalid_call.status == MCPToolRegistry::CALL_OK);
 	CHECK(bool(invalid_call.result.get("isError", false)));
-
-	context.surface = MCPToolRegistry::TOOL_SURFACE_CLI;
-	CHECK(registry.call_tool("godot.editor.get_state", Dictionary(), context).status == MCPToolRegistry::CALL_TOOL_NOT_FOUND);
 
 	provider->unregister_tools();
 	CHECK(registry.get_tool_names().is_empty());
 	memdelete(provider);
 }
 
-} // namespace TestMCPEditorProvider
+} // namespace TestMCPScriptProvider
+
+#endif // MODULE_GDSCRIPT_ENABLED && !GDSCRIPT_NO_LSP

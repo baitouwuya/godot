@@ -39,6 +39,17 @@
 
 int GDScriptLanguageServer::port_override = -1;
 
+static void _log_server_message(const String &p_message) {
+	EditorNode *editor_node = EditorNode::get_singleton();
+	if (!editor_node || !editor_node->is_editor_ready()) {
+		return;
+	}
+	EditorLog *editor_log = EditorNode::get_log();
+	if (editor_log) {
+		editor_log->add_message(p_message, EditorLog::MSG_TYPE_EDITOR);
+	}
+}
+
 GDScriptLanguageServer::GDScriptLanguageServer() {
 	set_process_internal(true);
 }
@@ -55,8 +66,12 @@ void GDScriptLanguageServer::_notification(int p_what) {
 				start();
 			}
 
-			if (started && !use_thread) {
-				GDScriptLanguageProtocol::get_singleton()->poll(poll_limit_usec);
+			if (started) {
+				GDScriptLanguageProtocol *protocol = GDScriptLanguageProtocol::get_singleton();
+				if (!use_thread) {
+					protocol->poll_network(poll_limit_usec);
+				}
+				protocol->poll_main_thread(poll_limit_usec);
 			}
 		} break;
 
@@ -78,11 +93,10 @@ void GDScriptLanguageServer::_notification(int p_what) {
 }
 
 void GDScriptLanguageServer::thread_main(void *p_userdata) {
-	set_current_thread_safe_for_nodes(true);
 	GDScriptLanguageServer *self = static_cast<GDScriptLanguageServer *>(p_userdata);
-	while (self->thread_running) {
+	while (self->thread_running.is_set()) {
 		// Poll 20 times per second
-		GDScriptLanguageProtocol::get_singleton()->poll(self->poll_limit_usec);
+		GDScriptLanguageProtocol::get_singleton()->poll_network(self->poll_limit_usec);
 		OS::get_singleton()->delay_usec(50000);
 	}
 }
@@ -94,27 +108,29 @@ void GDScriptLanguageServer::start() {
 	poll_limit_usec = (int)_EDITOR_GET("network/language_server/poll_limit_usec");
 	const Error status = GDScriptLanguageProtocol::get_singleton()->start(port, IPAddress(host));
 	if (status != OK) {
-		EditorNode::get_log()->add_message("--- Failed to start GDScript language server on port " + itos(port) + ": " + error_names[status] + " ---", EditorLog::MSG_TYPE_EDITOR);
+		_log_server_message("--- Failed to start GDScript language server on port " + itos(port) + ": " + error_names[status] + " ---");
 		return;
 	}
-	EditorNode::get_log()->add_message("--- GDScript language server started on port " + itos(port) + " ---", EditorLog::MSG_TYPE_EDITOR);
+	_log_server_message("--- GDScript language server started on port " + itos(port) + " ---");
 	if (use_thread) {
-		thread_running = true;
+		thread_running.set();
 		thread.start(GDScriptLanguageServer::thread_main, this);
 	}
-	set_process_internal(!use_thread);
+	set_process_internal(true);
 	started = true;
 }
 
 void GDScriptLanguageServer::stop() {
-	if (use_thread) {
-		ERR_FAIL_COND(!thread.is_started());
-		thread_running = false;
+	GDScriptLanguageProtocol *protocol = GDScriptLanguageProtocol::get_singleton();
+	protocol->begin_shutdown();
+	thread_running.clear();
+	if (thread.is_started()) {
 		thread.wait_to_finish();
 	}
-	GDScriptLanguageProtocol::get_singleton()->stop();
+	protocol->stop();
 	started = false;
-	EditorNode::get_log()->add_message("--- GDScript language server stopped ---", EditorLog::MSG_TYPE_EDITOR);
+	set_process_internal(true);
+	_log_server_message("--- GDScript language server stopped ---");
 }
 
 void register_lsp_types() {

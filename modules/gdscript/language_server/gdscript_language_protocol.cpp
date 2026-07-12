@@ -36,6 +36,7 @@
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
 #include "core/os/os.h"
+#include "core/os/thread.h"
 #include "editor/doc/doc_tools.h"
 #include "editor/doc/editor_help.h"
 #include "editor/editor_log.h"
@@ -43,15 +44,15 @@
 #include "editor/settings/editor_settings.h"
 
 #define LSP_CLIENT_V(m_ret_val) \
-	ERR_FAIL_COND_V(latest_client_id == LSP_NO_CLIENT, m_ret_val); \
-	ERR_FAIL_COND_V(!clients.has(latest_client_id), m_ret_val); \
-	Ref<LSPeer> client = clients.get(latest_client_id); \
+	ERR_FAIL_COND_V(active_client_id == LSP_NO_CLIENT, m_ret_val); \
+	ERR_FAIL_COND_V(!clients.has(active_client_id), m_ret_val); \
+	Ref<LSPeer> client = clients.get(active_client_id); \
 	ERR_FAIL_COND_V(!client.is_valid(), m_ret_val);
 
 #define LSP_CLIENT \
-	ERR_FAIL_COND(latest_client_id == LSP_NO_CLIENT); \
-	ERR_FAIL_COND(!clients.has(latest_client_id)); \
-	Ref<LSPeer> client = clients.get(latest_client_id); \
+	ERR_FAIL_COND(active_client_id == LSP_NO_CLIENT); \
+	ERR_FAIL_COND(!clients.has(active_client_id)); \
+	Ref<LSPeer> client = clients.get(active_client_id); \
 	ERR_FAIL_COND(!client.is_valid());
 
 GDScriptLanguageProtocol *GDScriptLanguageProtocol::singleton = nullptr;
@@ -67,101 +68,20 @@ static void _log_connection_message(const String &p_message) {
 	}
 }
 
-Error GDScriptLanguageProtocol::LSPeer::handle_data() {
-	int read = 0;
-	// Read headers
-	if (!has_header) {
-		while (true) {
-			if (req_pos >= LSP_MAX_BUFFER_SIZE) {
-				req_pos = 0;
-				ERR_FAIL_V_MSG(ERR_OUT_OF_MEMORY, "Response header too big");
-			}
-			Error err = connection->get_partial_data(&req_buf[req_pos], 1, read);
-			if (err != OK) {
-				return FAILED;
-			} else if (read != 1) { // Busy, wait until next poll
-				return ERR_BUSY;
-			}
-			char *r = (char *)req_buf;
-			int l = req_pos;
-
-			// End of headers
-			if (l > 3 && r[l] == '\n' && r[l - 1] == '\r' && r[l - 2] == '\n' && r[l - 3] == '\r') {
-				r[l - 3] = '\0'; // Null terminate to read string
-				String header = String::utf8(r);
-				content_length = header.substr(16).to_int();
-				has_header = true;
-				req_pos = 0;
-				break;
-			}
-			req_pos++;
-		}
-	}
-	if (has_header) {
-		while (req_pos < content_length) {
-			if (req_pos >= LSP_MAX_BUFFER_SIZE) {
-				req_pos = 0;
-				has_header = false;
-				ERR_FAIL_COND_V_MSG(req_pos >= LSP_MAX_BUFFER_SIZE, ERR_OUT_OF_MEMORY, "Response content too big");
-			}
-			Error err = connection->get_partial_data(&req_buf[req_pos], 1, read);
-			if (err != OK) {
-				return FAILED;
-			} else if (read != 1) {
-				return ERR_BUSY;
-			}
-			req_pos++;
-		}
-
-		// Parse data
-		String msg = String::utf8((const char *)req_buf, req_pos);
-
-		// Reset to read again
-		req_pos = 0;
-		has_header = false;
-
-		// Response
-		String output = GDScriptLanguageProtocol::get_singleton()->process_message(msg);
-		if (analysis_session.is_valid()) {
-			analysis_session->clear_transient_parsers();
-		}
-		if (!output.is_empty()) {
-			res_queue.push_back(output.utf8());
-		}
-	}
-	return OK;
-}
-
-Error GDScriptLanguageProtocol::LSPeer::send_data() {
-	int sent = 0;
-	while (!res_queue.is_empty()) {
-		CharString c_res = res_queue[0];
-		if (res_sent < c_res.size()) {
-			Error err = connection->put_partial_data((const uint8_t *)c_res.get_data() + res_sent, c_res.size() - res_sent - 1, sent);
-			if (err != OK) {
-				return err;
-			}
-			res_sent += sent;
-		}
-		// Response sent
-		if (res_sent >= c_res.size() - 1) {
-			res_sent = 0;
-			res_queue.remove_at(0);
-		}
-	}
+Error GDScriptLanguageProtocol::_add_client(int p_client_id) {
+	ERR_FAIL_COND_V_MSG(clients.size() >= GDScriptLanguageTransport::MAX_CLIENTS, FAILED, "Max client limits reached");
+	ERR_FAIL_COND_V(clients.has(p_client_id), ERR_ALREADY_EXISTS);
+	Ref<LSPeer> peer = memnew(LSPeer);
+	peer->analysis_session = analysis_service->create_session();
+	peer->analysis_session_id = peer->analysis_session->get_session_id();
+	clients.insert(p_client_id, peer);
+	next_client_id = MAX(next_client_id, p_client_id + 1);
+	_log_connection_message("[LSP] Connection Taken");
 	return OK;
 }
 
 Error GDScriptLanguageProtocol::on_client_connected() {
-	Ref<StreamPeerTCP> tcp_peer = server->take_connection();
-	ERR_FAIL_COND_V_MSG(clients.size() >= LSP_MAX_CLIENTS, FAILED, "Max client limits reached");
-	Ref<LSPeer> peer = memnew(LSPeer);
-	peer->connection = tcp_peer;
-	peer->analysis_session = analysis_service->create_session();
-	peer->analysis_session_id = peer->analysis_session->get_session_id();
-	clients.insert(next_client_id, peer);
-	next_client_id++;
-	_log_connection_message("[LSP] Connection Taken");
+	transport.poll_network(0);
 	return OK;
 }
 
@@ -174,11 +94,11 @@ bool GDScriptLanguageProtocol::_remove_client(int p_client_id) {
 		analysis_service->remove_session((*peer)->analysis_session_id);
 	}
 	clients.erase(p_client_id);
-	if (latest_client_id == p_client_id) {
-		latest_client_id = clients.is_empty() ? LSP_NO_CLIENT : clients.begin()->key;
+	if (active_client_id == p_client_id) {
+		active_client_id = LSP_NO_CLIENT;
 	}
 	if (clients.is_empty()) {
-		scene_cache.clear();
+		analysis_service->clear_scene_cache();
 	}
 	return true;
 }
@@ -186,6 +106,49 @@ bool GDScriptLanguageProtocol::_remove_client(int p_client_id) {
 void GDScriptLanguageProtocol::on_client_disconnected(const int &p_client_id) {
 	if (_remove_client(p_client_id)) {
 		_log_connection_message("[LSP] Disconnected");
+	}
+}
+
+void GDScriptLanguageProtocol::_clear_clients() {
+	while (!clients.is_empty()) {
+		_remove_client(clients.begin()->key);
+	}
+	active_client_id = LSP_NO_CLIENT;
+}
+
+bool GDScriptLanguageProtocol::_queue_output(int p_client_id, const String &p_output) {
+	if (transport.queue_response(p_client_id, p_output)) {
+		return true;
+	}
+	transport.request_disconnect(p_client_id);
+	return false;
+}
+
+void GDScriptLanguageProtocol::_process_transport_event(const GDScriptLanguageTransport::Event &p_event) {
+	switch (p_event.type) {
+		case GDScriptLanguageTransport::EVENT_CONNECTED: {
+			if (_add_client(p_event.client_id) != OK) {
+				transport.request_disconnect(p_event.client_id);
+			}
+		} break;
+		case GDScriptLanguageTransport::EVENT_MESSAGE: {
+			Ref<LSPeer> *peer = clients.getptr(p_event.client_id);
+			if (!peer || (*peer).is_null()) {
+				break;
+			}
+			active_client_id = p_event.client_id;
+			const String output = process_message(p_event.message);
+			active_client_id = LSP_NO_CLIENT;
+			if ((*peer)->analysis_session.is_valid()) {
+				(*peer)->analysis_session->clear_transient_parsers();
+			}
+			if (!output.is_empty()) {
+				_queue_output(p_event.client_id, output);
+			}
+		} break;
+		case GDScriptLanguageTransport::EVENT_DISCONNECTED: {
+			on_client_disconnected(p_event.client_id);
+		} break;
 	}
 }
 
@@ -287,13 +250,13 @@ Variant GDScriptLanguageProtocol::initialize(const Dictionary &p_params) {
 		params["path"] = workspace->root;
 		Dictionary request = make_notification("gdscript_client/changeWorkspace", params);
 
-		ERR_FAIL_COND_V_MSG(!clients.has(latest_client_id), ret.to_json(),
-				vformat("GDScriptLanguageProtocol: Can't initialize invalid peer '%d'.", latest_client_id));
-		Ref<LSPeer> peer = clients.get(latest_client_id);
+		ERR_FAIL_COND_V_MSG(!clients.has(active_client_id), ret.to_json(),
+				vformat("GDScriptLanguageProtocol: Can't initialize invalid peer '%d'.", active_client_id));
+		Ref<LSPeer> peer = clients.get(active_client_id);
 		if (peer.is_valid()) {
 			String msg = Variant(request).to_json_string();
 			msg = format_output(msg);
-			(*peer)->res_queue.push_back(msg.utf8());
+			_queue_output(active_client_id, msg);
 		}
 	}
 
@@ -328,62 +291,40 @@ void GDScriptLanguageProtocol::initialized(const Variant &p_params) {
 }
 
 void GDScriptLanguageProtocol::poll(int p_limit_usec) {
-	uint64_t target_ticks = OS::get_singleton()->get_ticks_usec() + p_limit_usec;
+	poll_network(p_limit_usec);
+	poll_main_thread(p_limit_usec);
+}
 
-	if (server->is_connection_available()) {
-		on_client_connected();
-	}
+void GDScriptLanguageProtocol::poll_network(int p_limit_usec) {
+	transport.poll_network(p_limit_usec);
+}
 
-	scene_cache.poll();
+void GDScriptLanguageProtocol::poll_main_thread(int p_limit_usec) {
+	ERR_FAIL_COND_MSG(!Thread::is_main_thread(), "GDScript LSP semantic processing must run on the main thread.");
+	analysis_service->poll_scene_cache();
+	const uint64_t target_ticks = OS::get_singleton()->get_ticks_usec() + MAX(0, p_limit_usec);
 
-	HashMap<int, Ref<LSPeer>>::Iterator E = clients.begin();
-	while (E != clients.end()) {
-		Ref<LSPeer> peer = E->value;
-		peer->connection->poll();
-		StreamPeerTCP::Status status = peer->connection->get_status();
-		if (status == StreamPeerTCP::STATUS_NONE || status == StreamPeerTCP::STATUS_ERROR) {
-			on_client_disconnected(E->key);
-			E = clients.begin();
-			continue;
-		} else {
-			Error err = OK;
-			while (peer->connection->get_available_bytes() > 0) {
-				latest_client_id = E->key;
-				err = peer->handle_data();
-				if (err != OK || OS::get_singleton()->get_ticks_usec() >= target_ticks) {
-					break;
-				}
-			}
-
-			if (err != OK && err != ERR_BUSY) {
-				on_client_disconnected(E->key);
-				E = clients.begin();
-				continue;
-			}
-
-			err = peer->send_data();
-			if (err != OK && err != ERR_BUSY) {
-				on_client_disconnected(E->key);
-				E = clients.begin();
-				continue;
-			}
+	GDScriptLanguageTransport::Event event;
+	while (transport.pop_event(event)) {
+		_process_transport_event(event);
+		if (OS::get_singleton()->get_ticks_usec() >= target_ticks) {
+			break;
 		}
-		++E;
 	}
 }
 
 Error GDScriptLanguageProtocol::start(int p_port, const IPAddress &p_bind_ip) {
-	return server->listen(p_port, p_bind_ip);
+	return transport.start(p_port, p_bind_ip);
+}
+
+void GDScriptLanguageProtocol::begin_shutdown() {
+	transport.begin_shutdown();
 }
 
 void GDScriptLanguageProtocol::stop() {
-	for (const KeyValue<int, Ref<LSPeer>> &E : clients) {
-		Ref<LSPeer> peer = clients.get(E.key);
-		peer->connection->disconnect_from_host();
-	}
-
-	scene_cache.clear();
-	server->stop();
+	transport.stop();
+	_clear_clients();
+	analysis_service->clear_scene_cache();
 }
 
 void GDScriptLanguageProtocol::notify_client(const String &p_method, const Variant &p_params, int p_client_id) {
@@ -393,8 +334,8 @@ void GDScriptLanguageProtocol::notify_client(const String &p_method, const Varia
 	}
 #endif
 	if (p_client_id == -1) {
-		ERR_FAIL_COND_MSG(latest_client_id == LSP_NO_CLIENT, "GDScript LSP: Can't notify client as none was connected.");
-		p_client_id = latest_client_id;
+		ERR_FAIL_COND_MSG(active_client_id == LSP_NO_CLIENT, "GDScript LSP: Can't notify a client outside an active request.");
+		p_client_id = active_client_id;
 	}
 	ERR_FAIL_COND(!clients.has(p_client_id));
 	Ref<LSPeer> peer = clients.get(p_client_id);
@@ -403,7 +344,7 @@ void GDScriptLanguageProtocol::notify_client(const String &p_method, const Varia
 	Dictionary message = make_notification(p_method, p_params);
 	String msg = Variant(message).to_json_string();
 	msg = format_output(msg);
-	peer->res_queue.push_back(msg.utf8());
+	_queue_output(p_client_id, msg);
 }
 
 void GDScriptLanguageProtocol::request_client(const String &p_method, const Variant &p_params, int p_client_id) {
@@ -413,8 +354,8 @@ void GDScriptLanguageProtocol::request_client(const String &p_method, const Vari
 	}
 #endif
 	if (p_client_id == -1) {
-		ERR_FAIL_COND_MSG(latest_client_id == LSP_NO_CLIENT, "GDScript LSP: Can't notify client as none was connected.");
-		p_client_id = latest_client_id;
+		ERR_FAIL_COND_MSG(active_client_id == LSP_NO_CLIENT, "GDScript LSP: Can't request a client outside an active request.");
+		p_client_id = active_client_id;
 	}
 	ERR_FAIL_COND(!clients.has(p_client_id));
 	Ref<LSPeer> peer = clients.get(p_client_id);
@@ -424,7 +365,7 @@ void GDScriptLanguageProtocol::request_client(const String &p_method, const Vari
 	next_server_id++;
 	String msg = Variant(message).to_json_string();
 	msg = format_output(msg);
-	peer->res_queue.push_back(msg.utf8());
+	_queue_output(p_client_id, msg);
 }
 
 bool GDScriptLanguageProtocol::is_smart_resolve_enabled() const {
@@ -436,7 +377,7 @@ bool GDScriptLanguageProtocol::is_goto_native_symbols_enabled() const {
 }
 
 Ref<GDScriptAnalysisSession> GDScriptLanguageProtocol::get_analysis_session(int p_client_id) const {
-	const int client_id = p_client_id == LSP_NO_CLIENT ? latest_client_id : p_client_id;
+	const int client_id = p_client_id == LSP_NO_CLIENT ? active_client_id : p_client_id;
 	const Ref<LSPeer> *peer = clients.getptr(client_id);
 	return peer ? (*peer)->analysis_session : Ref<GDScriptAnalysisSession>();
 }
@@ -466,12 +407,12 @@ Error GDScriptLanguageProtocol::lsp_did_open(const Ref<GDScriptAnalysisSession> 
 	if (document.languageId == LSP::LanguageId::GDSCRIPT) {
 		workspace->publish_diagnostics(path, diagnostics, p_client_id);
 	}
-	scene_cache.request_load(path);
+	analysis_service->request_scene_load(path);
 	return OK;
 }
 
 void GDScriptLanguageProtocol::lsp_did_open(const Dictionary &p_params) {
-	const Error error = lsp_did_open(get_analysis_session(), p_params, latest_client_id);
+	const Error error = lsp_did_open(get_analysis_session(), p_params, active_client_id);
 	ERR_FAIL_COND_MSG(error != OK, "LSP: Client is opening an already open or invalid document.");
 }
 
@@ -503,7 +444,7 @@ Error GDScriptLanguageProtocol::lsp_did_change(const Ref<GDScriptAnalysisSession
 }
 
 void GDScriptLanguageProtocol::lsp_did_change(const Dictionary &p_params) {
-	const Error error = lsp_did_change(get_analysis_session(), p_params, latest_client_id);
+	const Error error = lsp_did_change(get_analysis_session(), p_params, active_client_id);
 	ERR_FAIL_COND_MSG(error != OK, "LSP: Client is changing a document that is not open.");
 }
 
@@ -514,7 +455,7 @@ Error GDScriptLanguageProtocol::lsp_did_close(const Ref<GDScriptAnalysisSession>
 	const String path = get_workspace()->get_file_path(identifier.uri);
 	const Error error = p_session->close_document(path);
 	if (error == OK) {
-		scene_cache.unload(path);
+		analysis_service->unload_scene(path);
 	}
 	return error;
 }
@@ -667,7 +608,6 @@ void GDScriptLanguageProtocol::resolve_related_symbols(const Ref<GDScriptAnalysi
 // clang-format on
 
 GDScriptLanguageProtocol::GDScriptLanguageProtocol() {
-	server.instantiate();
 	singleton = this;
 	workspace.instantiate();
 	text_document.instantiate();

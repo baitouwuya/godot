@@ -27,12 +27,22 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
+#include "core/os/os.h"
 #include "editor/mcp/mcp_host.h"
 #include "tests/test_macros.h"
 
 TEST_FORCE_LINK(test_mcp_host);
 
 namespace TestMCPHost {
+
+class RecordingSessionObserver : public MCPHostSessionObserver {
+public:
+	Vector<String> removed_sessions;
+
+	void on_mcp_session_removed(const String &p_session_id) override {
+		removed_sessions.push_back(p_session_id);
+	}
+};
 
 MCPHTTPParser::Request request(
 		const String &p_method,
@@ -72,8 +82,10 @@ String response_session_id(const MCPHTTPResponse &p_response) {
 
 TEST_CASE("[MCP] Host allocates and deletes initialized sessions") {
 	MCPToolRegistry registry;
+	RecordingSessionObserver observer;
 	MCPHost host;
-	const MCPHost::Config config = make_config();
+	MCPHost::Config config = make_config();
+	config.session_observer = &observer;
 	REQUIRE(host.start(config, &registry) == OK);
 
 	const String initialize = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"1\"}}}";
@@ -90,7 +102,35 @@ TEST_CASE("[MCP] Host allocates and deletes initialized sessions") {
 	response = host.handle_request(request("DELETE", String(), session_id));
 	CHECK(response.status == 204);
 	CHECK(host.get_session_count() == 0);
+	REQUIRE(observer.removed_sessions.size() == 1);
+	CHECK(observer.removed_sessions[0] == session_id);
 	host.stop();
+}
+
+TEST_CASE("[MCP] Host notifies session cleanup on idle expiry and stop") {
+	MCPToolRegistry registry;
+	RecordingSessionObserver observer;
+	MCPHost host;
+	MCPHost::Config config = make_config();
+	config.session_idle_timeout_usec = 1;
+	config.session_observer = &observer;
+	REQUIRE(host.start(config, &registry) == OK);
+
+	const String initialize = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"1\"}}}";
+	MCPHTTPResponse response = host.handle_request(request("POST", initialize));
+	const String expired_session = response_session_id(response);
+	REQUIRE_FALSE(expired_session.is_empty());
+	OS::get_singleton()->delay_usec(10);
+	host.poll();
+	REQUIRE(observer.removed_sessions.size() == 1);
+	CHECK(observer.removed_sessions[0] == expired_session);
+
+	response = host.handle_request(request("POST", initialize));
+	const String stopped_session = response_session_id(response);
+	REQUIRE_FALSE(stopped_session.is_empty());
+	host.stop();
+	REQUIRE(observer.removed_sessions.size() == 2);
+	CHECK(observer.removed_sessions[1] == stopped_session);
 }
 
 TEST_CASE("[MCP] Host rejects unknown sessions and does not retain invalid initialization") {

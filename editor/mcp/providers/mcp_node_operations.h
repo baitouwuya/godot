@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  gdscript_language_server.h                                            */
+/*  mcp_node_operations.h                                                 */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -10,7 +10,7 @@
 /*                                                                        */
 /* Permission is hereby granted, free of charge, to any person obtaining  */
 /* a copy of this software and associated documentation files (the        */
-/* "Software"), to deal in the Software without restriction, including    */
+/* "Software"), to deal in the Software without restriction, including   */
 /* without limitation the rights to use, copy, modify, merge, publish,    */
 /* distribute, sublicense, and/or sell copies of the Software, and to     */
 /* permit persons to whom the Software is furnished to do so, subject to  */
@@ -30,34 +30,21 @@
 
 #pragma once
 
-#include "core/templates/safe_refcount.h"
-#include "editor/plugins/editor_plugin.h"
+#include "core/error/error_list.h"
+#include "core/object/object.h"
 
-class GDScriptLanguageServer : public EditorPlugin {
-	GDCLASS(GDScriptLanguageServer, EditorPlugin);
+class MCPUndoRedoAction;
+class Node;
+class Script;
 
-	Thread thread;
-	SafeFlag thread_running;
-	// There is no notification when the editor is initialized. We need to poll till we attempted to start the server.
-	bool start_attempted = false;
-	bool started = false;
+namespace MCPNodeOperations {
 
-	// Defaults located in editor_settings.cpp
-	bool use_thread = false;
-	String host;
-	int port = 0;
-	int poll_limit_usec = 0;
+bool find_property_info(Node *p_node, const StringName &p_property, PropertyInfo &r_info);
+Error create_node(Node *p_scene_root, Node *p_parent, const StringName &p_type, const String &p_name,
+		MCPUndoRedoAction *p_undo_redo, Node *&r_node, String *r_error = nullptr);
+Error set_property(Node *p_scene_root, Node *p_node, const StringName &p_property, const Variant &p_value,
+		MCPUndoRedoAction *p_undo_redo, String *r_error = nullptr);
+Error attach_script(Node *p_scene_root, Node *p_node, const Ref<Script> &p_script,
+		MCPUndoRedoAction *p_undo_redo, String *r_error = nullptr);
 
-	static void thread_main(void *p_userdata);
-
-private:
-	void _notification(int p_what);
-
-public:
-	static int port_override;
-	GDScriptLanguageServer();
-	void start();
-	void stop();
-};
-
-void register_lsp_types();
+} // namespace MCPNodeOperations

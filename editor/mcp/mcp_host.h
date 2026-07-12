@@ -35,6 +35,12 @@
 #include "core/mcp/mcp_protocol.h"
 #include "core/templates/hash_map.h"
 
+class MCPHostSessionObserver {
+public:
+	virtual void on_mcp_session_removed(const String &p_session_id) = 0;
+	virtual ~MCPHostSessionObserver() = default;
+};
+
 class MCPHost : public MCPHTTPRequestHandler {
 public:
 	struct Config {
@@ -46,6 +52,7 @@ public:
 		int max_sessions = 64;
 		uint64_t session_idle_timeout_usec = 30 * 60 * 1000 * 1000ULL;
 		MCPHTTPServer::Config http;
+		MCPHostSessionObserver *session_observer = nullptr;
 	};
 
 private:

@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  gdscript_language_server.h                                            */
+/*  mcp_script_provider.h                                                 */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -10,7 +10,7 @@
 /*                                                                        */
 /* Permission is hereby granted, free of charge, to any person obtaining  */
 /* a copy of this software and associated documentation files (the        */
-/* "Software"), to deal in the Software without restriction, including    */
+/* "Software"), to deal in the Software without restriction, including   */
 /* without limitation the rights to use, copy, modify, merge, publish,    */
 /* distribute, sublicense, and/or sell copies of the Software, and to     */
 /* permit persons to whom the Software is furnished to do so, subject to  */
@@ -30,34 +30,33 @@
 
 #pragma once
 
-#include "core/templates/safe_refcount.h"
-#include "editor/plugins/editor_plugin.h"
+#include "mcp_gdscript_session_manager.h"
 
-class GDScriptLanguageServer : public EditorPlugin {
-	GDCLASS(GDScriptLanguageServer, EditorPlugin);
+#include "core/object/object.h"
+#include "core/variant/dictionary.h"
 
-	Thread thread;
-	SafeFlag thread_running;
-	// There is no notification when the editor is initialized. We need to poll till we attempted to start the server.
-	bool start_attempted = false;
-	bool started = false;
+class MCPToolRegistry;
 
-	// Defaults located in editor_settings.cpp
-	bool use_thread = false;
-	String host;
-	int port = 0;
-	int poll_limit_usec = 0;
+class MCPScriptProvider : public Object {
+public:
+	static constexpr const char *STALE_REVISION_ERROR_CODE = "stale_revision";
 
-	static void thread_main(void *p_userdata);
+	MCPScriptProvider(const Ref<MCPGDScriptSessionManager> &p_session_manager = Ref<MCPGDScriptSessionManager>());
+	~MCPScriptProvider();
+
+	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr);
+	void unregister_tools();
+	void set_session_manager(const Ref<MCPGDScriptSessionManager> &p_session_manager) { session_manager = p_session_manager; }
+	const Ref<MCPGDScriptSessionManager> &get_session_manager() const { return session_manager; }
+
+	Dictionary create(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary get(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary edit(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary save(const Dictionary &p_arguments, const Dictionary &p_context);
 
 private:
-	void _notification(int p_what);
+	MCPToolRegistry *tool_registry = nullptr;
+	Ref<MCPGDScriptSessionManager> session_manager;
 
-public:
-	static int port_override;
-	GDScriptLanguageServer();
-	void start();
-	void stop();
+	bool _resolve_analysis_context(const Dictionary &p_context, String &r_session_id, String &r_error);
 };
-
-void register_lsp_types();

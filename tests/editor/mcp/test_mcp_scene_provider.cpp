@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  test_mcp_editor_provider.cpp                                          */
+/*  test_mcp_scene_provider.cpp                                           */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -29,59 +29,81 @@
 /**************************************************************************/
 
 #include "core/mcp/mcp_tool_registry.h"
-#include "editor/mcp/providers/mcp_editor_provider.h"
+#include "editor/mcp/providers/mcp_scene_provider.h"
+#include "scene/main/node.h"
 #include "tests/test_macros.h"
 
-TEST_FORCE_LINK(test_mcp_editor_provider);
+TEST_FORCE_LINK(test_mcp_scene_provider);
 
-namespace TestMCPEditorProvider {
+namespace TestMCPSceneProvider {
 
-TEST_CASE("[MCP][Provider] Editor tools register as MCP-only composable handlers") {
+TEST_CASE("[MCP][Provider] Scene tools register in order on the MCP surface") {
 	MCPToolRegistry registry;
-	MCPEditorProvider *provider = memnew(MCPEditorProvider);
+	MCPSceneProvider *provider = memnew(MCPSceneProvider);
 	REQUIRE(provider->register_tools(&registry) == OK);
 	CHECK(provider->register_tools(&registry) == ERR_ALREADY_IN_USE);
 
 	const PackedStringArray names = registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_MCP);
 	REQUIRE(names.size() == 3);
-	CHECK(names[0] == "godot.editor.get_state");
-	CHECK(names[1] == "godot.editor.undo");
-	CHECK(names[2] == "godot.editor.redo");
+	CHECK(names[0] == "godot.scene.get_tree");
+	CHECK(names[1] == "godot.scene.get_selection");
+	CHECK(names[2] == "godot.scene.save");
 	CHECK(registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_CLI).is_empty());
+
 	const Array definitions = registry.get_tool_definitions(MCPToolRegistry::TOOL_SURFACE_MCP);
 	REQUIRE(definitions.size() == 3);
-	const Dictionary state_output_schema = Dictionary(definitions[0]).get("outputSchema", Dictionary());
-	const Dictionary state_properties = state_output_schema.get("properties", Dictionary());
-	CHECK(state_properties.has("unsavedScenes"));
-	CHECK(PackedStringArray(state_output_schema.get("required", PackedStringArray())).has("unsavedScenes"));
+	const Dictionary tree_schema = Dictionary(definitions[0]).get("inputSchema", Dictionary());
+	const Dictionary tree_properties = tree_schema.get("properties", Dictionary());
+	CHECK(tree_properties.has("rootPath"));
+	CHECK(tree_properties.has("maxDepth"));
+	CHECK(tree_properties.has("includeInternal"));
 
 	MCPToolCallContext context;
 	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
-	const MCPToolRegistry::CallResult call_result = registry.call_tool("godot.editor.get_state", Dictionary(), context);
-	REQUIRE(call_result.status == MCPToolRegistry::CALL_OK);
-	CHECK_FALSE(bool(call_result.result.get("isError", false)));
-
-	const Dictionary state = call_result.result.get("structuredContent", Dictionary());
-	CHECK(state.get("currentScene", Variant()).get_type() == Variant::STRING);
-	CHECK(state.get("unsavedScenes", Variant()).get_type() == Variant::PACKED_STRING_ARRAY);
-	CHECK(state.get("openScripts", Variant()).get_type() == Variant::PACKED_STRING_ARRAY);
-	CHECK(state.get("unsavedScripts", Variant()).get_type() == Variant::PACKED_STRING_ARRAY);
-	CHECK(state.get("canUndo", Variant()).get_type() == Variant::BOOL);
-	CHECK(state.get("canRedo", Variant()).get_type() == Variant::BOOL);
-
-	Dictionary unexpected_arguments;
-	unexpected_arguments["unexpected"] = true;
-	const MCPToolRegistry::CallResult invalid_call =
-			registry.call_tool("godot.editor.get_state", unexpected_arguments, context);
+	Dictionary invalid_arguments;
+	invalid_arguments["unknown"] = true;
+	const MCPToolRegistry::CallResult invalid_call = registry.call_tool("godot.scene.get_tree", invalid_arguments, context);
 	REQUIRE(invalid_call.status == MCPToolRegistry::CALL_OK);
 	CHECK(bool(invalid_call.result.get("isError", false)));
-
-	context.surface = MCPToolRegistry::TOOL_SURFACE_CLI;
-	CHECK(registry.call_tool("godot.editor.get_state", Dictionary(), context).status == MCPToolRegistry::CALL_TOOL_NOT_FOUND);
 
 	provider->unregister_tools();
 	CHECK(registry.get_tool_names().is_empty());
 	memdelete(provider);
 }
 
-} // namespace TestMCPEditorProvider
+TEST_CASE("[MCP][Provider] Scene tree tool returns the injected edited scene") {
+	Node *scene_root = memnew(Node);
+	scene_root->set_name("SceneRoot");
+	Node *child = memnew(Node);
+	child->set_name("Child");
+	scene_root->add_child(child);
+	child->set_owner(scene_root);
+
+	MCPToolRegistry registry;
+	MCPSceneProvider *provider = memnew(MCPSceneProvider(scene_root));
+	REQUIRE(provider->register_tools(&registry) == OK);
+
+	Dictionary arguments;
+	arguments["rootPath"] = ".";
+	arguments["maxDepth"] = 1;
+	arguments["includeInternal"] = false;
+	MCPToolCallContext context;
+	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
+	const MCPToolRegistry::CallResult call_result = registry.call_tool("godot.scene.get_tree", arguments, context);
+	REQUIRE(call_result.status == MCPToolRegistry::CALL_OK);
+	REQUIRE_FALSE(bool(call_result.result.get("isError", false)));
+
+	const Dictionary content = call_result.result.get("structuredContent", Dictionary());
+	const Dictionary root = content.get("root", Dictionary());
+	CHECK(root.get("path", String()) == ".");
+	CHECK(root.get("name", String()) == "SceneRoot");
+	const Array children = root.get("children", Array());
+	REQUIRE(children.size() == 1);
+	CHECK(Dictionary(children[0]).get("path", String()) == "Child");
+
+	provider->unregister_tools();
+	memdelete(provider);
+	memdelete(scene_root);
+}
+
+} // namespace TestMCPSceneProvider

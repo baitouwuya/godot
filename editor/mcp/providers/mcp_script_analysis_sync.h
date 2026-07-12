@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  gdscript_language_server.h                                            */
+/*  mcp_script_analysis_sync.h                                            */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -10,7 +10,7 @@
 /*                                                                        */
 /* Permission is hereby granted, free of charge, to any person obtaining  */
 /* a copy of this software and associated documentation files (the        */
-/* "Software"), to deal in the Software without restriction, including    */
+/* "Software"), to deal in the Software without restriction, including   */
 /* without limitation the rights to use, copy, modify, merge, publish,    */
 /* distribute, sublicense, and/or sell copies of the Software, and to     */
 /* permit persons to whom the Software is furnished to do so, subject to  */
@@ -30,34 +30,12 @@
 
 #pragma once
 
-#include "core/templates/safe_refcount.h"
-#include "editor/plugins/editor_plugin.h"
+#include "mcp_gdscript_session_manager.h"
 
-class GDScriptLanguageServer : public EditorPlugin {
-	GDCLASS(GDScriptLanguageServer, EditorPlugin);
-
-	Thread thread;
-	SafeFlag thread_running;
-	// There is no notification when the editor is initialized. We need to poll till we attempted to start the server.
-	bool start_attempted = false;
-	bool started = false;
-
-	// Defaults located in editor_settings.cpp
-	bool use_thread = false;
-	String host;
-	int port = 0;
-	int poll_limit_usec = 0;
-
-	static void thread_main(void *p_userdata);
-
-private:
-	void _notification(int p_what);
-
+class MCPScriptAnalysisSync {
 public:
-	static int port_override;
-	GDScriptLanguageServer();
-	void start();
-	void stop();
+	static Error sync_snapshot(const Ref<MCPGDScriptSessionManager> &p_session_manager, const String &p_session_id, const Dictionary &p_snapshot, Array &r_diagnostics, String *r_error = nullptr);
+	static Error sync_authoritative_path(const Ref<MCPGDScriptSessionManager> &p_session_manager, const String &p_session_id, const String &p_path, const String &p_project_root, Dictionary &r_snapshot, Array &r_diagnostics, String *r_error = nullptr);
+	static Error sync_saved_snapshot(const Ref<MCPGDScriptSessionManager> &p_session_manager, const String &p_session_id, Dictionary &r_snapshot, String *r_error = nullptr);
+	static Dictionary make_failure(const Dictionary &p_snapshot, bool p_applied, bool p_changed, bool p_created, const String &p_message);
 };
-
-void register_lsp_types();

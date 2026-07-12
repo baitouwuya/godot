@@ -34,6 +34,7 @@
 
 #include "core/mcp/mcp_tool_registry.h"
 #include "core/object/callable_mp.h"
+#include "editor/editor_interface.h"
 #include "editor/editor_node.h"
 #include "editor/editor_undo_redo_manager.h"
 #include "editor/script/script_editor_plugin.h"
@@ -44,6 +45,39 @@ namespace {
 static Dictionary _empty_input_schema() {
 	Dictionary schema;
 	schema["type"] = "object";
+	schema["additionalProperties"] = false;
+	return schema;
+}
+
+static Dictionary _state_output_schema() {
+	Dictionary string_property;
+	string_property["type"] = "string";
+	Dictionary boolean_property;
+	boolean_property["type"] = "boolean";
+	Dictionary string_array_property;
+	string_array_property["type"] = "array";
+	string_array_property["items"] = string_property;
+
+	Dictionary properties;
+	properties["currentScene"] = string_property;
+	properties["unsavedScenes"] = string_array_property;
+	properties["openScripts"] = string_array_property;
+	properties["unsavedScripts"] = string_array_property;
+	properties["canUndo"] = boolean_property;
+	properties["canRedo"] = boolean_property;
+
+	PackedStringArray required;
+	required.push_back("currentScene");
+	required.push_back("unsavedScenes");
+	required.push_back("openScripts");
+	required.push_back("unsavedScripts");
+	required.push_back("canUndo");
+	required.push_back("canRedo");
+
+	Dictionary schema;
+	schema["type"] = "object";
+	schema["properties"] = properties;
+	schema["required"] = required;
 	schema["additionalProperties"] = false;
 	return schema;
 }
@@ -78,8 +112,11 @@ Error MCPEditorProvider::register_tools(MCPToolRegistry *p_registry, String *r_e
 	}
 
 	const Dictionary schema = _empty_input_schema();
+	Dictionary state_definition = MCPToolUtils::make_tool_definition(
+			"godot.editor.get_state", "Get the current scene, unsaved scenes, scripts, and undo state.", schema);
+	state_definition["outputSchema"] = _state_output_schema();
 	Error err = p_registry->register_tool(
-			MCPToolUtils::make_tool_definition("godot.editor.get_state", "Get the current scene, scripts, and undo state.", schema),
+			state_definition,
 			callable_mp(this, &MCPEditorProvider::get_state), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
 	if (err == OK) {
 		err = p_registry->register_tool(
@@ -134,10 +171,16 @@ Dictionary MCPEditorProvider::get_state(const Dictionary &p_arguments, const Dic
 		}
 		unsaved_scripts = script_editor->get_unsaved_scripts();
 	}
+	PackedStringArray unsaved_scenes;
+	EditorInterface *editor_interface = EditorInterface::get_singleton();
+	if (editor_interface && editor_node) {
+		unsaved_scenes = editor_interface->get_unsaved_scenes();
+	}
 
 	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
 	Dictionary state;
 	state["currentScene"] = current_scene;
+	state["unsavedScenes"] = unsaved_scenes;
 	state["openScripts"] = open_scripts;
 	state["unsavedScripts"] = unsaved_scripts;
 	state["canUndo"] = undo_redo && undo_redo->has_undo();

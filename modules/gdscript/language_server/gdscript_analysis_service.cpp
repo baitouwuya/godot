@@ -32,9 +32,34 @@
 
 #include "gdscript_workspace.h"
 
+#include "core/os/thread.h"
+#include "editor/file_system/editor_file_system.h"
+
 void GDScriptAnalysisService::configure(const String &p_project_root, const Ref<GDScriptWorkspace> &p_workspace) {
 	project_root = p_project_root.simplify_path();
 	workspace = p_workspace;
+}
+
+void GDScriptAnalysisService::poll_scene_cache() {
+	ERR_FAIL_COND_MSG(!Thread::is_main_thread(), "GDScript scene cache polling must run on the main thread.");
+	if (EditorFileSystem::get_singleton()) {
+		scene_cache.poll();
+	}
+}
+
+void GDScriptAnalysisService::clear_scene_cache() {
+	ERR_FAIL_COND_MSG(!Thread::is_main_thread(), "GDScript scene cache clearing must run on the main thread.");
+	scene_cache.clear();
+}
+
+void GDScriptAnalysisService::request_scene_load(const String &p_script_path) {
+	ERR_FAIL_COND_MSG(!Thread::is_main_thread(), "GDScript scene cache requests must run on the main thread.");
+	scene_cache.request_load(p_script_path);
+}
+
+void GDScriptAnalysisService::unload_scene(const String &p_script_path) {
+	ERR_FAIL_COND_MSG(!Thread::is_main_thread(), "GDScript scene cache unloading must run on the main thread.");
+	scene_cache.unload(p_script_path);
 }
 
 Ref<GDScriptAnalysisSession> GDScriptAnalysisService::create_session() {

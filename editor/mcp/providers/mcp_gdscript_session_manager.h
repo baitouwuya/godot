@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  gdscript_language_server.h                                            */
+/*  mcp_gdscript_session_manager.h                                        */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -10,7 +10,7 @@
 /*                                                                        */
 /* Permission is hereby granted, free of charge, to any person obtaining  */
 /* a copy of this software and associated documentation files (the        */
-/* "Software"), to deal in the Software without restriction, including    */
+/* "Software"), to deal in the Software without restriction, including   */
 /* without limitation the rights to use, copy, modify, merge, publish,    */
 /* distribute, sublicense, and/or sell copies of the Software, and to     */
 /* permit persons to whom the Software is furnished to do so, subject to  */
@@ -30,34 +30,33 @@
 
 #pragma once
 
-#include "core/templates/safe_refcount.h"
-#include "editor/plugins/editor_plugin.h"
+#include "core/object/ref_counted.h"
+#include "core/templates/hash_map.h"
 
-class GDScriptLanguageServer : public EditorPlugin {
-	GDCLASS(GDScriptLanguageServer, EditorPlugin);
+#include "modules/gdscript/language_server/gdscript_analysis_service.h"
 
-	Thread thread;
-	SafeFlag thread_running;
-	// There is no notification when the editor is initialized. We need to poll till we attempted to start the server.
-	bool start_attempted = false;
-	bool started = false;
+class MCPGDScriptSessionManager : public RefCounted {
+	GDSOFTCLASS(MCPGDScriptSessionManager, RefCounted);
 
-	// Defaults located in editor_settings.cpp
-	bool use_thread = false;
-	String host;
-	int port = 0;
-	int poll_limit_usec = 0;
-
-	static void thread_main(void *p_userdata);
-
-private:
-	void _notification(int p_what);
+	Ref<GDScriptAnalysisService> analysis_service;
+	Ref<GDScriptAnalysisSession> fallback_session;
+	HashMap<String, Ref<GDScriptAnalysisSession>> sessions;
 
 public:
-	static int port_override;
-	GDScriptLanguageServer();
-	void start();
-	void stop();
-};
+	MCPGDScriptSessionManager(const Ref<GDScriptAnalysisService> &p_service = Ref<GDScriptAnalysisService>(), const Ref<GDScriptAnalysisSession> &p_fallback_session = Ref<GDScriptAnalysisSession>());
+	~MCPGDScriptSessionManager();
 
-void register_lsp_types();
+	void set_analysis_service(const Ref<GDScriptAnalysisService> &p_service);
+	const Ref<GDScriptAnalysisService> &get_analysis_service() const { return analysis_service; }
+
+	void set_fallback_session(const Ref<GDScriptAnalysisSession> &p_session) { fallback_session = p_session; }
+	const Ref<GDScriptAnalysisSession> &get_fallback_session() const { return fallback_session; }
+
+	Ref<GDScriptAnalysisSession> get_or_create_session(const String &p_session_id);
+	Ref<GDScriptAnalysisSession> get_session(const String &p_session_id) const;
+	Error resolve_context(const Dictionary &p_context, String &r_session_id, Ref<GDScriptAnalysisSession> &r_session, String *r_error = nullptr);
+	Error sync_document(const String &p_session_id, const String &p_path, const String &p_text, int64_t p_client_version, Array &r_diagnostics, String *r_error = nullptr);
+	bool release_session(const String &p_session_id);
+	void clear();
+	int get_session_count() const { return sessions.size(); }
+};

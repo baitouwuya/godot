@@ -71,7 +71,8 @@ String exchange(MCPHTTPServer &p_server, const String &p_request) {
 	while (OS::get_singleton()->get_ticks_usec() - response_started < MAX_WAIT_USEC) {
 		p_server.poll();
 		client->poll();
-		const int available = client->get_available_bytes();
+		const StreamPeerTCP::Status status = client->get_status();
+		const int available = status == StreamPeerTCP::STATUS_CONNECTED ? client->get_available_bytes() : 0;
 		if (available > 0) {
 			Vector<uint8_t> chunk;
 			chunk.resize(available);
@@ -79,7 +80,7 @@ String exchange(MCPHTTPServer &p_server, const String &p_request) {
 			REQUIRE(client->get_partial_data(chunk.ptrw(), available, received) == OK);
 			response += String::utf8((const char *)chunk.ptr(), received);
 		}
-		if (client->get_status() != StreamPeerTCP::STATUS_CONNECTED && available <= 0) {
+		if (status != StreamPeerTCP::STATUS_CONNECTED && available <= 0) {
 			break;
 		}
 		OS::get_singleton()->delay_usec(1000);

@@ -41,6 +41,7 @@
 #include "../language_server/gdscript_workspace.h"
 #include "../language_server/godot_lsp.h"
 #include "gdscript_test_runner.h"
+#include "test_gdscript_language_transport.h"
 
 #include "core/io/dir_access.h"
 #include "editor/file_system/editor_file_system.h"
@@ -59,7 +60,7 @@ public:
 		peer->analysis_session_id = peer->analysis_session->get_session_id();
 		const int client_id = proto->next_client_id++;
 		proto->clients.insert(client_id, peer);
-		proto->latest_client_id = client_id;
+		proto->active_client_id = client_id;
 		return client_id;
 	}
 
@@ -69,12 +70,40 @@ public:
 		return peer ? (*peer)->analysis_session : Ref<GDScriptAnalysisSession>();
 	}
 
-	static int get_latest_client_id() {
-		return GDScriptLanguageProtocol::get_singleton()->latest_client_id;
+	static int get_active_client_id() {
+		return GDScriptLanguageProtocol::get_singleton()->active_client_id;
 	}
 
 	static bool remove_client(int p_client_id) {
 		return GDScriptLanguageProtocol::get_singleton()->_remove_client(p_client_id);
+	}
+
+	static void open_transport() {
+		TestGDScriptLanguageTransport::open(GDScriptLanguageProtocol::get_singleton()->transport);
+	}
+
+	static bool queue_transport_event(const GDScriptLanguageTransport::Event &p_event) {
+		return TestGDScriptLanguageTransport::push_event(GDScriptLanguageProtocol::get_singleton()->transport, p_event);
+	}
+
+	static int get_pending_transport_event_count() {
+		return GDScriptLanguageProtocol::get_singleton()->transport.get_pending_event_count();
+	}
+
+	static int get_pending_transport_response_count() {
+		return GDScriptLanguageProtocol::get_singleton()->transport.get_pending_response_count();
+	}
+
+	static bool pop_transport_response(int &r_client_id, String &r_message) {
+		return TestGDScriptLanguageTransport::pop_response(GDScriptLanguageProtocol::get_singleton()->transport, r_client_id, r_message);
+	}
+
+	static int get_client_count() {
+		return GDScriptLanguageProtocol::get_singleton()->clients.size();
+	}
+
+	static bool is_transport_accepting() {
+		return GDScriptLanguageProtocol::get_singleton()->transport.is_accepting();
 	}
 };
 
@@ -132,6 +161,19 @@ GDScriptLanguageProtocol *initialize(const String &p_root) {
 
 	return proto;
 }
+
+#ifdef THREADS_ENABLED
+struct NetworkPollContext {
+	GDScriptLanguageProtocol *protocol = nullptr;
+	SafeFlag finished;
+};
+
+static void poll_network_from_worker(void *p_userdata) {
+	NetworkPollContext *context = static_cast<NetworkPollContext *>(p_userdata);
+	context->protocol->poll_network(1000);
+	context->finished.set();
+}
+#endif // THREADS_ENABLED
 
 LSP::Position pos(const int p_line, const int p_character) {
 	LSP::Position p;
@@ -349,6 +391,89 @@ void assert_no_errors_in(const String &p_path) {
 //   * LSP: both 0-based
 //   * Godot: both 1-based
 TEST_SUITE("[Modules][GDScript][LSP][Editor]") {
+	TEST_CASE("Network polling only transfers messages; semantic processing stays on the main thread") {
+		GDScriptLanguageProtocol *proto = initialize(root);
+		REQUIRE(proto);
+		TestGDScriptLanguageProtocolInitializer::open_transport();
+		const int client_id = TestGDScriptLanguageProtocolInitializer::get_active_client_id();
+		const String request = R"({"jsonrpc":"2.0","id":1,"method":"test/missing","params":{}})";
+		REQUIRE(TestGDScriptLanguageProtocolInitializer::queue_transport_event(GDScriptLanguageTransport::Event(GDScriptLanguageTransport::EVENT_MESSAGE, client_id, request)));
+
+#ifdef THREADS_ENABLED
+		NetworkPollContext context;
+		context.protocol = proto;
+		Thread worker;
+		worker.start(poll_network_from_worker, &context);
+		worker.wait_to_finish();
+		CHECK(context.finished.is_set());
+#else
+		proto->poll_network(1000);
+#endif // THREADS_ENABLED
+
+		CHECK_EQ(TestGDScriptLanguageProtocolInitializer::get_pending_transport_event_count(), 1);
+		CHECK_EQ(TestGDScriptLanguageProtocolInitializer::get_pending_transport_response_count(), 0);
+		proto->poll_main_thread(100000);
+		CHECK_EQ(TestGDScriptLanguageProtocolInitializer::get_active_client_id(), LSP_NO_CLIENT);
+		CHECK_EQ(TestGDScriptLanguageProtocolInitializer::get_pending_transport_event_count(), 0);
+		CHECK_EQ(TestGDScriptLanguageProtocolInitializer::get_pending_transport_response_count(), 1);
+
+		int response_client_id = LSP_NO_CLIENT;
+		String response;
+		REQUIRE(TestGDScriptLanguageProtocolInitializer::pop_transport_response(response_client_id, response));
+		CHECK_EQ(response_client_id, client_id);
+		CHECK(response.contains("Content-Length:"));
+		CHECK(response.contains(itos(JSONRPC::METHOD_NOT_FOUND)));
+
+		proto->stop();
+		memdelete(proto);
+		CHECK(GDScriptLanguageProtocol::get_singleton() == nullptr);
+		finish_language();
+	}
+
+	TEST_CASE("Transport connection and shutdown events own analysis session lifecycle") {
+		GDScriptLanguageProtocol *proto = initialize(root);
+		REQUIRE(proto);
+		TestGDScriptLanguageProtocolInitializer::open_transport();
+		Ref<GDScriptAnalysisService> service = proto->get_analysis_service();
+		const int original_client_id = TestGDScriptLanguageProtocolInitializer::get_active_client_id();
+		Ref<GDScriptAnalysisSession> original_session = TestGDScriptLanguageProtocolInitializer::get_session(original_client_id);
+		REQUIRE(original_session.is_valid());
+		const uint64_t original_session_id = original_session->get_session_id();
+
+		const int connected_client_id = 42;
+		REQUIRE(TestGDScriptLanguageProtocolInitializer::queue_transport_event(GDScriptLanguageTransport::Event(GDScriptLanguageTransport::EVENT_CONNECTED, connected_client_id)));
+		proto->poll_main_thread(100000);
+		Ref<GDScriptAnalysisSession> connected_session = TestGDScriptLanguageProtocolInitializer::get_session(connected_client_id);
+		REQUIRE(connected_session.is_valid());
+		const uint64_t connected_session_id = connected_session->get_session_id();
+		CHECK(service->get_session(connected_session_id).is_valid());
+
+		REQUIRE(TestGDScriptLanguageProtocolInitializer::queue_transport_event(GDScriptLanguageTransport::Event(GDScriptLanguageTransport::EVENT_DISCONNECTED, connected_client_id)));
+		proto->poll_main_thread(100000);
+		CHECK(service->get_session(connected_session_id).is_null());
+		CHECK(TestGDScriptLanguageProtocolInitializer::get_session(connected_client_id).is_null());
+
+		REQUIRE(TestGDScriptLanguageProtocolInitializer::queue_transport_event(GDScriptLanguageTransport::Event(GDScriptLanguageTransport::EVENT_MESSAGE, original_client_id, "pending")));
+		proto->notify_client("test/pending", Dictionary(), original_client_id);
+		CHECK_GT(TestGDScriptLanguageProtocolInitializer::get_pending_transport_event_count(), 0);
+		CHECK_GT(TestGDScriptLanguageProtocolInitializer::get_pending_transport_response_count(), 0);
+
+		proto->begin_shutdown();
+		proto->stop();
+		CHECK_FALSE(TestGDScriptLanguageProtocolInitializer::is_transport_accepting());
+		CHECK_EQ(TestGDScriptLanguageProtocolInitializer::get_pending_transport_event_count(), 0);
+		CHECK_EQ(TestGDScriptLanguageProtocolInitializer::get_pending_transport_response_count(), 0);
+		CHECK_EQ(TestGDScriptLanguageProtocolInitializer::get_client_count(), 0);
+		CHECK(service->get_session(original_session_id).is_null());
+
+		original_session.unref();
+		connected_session.unref();
+		service.unref();
+		memdelete(proto);
+		CHECK(GDScriptLanguageProtocol::get_singleton() == nullptr);
+		finish_language();
+	}
+
 	TEST_CASE("[analysis_session][utf16_positions]") {
 		const String text = "a" + String::chr(0x1f600) + "\tb\r\nlast";
 
@@ -391,7 +516,7 @@ TEST_SUITE("[Modules][GDScript][LSP][Editor]") {
 	TEST_CASE("[analysis_session][tcp_client_isolation]") {
 		GDScriptLanguageProtocol *proto = initialize(root);
 		REQUIRE(proto);
-		const int first_client_id = TestGDScriptLanguageProtocolInitializer::get_latest_client_id();
+		const int first_client_id = TestGDScriptLanguageProtocolInitializer::get_active_client_id();
 		const int second_client_id = TestGDScriptLanguageProtocolInitializer::setup_client();
 		Ref<GDScriptAnalysisSession> first = TestGDScriptLanguageProtocolInitializer::get_session(first_client_id);
 		Ref<GDScriptAnalysisSession> second = TestGDScriptLanguageProtocolInitializer::get_session(second_client_id);

@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  gdscript_language_server.h                                            */
+/*  mcp_node_provider.h                                                   */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -10,7 +10,7 @@
 /*                                                                        */
 /* Permission is hereby granted, free of charge, to any person obtaining  */
 /* a copy of this software and associated documentation files (the        */
-/* "Software"), to deal in the Software without restriction, including    */
+/* "Software"), to deal in the Software without restriction, including   */
 /* without limitation the rights to use, copy, modify, merge, publish,    */
 /* distribute, sublicense, and/or sell copies of the Software, and to     */
 /* permit persons to whom the Software is furnished to do so, subject to  */
@@ -30,34 +30,30 @@
 
 #pragma once
 
-#include "core/templates/safe_refcount.h"
-#include "editor/plugins/editor_plugin.h"
+#include "core/object/object.h"
+#include "core/variant/dictionary.h"
 
-class GDScriptLanguageServer : public EditorPlugin {
-	GDCLASS(GDScriptLanguageServer, EditorPlugin);
+class MCPToolRegistry;
+class MCPUndoRedoAction;
+class Node;
 
-	Thread thread;
-	SafeFlag thread_running;
-	// There is no notification when the editor is initialized. We need to poll till we attempted to start the server.
-	bool start_attempted = false;
-	bool started = false;
+class MCPNodeProvider : public Object {
+public:
+	MCPNodeProvider(Node *p_scene_root = nullptr, MCPUndoRedoAction *p_undo_redo = nullptr);
+	~MCPNodeProvider();
 
-	// Defaults located in editor_settings.cpp
-	bool use_thread = false;
-	String host;
-	int port = 0;
-	int poll_limit_usec = 0;
+	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr);
+	void unregister_tools();
 
-	static void thread_main(void *p_userdata);
+	Dictionary get_properties(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary create(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary set_property(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary attach_script(const Dictionary &p_arguments, const Dictionary &p_context);
 
 private:
-	void _notification(int p_what);
+	Node *_get_scene_root() const;
 
-public:
-	static int port_override;
-	GDScriptLanguageServer();
-	void start();
-	void stop();
+	MCPToolRegistry *tool_registry = nullptr;
+	Node *scene_root_override = nullptr;
+	MCPUndoRedoAction *undo_redo_override = nullptr;
 };
-
-void register_lsp_types();

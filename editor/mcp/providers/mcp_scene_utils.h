@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  gdscript_language_server.h                                            */
+/*  mcp_scene_utils.h                                                     */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -10,7 +10,7 @@
 /*                                                                        */
 /* Permission is hereby granted, free of charge, to any person obtaining  */
 /* a copy of this software and associated documentation files (the        */
-/* "Software"), to deal in the Software without restriction, including    */
+/* "Software"), to deal in the Software without restriction, including   */
 /* without limitation the rights to use, copy, modify, merge, publish,    */
 /* distribute, sublicense, and/or sell copies of the Software, and to     */
 /* permit persons to whom the Software is furnished to do so, subject to  */
@@ -30,34 +30,21 @@
 
 #pragma once
 
-#include "core/templates/safe_refcount.h"
-#include "editor/plugins/editor_plugin.h"
+#include "core/error/error_list.h"
+#include "core/variant/dictionary.h"
 
-class GDScriptLanguageServer : public EditorPlugin {
-	GDCLASS(GDScriptLanguageServer, EditorPlugin);
+class EditorUndoRedoManager;
+class Node;
 
-	Thread thread;
-	SafeFlag thread_running;
-	// There is no notification when the editor is initialized. We need to poll till we attempted to start the server.
-	bool start_attempted = false;
-	bool started = false;
+namespace MCPSceneUtils {
 
-	// Defaults located in editor_settings.cpp
-	bool use_thread = false;
-	String host;
-	int port = 0;
-	int poll_limit_usec = 0;
+Node *get_edited_scene_root();
+Node *find_node(Node *p_scene_root, const String &p_path);
+String get_relative_path(Node *p_scene_root, Node *p_node);
+bool is_node_in_scene(Node *p_scene_root, Node *p_node);
+bool is_node_editable(Node *p_scene_root, Node *p_node);
+Dictionary make_node_summary(Node *p_scene_root, Node *p_node, bool p_include_internal_children = false);
+Error make_tree(Node *p_scene_root, Node *p_tree_root, int p_max_depth, bool p_include_internal_children, Dictionary &r_tree, String *r_error = nullptr);
+Error begin_undo_action(EditorUndoRedoManager *p_undo_redo, const String &p_name, String *r_error = nullptr);
 
-	static void thread_main(void *p_userdata);
-
-private:
-	void _notification(int p_what);
-
-public:
-	static int port_override;
-	GDScriptLanguageServer();
-	void start();
-	void stop();
-};
-
-void register_lsp_types();
+} // namespace MCPSceneUtils

@@ -1,16 +1,15 @@
 /**************************************************************************/
-/*  gdscript_language_server.h                                            */
+/*  mcp_gdscript_tool_utils.h                                             */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
-/*                        https://godotengine.org                         */
 /**************************************************************************/
 /* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
 /* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
 /*                                                                        */
 /* Permission is hereby granted, free of charge, to any person obtaining  */
 /* a copy of this software and associated documentation files (the        */
-/* "Software"), to deal in the Software without restriction, including    */
+/* "Software"), to deal in the Software without restriction, including   */
 /* without limitation the rights to use, copy, modify, merge, publish,    */
 /* distribute, sublicense, and/or sell copies of the Software, and to     */
 /* permit persons to whom the Software is furnished to do so, subject to  */
@@ -30,34 +29,20 @@
 
 #pragma once
 
-#include "core/templates/safe_refcount.h"
-#include "editor/plugins/editor_plugin.h"
+#include "core/object/script_language.h"
+#include "core/variant/dictionary.h"
 
-class GDScriptLanguageServer : public EditorPlugin {
-	GDCLASS(GDScriptLanguageServer, EditorPlugin);
+namespace MCPGDScriptToolUtils {
 
-	Thread thread;
-	SafeFlag thread_running;
-	// There is no notification when the editor is initialized. We need to poll till we attempted to start the server.
-	bool start_attempted = false;
-	bool started = false;
+Dictionary diagnostics_schema();
+Dictionary position_schema();
+Dictionary references_schema();
+Dictionary rename_schema();
 
-	// Defaults located in editor_settings.cpp
-	bool use_thread = false;
-	String host;
-	int port = 0;
-	int poll_limit_usec = 0;
+bool validate_arguments(const Dictionary &p_arguments, const PackedStringArray &p_allowed, String &r_error);
+bool get_string_argument(const Dictionary &p_arguments, const String &p_name, String &r_value, String &r_error);
+bool get_position_argument(const Dictionary &p_arguments, const String &p_name, int &r_value, String &r_error);
 
-	static void thread_main(void *p_userdata);
+int completion_kind(ScriptLanguage::CodeCompletionKind p_kind);
 
-private:
-	void _notification(int p_what);
-
-public:
-	static int port_override;
-	GDScriptLanguageServer();
-	void start();
-	void stop();
-};
-
-void register_lsp_types();
+} // namespace MCPGDScriptToolUtils

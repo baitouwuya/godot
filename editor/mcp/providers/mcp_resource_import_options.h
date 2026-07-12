@@ -1,16 +1,15 @@
 /**************************************************************************/
-/*  gdscript_language_server.h                                            */
+/*  mcp_resource_import_options.h                                         */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
-/*                        https://godotengine.org                         */
 /**************************************************************************/
 /* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
 /* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
 /*                                                                        */
 /* Permission is hereby granted, free of charge, to any person obtaining  */
 /* a copy of this software and associated documentation files (the        */
-/* "Software"), to deal in the Software without restriction, including    */
+/* "Software"), to deal in the Software without restriction, including   */
 /* without limitation the rights to use, copy, modify, merge, publish,    */
 /* distribute, sublicense, and/or sell copies of the Software, and to     */
 /* permit persons to whom the Software is furnished to do so, subject to  */
@@ -30,34 +29,24 @@
 
 #pragma once
 
-#include "core/templates/safe_refcount.h"
-#include "editor/plugins/editor_plugin.h"
+#include "core/io/resource_importer.h"
+#include "core/templates/hash_set.h"
+#include "core/variant/dictionary.h"
 
-class GDScriptLanguageServer : public EditorPlugin {
-	GDCLASS(GDScriptLanguageServer, EditorPlugin);
-
-	Thread thread;
-	SafeFlag thread_running;
-	// There is no notification when the editor is initialized. We need to poll till we attempted to start the server.
-	bool start_attempted = false;
-	bool started = false;
-
-	// Defaults located in editor_settings.cpp
-	bool use_thread = false;
-	String host;
-	int port = 0;
-	int poll_limit_usec = 0;
-
-	static void thread_main(void *p_userdata);
-
-private:
-	void _notification(int p_what);
-
-public:
-	static int port_override;
-	GDScriptLanguageServer();
-	void start();
-	void stop();
+struct MCPResourceImportResolution {
+	Ref<ResourceImporter> importer;
+	List<ResourceImporter::ImportOption> option_definitions;
+	HashMap<StringName, Variant> values;
+	HashSet<StringName> overridden_options;
+	int preset = 0;
+	bool importer_explicit = false;
+	bool preset_explicit = false;
+	bool project_defaults_applied = false;
 };
 
-void register_lsp_types();
+namespace MCPResourceImportOptions {
+
+bool resolve(const Dictionary &p_arguments, const String &p_source_path, MCPResourceImportResolution &r_resolution, Dictionary &r_error);
+Dictionary make_result(const String &p_source_path, const MCPResourceImportResolution &p_resolution, Dictionary &r_error);
+
+} // namespace MCPResourceImportOptions

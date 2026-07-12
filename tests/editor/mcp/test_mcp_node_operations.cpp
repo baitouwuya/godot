@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  gdscript_language_server.h                                            */
+/*  test_mcp_node_operations.cpp                                          */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -10,7 +10,7 @@
 /*                                                                        */
 /* Permission is hereby granted, free of charge, to any person obtaining  */
 /* a copy of this software and associated documentation files (the        */
-/* "Software"), to deal in the Software without restriction, including    */
+/* "Software"), to deal in the Software without restriction, including   */
 /* without limitation the rights to use, copy, modify, merge, publish,    */
 /* distribute, sublicense, and/or sell copies of the Software, and to     */
 /* permit persons to whom the Software is furnished to do so, subject to  */
@@ -28,36 +28,46 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#pragma once
+#include "editor/mcp/providers/mcp_node_operations.h"
+#include "scene/main/node.h"
+#include "tests/test_macros.h"
 
-#include "core/templates/safe_refcount.h"
-#include "editor/plugins/editor_plugin.h"
+TEST_FORCE_LINK(test_mcp_node_operations);
 
-class GDScriptLanguageServer : public EditorPlugin {
-	GDCLASS(GDScriptLanguageServer, EditorPlugin);
+namespace TestMCPNodeOperations {
 
-	Thread thread;
-	SafeFlag thread_running;
-	// There is no notification when the editor is initialized. We need to poll till we attempted to start the server.
-	bool start_attempted = false;
-	bool started = false;
+TEST_CASE("[MCP][Provider] Node operations do not mutate without an editor undo manager") {
+	Node *root = memnew(Node);
+	root->set_name("SceneRoot");
 
-	// Defaults located in editor_settings.cpp
-	bool use_thread = false;
-	String host;
-	int port = 0;
-	int poll_limit_usec = 0;
+	Node *created = nullptr;
+	String error;
+	CHECK(MCPNodeOperations::create_node(root, root, "Node", "Created", nullptr, created, &error) == ERR_UNCONFIGURED);
+	CHECK(created == nullptr);
+	CHECK(root->get_child_count(false) == 0);
 
-	static void thread_main(void *p_userdata);
+	PropertyInfo property_info;
+	REQUIRE(MCPNodeOperations::find_property_info(root, "process_mode", property_info));
+	const Node::ProcessMode old_process_mode = root->get_process_mode();
+	CHECK(MCPNodeOperations::set_property(root, root, "process_mode", int(Node::PROCESS_MODE_ALWAYS), nullptr, &error) == ERR_UNCONFIGURED);
+	CHECK(root->get_process_mode() == old_process_mode);
 
-private:
-	void _notification(int p_what);
+	Node *foreign_child = memnew(Node);
+	root->add_child(foreign_child);
+	CHECK(MCPNodeOperations::set_property(root, foreign_child, "process_mode", int(Node::PROCESS_MODE_ALWAYS), nullptr, &error) == ERR_UNAUTHORIZED);
+	CHECK(foreign_child->get_process_mode() == Node::PROCESS_MODE_INHERIT);
 
-public:
-	static int port_override;
-	GDScriptLanguageServer();
-	void start();
-	void stop();
-};
+	memdelete(root);
+}
 
-void register_lsp_types();
+TEST_CASE("[MCP][Provider] Node creation rejects non-Node classes before allocating") {
+	Node *root = memnew(Node);
+	Node *created = nullptr;
+	String error;
+	CHECK(MCPNodeOperations::create_node(root, root, "Resource", "Invalid", nullptr, created, &error) == ERR_INVALID_DATA);
+	CHECK(created == nullptr);
+	CHECK(root->get_child_count(false) == 0);
+	memdelete(root);
+}
+
+} // namespace TestMCPNodeOperations

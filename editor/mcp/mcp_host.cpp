@@ -85,6 +85,9 @@ void MCPHost::_remove_session(const String &p_session_id) {
 	}
 	memdelete(*session);
 	sessions.erase(p_session_id);
+	if (config.session_observer) {
+		config.session_observer->on_mcp_session_removed(p_session_id);
+	}
 }
 
 void MCPHost::_expire_sessions(uint64_t p_now_usec) {

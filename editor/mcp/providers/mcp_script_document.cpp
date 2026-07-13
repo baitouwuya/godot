@@ -215,48 +215,6 @@ static const GDScriptParser::SignalNode *_find_signal_node(const GDScriptParser:
 	return nullptr;
 }
 
-static Dictionary _make_parameter(const ExtendGDScriptParser &p_parser, const GDScriptParser::ParameterNode *p_parameter, bool p_rest) {
-	Dictionary parameter;
-	parameter["name"] = p_parameter->identifier->name;
-	parameter["line"] = p_parameter->start_line;
-	parameter["range"] = p_parser.to_lsp_range(p_parameter->start_line, p_parameter->start_column, p_parameter->end_line, p_parameter->end_column).to_json();
-	const GDScriptParser::DataType type = p_parameter->get_datatype();
-	if (type.is_hard_type()) {
-		parameter["type"] = type.to_string();
-	}
-	if (p_rest) {
-		parameter["variadic"] = true;
-	}
-	return parameter;
-}
-
-static Array _get_parameters(const ExtendGDScriptParser &p_parser, const LSP::DocumentSymbol &p_symbol) {
-	Array parameters;
-	const GDScriptParser::ClassNode *tree = p_parser.get_tree();
-	if (!tree) {
-		return parameters;
-	}
-	if (p_symbol.kind == LSP::SymbolKind::Method || p_symbol.kind == LSP::SymbolKind::Function) {
-		const GDScriptParser::FunctionNode *function = _find_function_node(tree, p_symbol.range.start.line);
-		if (function) {
-			for (const GDScriptParser::ParameterNode *parameter : function->parameters) {
-				parameters.push_back(_make_parameter(p_parser, parameter, false));
-			}
-			if (function->rest_parameter) {
-				parameters.push_back(_make_parameter(p_parser, function->rest_parameter, true));
-			}
-		}
-	} else if (p_symbol.kind == LSP::SymbolKind::Event) {
-		const GDScriptParser::SignalNode *signal = _find_signal_node(tree, p_symbol.range.start.line);
-		if (signal) {
-			for (const GDScriptParser::ParameterNode *parameter : signal->parameters) {
-				parameters.push_back(_make_parameter(p_parser, parameter, false));
-			}
-		}
-	}
-	return parameters;
-}
-
 static String _declaration_text(const ExtendGDScriptParser &p_parser, const LSP::DocumentSymbol &p_symbol, bool p_parameter) {
 	const Vector<String> &source_lines = p_parser.get_lines();
 	const int line = p_symbol.selectionRange.start.line;
@@ -291,34 +249,59 @@ static String _declaration_text(const ExtendGDScriptParser &p_parser, const LSP:
 static Dictionary _render_document_member(const ExtendGDScriptParser &p_parser, const LSP::DocumentSymbol &p_symbol,
 		const String &p_kind, bool p_include_comments, bool p_parameter, const String &p_owner) {
 	Dictionary member;
-	member["kind"] = p_kind;
-	member["name"] = p_symbol.name;
-	member["declaration"] = _declaration_text(p_parser, p_symbol, p_parameter);
+	member["text"] = _declaration_text(p_parser, p_symbol, p_parameter);
 	member["line"] = p_symbol.selectionRange.start.line + 1;
-	member["range"] = p_symbol.range.to_json();
 	if (p_include_comments && !p_symbol.documentation.is_empty()) {
-		member["documentation"] = p_symbol.documentation;
+		member["doc"] = p_symbol.documentation;
 	}
 	if (!p_owner.is_empty()) {
 		member["owner"] = p_owner;
 	}
-	const Array parameters = _get_parameters(p_parser, p_symbol);
-	if (!parameters.is_empty()) {
-		member["parameters"] = parameters;
-	}
 	return member;
 }
 
+static StringName _group_name(const String &p_kind) {
+	if (p_kind == "class") {
+		return "classes";
+	}
+	if (p_kind == "enum") {
+		return "enums";
+	}
+	if (p_kind == "enumValue") {
+		return "enumValues";
+	}
+	if (p_kind == "constant") {
+		return "constants";
+	}
+	if (p_kind == "property") {
+		return "properties";
+	}
+	if (p_kind == "signal") {
+		return "signals";
+	}
+	if (p_kind == "method") {
+		return "methods";
+	}
+	return "parameters";
+}
+
+static void _append_grouped(Dictionary &r_groups, const String &p_kind, const Dictionary &p_member) {
+	const StringName group_name = _group_name(p_kind);
+	Array group = r_groups.get(group_name, Array());
+	group.push_back(p_member);
+	r_groups[group_name] = group;
+}
+
 static void _render_class_members(const ExtendGDScriptParser &p_parser, const LSP::DocumentSymbol &p_class,
-		bool p_include_comments, const String &p_owner, Array &r_members) {
+		bool p_include_comments, const String &p_owner, Dictionary &r_groups) {
 	for (const LSP::DocumentSymbol &symbol : p_class.children) {
 		const String kind = _symbol_kind(symbol);
 		if (kind.is_empty()) {
 			continue;
 		}
-		r_members.push_back(_render_document_member(p_parser, symbol, kind, p_include_comments, false, p_owner));
+		_append_grouped(r_groups, kind, _render_document_member(p_parser, symbol, kind, p_include_comments, false, p_owner));
 		if (symbol.kind == LSP::SymbolKind::Class) {
-			_render_class_members(p_parser, symbol, p_include_comments, symbol.name, r_members);
+			_render_class_members(p_parser, symbol, p_include_comments, symbol.name, r_groups);
 		}
 	}
 }
@@ -383,7 +366,7 @@ Error MCPScriptDocument::render(const ExtendGDScriptParser &p_parser, const Stri
 		}
 	}
 
-	Array members;
+	Dictionary groups;
 	if (p_view == "full") {
 		int start_line = 0;
 		int end_line = p_parser.get_lines().size() - 1;
@@ -395,19 +378,20 @@ Error MCPScriptDocument::render(const ExtendGDScriptParser &p_parser, const Stri
 		r_document["lines"] = lines;
 		r_document["text"] = _join_lines(lines);
 	} else if (selected.symbol) {
-		members.push_back(_render_document_member(p_parser, *selected.symbol, selected.kind, p_include_comments, selected.parameter, p_member.get("owner", String())));
+		_append_grouped(groups, selected.kind, _render_document_member(p_parser, *selected.symbol, selected.kind, p_include_comments, selected.parameter, p_member.get("owner", String())));
 	} else {
 		if (p_include_comments && !root.documentation.is_empty()) {
 			r_document["documentation"] = root.documentation;
 		}
-		_render_class_members(p_parser, root, p_include_comments, String(), members);
+		_render_class_members(p_parser, root, p_include_comments, String(), groups);
 	}
 
 	r_document["view"] = p_view;
 	r_document["includeComments"] = p_include_comments;
 	if (p_view == "documentation") {
-		r_document["memberCount"] = members.size();
-		r_document["members"] = members;
+		for (const KeyValue<Variant, Variant> &group : groups) {
+			r_document[group.key] = group.value;
+		}
 	}
 	return OK;
 }

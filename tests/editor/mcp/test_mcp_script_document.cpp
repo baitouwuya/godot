@@ -80,39 +80,40 @@ TEST_CASE("[MCP][Provider] Script documentation uses LSP symbols without impleme
 	CHECK(document.get("view", String()) == "documentation");
 	CHECK_FALSE(document.has("lines"));
 	CHECK_FALSE(document.has("lineBase"));
+	CHECK_FALSE(document.has("memberCount"));
 	CHECK(String(document.get("documentation", String())).contains("Actor documentation"));
-	const Array members = document.get("members", Array());
-	REQUIRE(members.size() == 3);
-	const Dictionary speed = members[0];
-	CHECK(speed.get("kind", String()) == "property");
-	CHECK(String(speed.get("documentation", String())).contains("Configured movement speed"));
-	CHECK(speed.get("declaration", String()) == "@export_range(0.0, 20.0) var speed: float = 4.0");
+	CHECK_FALSE(document.has("members"));
+	CHECK_FALSE(document.has("classes"));
+	CHECK_FALSE(document.has("enums"));
+	CHECK_FALSE(document.has("enumValues"));
+	CHECK_FALSE(document.has("constants"));
+	CHECK_FALSE(document.has("parameters"));
+	const Array properties = document.get("properties", Array());
+	REQUIRE(properties.size() == 1);
+	const Dictionary speed = properties[0];
+	CHECK(String(speed.get("doc", String())).contains("Configured movement speed"));
+	CHECK(speed.get("text", String()) == "@export_range(0.0, 20.0) var speed: float = 4.0");
 	CHECK(int(speed.get("line", 0)) == 5);
-	CHECK(Dictionary(speed.get("range", Dictionary())).has("start"));
-	const Dictionary moved = members[1];
-	CHECK(moved.get("kind", String()) == "signal");
-	CHECK(moved.get("declaration", String()) == "signal moved(distance: float)");
-	const Array signal_parameters = moved.get("parameters", Array());
-	REQUIRE(signal_parameters.size() == 1);
-	CHECK(String(Dictionary(signal_parameters[0]).get("name", String())) == "distance");
-	CHECK(Dictionary(signal_parameters[0]).get("type", String()) == "float");
-	const Dictionary move = members[2];
-	CHECK(move.get("kind", String()) == "method");
-	CHECK(String(move.get("documentation", String())).contains("Moves by the requested amount"));
-	CHECK(move.get("declaration", String()) == "func move(amount: float) -> void:");
+	CHECK_FALSE(speed.has("range"));
+	const Array signals = document.get("signals", Array());
+	REQUIRE(signals.size() == 1);
+	CHECK(Dictionary(signals[0]).get("text", String()) == "signal moved(distance: float)");
+	CHECK_FALSE(Dictionary(signals[0]).has("parameters"));
+	const Array methods = document.get("methods", Array());
+	REQUIRE(methods.size() == 1);
+	const Dictionary move = methods[0];
+	CHECK(String(move.get("doc", String())).contains("Moves by the requested amount"));
+	CHECK(move.get("text", String()) == "func move(amount: float) -> void:");
 	CHECK(int(move.get("line", 0)) == 11);
-	const Array method_parameters = move.get("parameters", Array());
-	REQUIRE(method_parameters.size() == 1);
-	CHECK(String(Dictionary(method_parameters[0]).get("name", String())) == "amount");
-	CHECK(int(Dictionary(method_parameters[0]).get("line", 0)) == 11);
+	CHECK_FALSE(move.has("parameters"));
 
 	Dictionary without_comments;
 	REQUIRE(MCPScriptDocument::render(parser, "documentation", false, Dictionary(), without_comments, &error) == OK);
 	CHECK_FALSE(without_comments.has("documentation"));
-	const Array uncommented_members = without_comments.get("members", Array());
-	REQUIRE(uncommented_members.size() == 3);
-	CHECK_FALSE(Dictionary(uncommented_members[0]).has("documentation"));
-	CHECK(String(Dictionary(uncommented_members[2]).get("declaration", String())).contains("func move"));
+	const Array uncommented_properties = without_comments.get("properties", Array());
+	REQUIRE(uncommented_properties.size() == 1);
+	CHECK_FALSE(Dictionary(uncommented_properties[0]).has("doc"));
+	CHECK(String(Dictionary(Array(without_comments.get("methods", Array()))[0]).get("text", String())).contains("func move"));
 
 	Dictionary full;
 	REQUIRE(MCPScriptDocument::render(parser, "full", true, Dictionary(), full, &error) == OK);
@@ -121,7 +122,11 @@ TEST_CASE("[MCP][Provider] Script documentation uses LSP symbols without impleme
 	REQUIRE_FALSE(full_lines.is_empty());
 	CHECK(int(Dictionary(full_lines[0]).get("line", 0)) == 1);
 	CHECK_FALSE(full.has("lineBase"));
+	CHECK_FALSE(full.has("memberCount"));
 	CHECK_FALSE(full.has("members"));
+	CHECK_FALSE(full.has("properties"));
+	CHECK_FALSE(full.has("signals"));
+	CHECK_FALSE(full.has("methods"));
 	CHECK(_line_text(full_lines).contains("implementation_sentinel"));
 }
 
@@ -144,11 +149,10 @@ TEST_CASE("[MCP][Provider] Script documentation can select individual members an
 	Dictionary result;
 	String error;
 	REQUIRE(MCPScriptDocument::render(parser, "documentation", true, query, result, &error) == OK);
-	CHECK(int(result.get("memberCount", 0)) == 1);
 	CHECK_FALSE(result.has("lines"));
-	const Array selected_members = result.get("members", Array());
+	const Array selected_members = result.get("properties", Array());
 	REQUIRE(selected_members.size() == 1);
-	CHECK(Dictionary(selected_members[0]).get("name", String()) == "speed");
+	CHECK(Dictionary(selected_members[0]).get("text", String()) == "@export var speed: float = 1.0");
 
 	query["kind"] = "method";
 	query["name"] = "move";
@@ -158,21 +162,21 @@ TEST_CASE("[MCP][Provider] Script documentation can select individual members an
 	query["kind"] = "signal";
 	query["name"] = "moved";
 	REQUIRE(MCPScriptDocument::render(parser, "documentation", true, query, result, &error) == OK);
-	CHECK(Dictionary(Array(result.get("members", Array()))[0]).get("declaration", String()) == "signal moved(distance: float)");
+	CHECK(Dictionary(Array(result.get("signals", Array()))[0]).get("text", String()) == "signal moved(distance: float)");
 
 	query["kind"] = "parameter";
 	query["name"] = "amount";
 	query["owner"] = "move";
 	REQUIRE(MCPScriptDocument::render(parser, "documentation", true, query, result, &error) == OK);
-	CHECK(String(Dictionary(Array(result.get("members", Array()))[0]).get("declaration", String())).contains("amount: float"));
+	CHECK(String(Dictionary(Array(result.get("parameters", Array()))[0]).get("text", String())).contains("amount: float"));
 
 	query["kind"] = "method";
 	query["name"] = "move";
 	query.erase("owner");
 	REQUIRE(MCPScriptDocument::render(parser, "documentation", true, query, result, &error) == OK);
-	const Array parameters = Dictionary(Array(result.get("members", Array()))[0]).get("parameters", Array());
-	REQUIRE(parameters.size() == 2);
-	CHECK(bool(Dictionary(parameters[1]).get("variadic", false)));
+	const Array selected_methods = result.get("methods", Array());
+	REQUIRE(selected_methods.size() == 1);
+	CHECK(String(Dictionary(selected_methods[0]).get("text", String())).contains("...rest"));
 
 	query["kind"] = "parameter";
 	query["name"] = "local_only";

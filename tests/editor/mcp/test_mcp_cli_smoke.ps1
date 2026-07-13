@@ -611,11 +611,14 @@ try {
 	$getResult = $scriptResponses["11"].result.structuredContent
 	Assert-Condition ([string]$getResult.sha256 -ceq $initialScriptSha) "a second MCP session did not read the authoritative initial ScriptEditor buffer."
 	Assert-Condition ([string]$getResult.view -ceq "documentation") "script/get did not default to the documentation view."
-	Assert-Condition (-not ($getResult.PSObject.Properties.Name -contains "lines")) "documentation script/get duplicated members into a top-level lines array."
+	Assert-Condition (-not ($getResult.PSObject.Properties.Name -contains "lines")) "documentation script/get returned a source lines array."
+	Assert-Condition (-not ($getResult.PSObject.Properties.Name -contains "lineBase")) "documentation script/get returned obsolete line-base metadata."
+	Assert-Condition (-not ($getResult.PSObject.Properties.Name -contains "memberCount")) "documentation script/get returned a redundant member count."
+	Assert-Condition (-not ($getResult.PSObject.Properties.Name -contains "members")) "documentation script/get returned an ungrouped members array."
 	Assert-Condition ([string]$getResult.documentation -ceq "Smoke script.") "documentation script/get did not return parsed class documentation."
-	Assert-Condition (@($getResult.members).Count -eq 1) "documentation script/get returned an unexpected member count."
-	Assert-Condition ([string]$getResult.members[0].declaration -ceq "var value: int = 1") "documentation script/get returned an unexpected declaration."
-	Assert-Condition ([int]$getResult.members[0].line -eq 5) "documentation script/get did not return a 1-based source line."
+	Assert-Condition (@($getResult.properties).Count -eq 1) "documentation script/get returned an unexpected property count."
+	Assert-Condition ([string]$getResult.properties[0].text -ceq "var value: int = 1") "documentation script/get returned an unexpected property declaration."
+	Assert-Condition ([int]$getResult.properties[0].line -eq 5) "documentation script/get did not return a 1-based source line."
 	$editResult = $scriptResponses["12"].result.structuredContent
 	Assert-Condition (-not (Test-ToolResultError -Result $scriptResponses["12"].result)) "script/edit returned a tool error."
 	Assert-Condition ([string]$editResult.sha256 -ceq $dirtyScriptSha) "script/edit returned an unexpected dirty SHA-256."

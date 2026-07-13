@@ -168,7 +168,18 @@ TEST_CASE("[MCP][Provider] Script documentation can select individual members an
 	query["name"] = "amount";
 	query["owner"] = "move";
 	REQUIRE(MCPScriptDocument::render(parser, "documentation", true, query, result, &error) == OK);
-	CHECK(String(Dictionary(Array(result.get("parameters", Array()))[0]).get("text", String())).contains("amount: float"));
+	CHECK(Dictionary(Array(result.get("parameters", Array()))[0]).get("text", String()) == "amount: float");
+	CHECK(Dictionary(Array(result.get("parameters", Array()))[0]).get("owner", String()) == "move");
+
+	query["name"] = "rest";
+	REQUIRE(MCPScriptDocument::render(parser, "documentation", true, query, result, &error) == OK);
+	CHECK(Dictionary(Array(result.get("parameters", Array()))[0]).get("text", String()) == "...rest");
+	REQUIRE(MCPScriptDocument::render(parser, "full", true, query, result, &error) == OK);
+	CHECK(result.get("text", String()) == "...rest");
+	const Array rest_lines = result.get("lines", Array());
+	REQUIRE(rest_lines.size() == 1);
+	CHECK(int(Dictionary(rest_lines[0]).get("line", 0)) == 5);
+	CHECK(Dictionary(rest_lines[0]).get("text", String()) == "...rest");
 
 	query["kind"] = "method";
 	query["name"] = "move";
@@ -188,6 +199,94 @@ TEST_CASE("[MCP][Provider] Script documentation can select individual members an
 	query.erase("owner");
 	CHECK(MCPScriptDocument::render(parser, "documentation", true, query, result, &error) == ERR_DOES_NOT_EXIST);
 	CHECK_FALSE(error.is_empty());
+}
+
+TEST_CASE("[MCP][Provider] Script member selection uses qualified inner class paths") {
+	const String source =
+			"extends Node\n"
+			"func move(amount: int) -> void:\n"
+			"\tpass\n"
+			"class Outer:\n"
+			"\tclass Inner:\n"
+			"\t\tvar value := 1\n"
+			"\t\tfunc move(amount: String = \"😀\") -> void:\n"
+			"\t\t\tpass\n"
+			"class Other:\n"
+			"\tclass Inner:\n"
+			"\t\tvar value := 2\n"
+			"\t\tfunc move(amount: float) -> void:\n"
+			"\t\t\tpass\n";
+	ExtendGDScriptParser parser;
+	parser.parse(source, "res://nested_selection.gd");
+	REQUIRE(parser.parse_result == OK);
+
+	Dictionary query;
+	query["kind"] = "property";
+	query["name"] = "value";
+	query["owner"] = "Outer.Inner";
+	Dictionary result;
+	String error;
+	REQUIRE(MCPScriptDocument::render(parser, "documentation", true, query, result, &error) == OK);
+	const Dictionary value = Array(result.get("properties", Array()))[0];
+	CHECK(value.get("text", String()) == "\t\tvar value := 1");
+	CHECK(value.get("owner", String()) == "Outer.Inner");
+
+	query["owner"] = "Inner";
+	CHECK(MCPScriptDocument::render(parser, "documentation", true, query, result, &error) == ERR_ALREADY_EXISTS);
+	CHECK(String(error).contains("ambiguous"));
+
+	query["kind"] = "parameter";
+	query["name"] = "amount";
+	query["owner"] = "move";
+	query["classPath"] = "Outer.Inner";
+	REQUIRE(MCPScriptDocument::render(parser, "documentation", true, query, result, &error) == OK);
+	const Dictionary parameter = Array(result.get("parameters", Array()))[0];
+	CHECK(parameter.get("text", String()) == "amount: String = \"😀\"");
+	CHECK(parameter.get("owner", String()) == "move");
+	CHECK(parameter.get("classPath", String()) == "Outer.Inner");
+	CHECK(int(parameter.get("line", 0)) == 7);
+
+	REQUIRE(MCPScriptDocument::render(parser, "full", true, query, result, &error) == OK);
+	CHECK(result.get("text", String()) == "amount: String = \"😀\"");
+	const Array parameter_lines = result.get("lines", Array());
+	REQUIRE(parameter_lines.size() == 1);
+	CHECK(int(Dictionary(parameter_lines[0]).get("line", 0)) == 7);
+
+	query.erase("classPath");
+	CHECK(MCPScriptDocument::render(parser, "documentation", true, query, result, &error) == ERR_ALREADY_EXISTS);
+}
+
+TEST_CASE("[MCP][Provider] Full parameter selection preserves multiline source") {
+	const String source =
+			"extends Node\r\n"
+			"func configure(\r\n"
+			"\titems: Array[String] = [\r\n"
+			"\t\t\"😀\", # item\r\n"
+			"\t],\r\n"
+			") -> void:\r\n"
+			"\tpass\r\n";
+	ExtendGDScriptParser parser;
+	parser.parse(source, "res://multiline_parameter.gd");
+	REQUIRE(parser.parse_result == OK);
+
+	Dictionary query;
+	query["kind"] = "parameter";
+	query["name"] = "items";
+	query["owner"] = "configure";
+	Dictionary result;
+	String error;
+	REQUIRE(MCPScriptDocument::render(parser, "full", true, query, result, &error) == OK);
+	CHECK(result.get("text", String()) == "items: Array[String] = [\r\n\t\t\"😀\", # item\r\n\t]");
+	const Array lines = result.get("lines", Array());
+	REQUIRE(lines.size() == 3);
+	CHECK(int(Dictionary(lines[0]).get("line", 0)) == 3);
+	CHECK(int(Dictionary(lines[2]).get("line", 0)) == 5);
+	CHECK(Dictionary(lines[0]).get("text", String()) == "items: Array[String] = [\r");
+	CHECK(Dictionary(lines[2]).get("text", String()) == "\t]");
+
+	REQUIRE(MCPScriptDocument::render(parser, "full", false, query, result, &error) == OK);
+	CHECK(result.get("text", String()) == "items: Array[String] = [\r\n\t\t\"😀\",\n\t]");
+	CHECK_FALSE(String(result.get("text", String())).contains("# item"));
 }
 
 } // namespace TestMCPScriptDocument

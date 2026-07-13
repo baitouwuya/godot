@@ -112,7 +112,8 @@ static Dictionary _member_schema() {
 	kind["enum"] = kinds;
 	properties["kind"] = kind;
 	properties["name"] = _property_schema("string", "Exact member name.");
-	properties["owner"] = _property_schema("string", "Optional inner class name, or required method/signal name for a parameter.");
+	properties["owner"] = _property_schema("string", "Optional qualified inner class path, or required method/signal name for a parameter.");
+	properties["classPath"] = _property_schema("string", "Optional qualified inner class path for a parameter, such as Outer.Inner.");
 	PackedStringArray required;
 	required.push_back("kind");
 	required.push_back("name");
@@ -187,6 +188,10 @@ static bool _get_required_string(const Dictionary &p_arguments, const StringName
 	return !r_value.is_empty();
 }
 
+static bool _is_valid_class_path(const String &p_path) {
+	return !p_path.is_empty() && !p_path.begins_with(".") && !p_path.ends_with(".") && !p_path.contains("..");
+}
+
 static String _buffer_error_code(Error p_error) {
 	switch (p_error) {
 		case ERR_FILE_NOT_FOUND:
@@ -253,15 +258,28 @@ static bool _get_script_view(const Dictionary &p_arguments, String &r_view, bool
 		allowed.push_back("kind");
 		allowed.push_back("name");
 		allowed.push_back("owner");
+		allowed.push_back("classPath");
 		if (!MCPToolUtils::has_only_arguments(r_member, allowed, unknown) ||
 				r_member.get("kind", Variant()).get_type() != Variant::STRING || String(r_member.get("kind", String())).is_empty() ||
 				r_member.get("name", Variant()).get_type() != Variant::STRING || String(r_member.get("name", String())).is_empty() ||
-				(r_member.has("owner") && r_member["owner"].get_type() != Variant::STRING)) {
-			r_error = "member requires non-empty string kind and name fields, with an optional string owner.";
+				(r_member.has("owner") && r_member["owner"].get_type() != Variant::STRING) ||
+				(r_member.has("classPath") && (r_member["classPath"].get_type() != Variant::STRING || String(r_member["classPath"]).is_empty()))) {
+			r_error = "member requires non-empty string kind and name fields, with optional string owner and classPath fields.";
 			return false;
 		}
-		if (String(r_member.get("kind", String())) == "parameter" && String(r_member.get("owner", String())).is_empty()) {
+		const bool parameter = String(r_member.get("kind", String())) == "parameter";
+		if (parameter && String(r_member.get("owner", String())).is_empty()) {
 			r_error = "A parameter member query requires its method or signal owner.";
+			return false;
+		}
+		if (!parameter && r_member.has("classPath")) {
+			r_error = "classPath is only valid for parameter member queries.";
+			return false;
+		}
+		const String class_path = r_member.get("classPath", String());
+		const String owner = r_member.get("owner", String());
+		if ((!class_path.is_empty() && !_is_valid_class_path(class_path)) || (!parameter && owner.contains(".") && !_is_valid_class_path(owner))) {
+			r_error = "Qualified class paths cannot start or end with a period or contain empty segments.";
 			return false;
 		}
 	}
@@ -462,7 +480,9 @@ Dictionary MCPScriptProvider::get(const Dictionary &p_arguments, const Dictionar
 	String document_error;
 	const Error render_error = MCPScriptDocument::render(*parser, view, include_comments, member, document, &document_error);
 	if (render_error != OK) {
-		return MCPToolUtils::make_error_result(render_error == ERR_DOES_NOT_EXIST ? "MEMBER_NOT_FOUND" : "INVALID_ARGUMENTS", document_error);
+		const String error_code = render_error == ERR_DOES_NOT_EXIST ? "MEMBER_NOT_FOUND" : render_error == ERR_ALREADY_EXISTS ? "MEMBER_AMBIGUOUS"
+																													 : "INVALID_ARGUMENTS";
+		return MCPToolUtils::make_error_result(error_code, document_error);
 	}
 	result.erase("text");
 	for (const KeyValue<Variant, Variant> &entry : document) {

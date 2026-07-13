@@ -30,18 +30,11 @@
 
 #include "mcp_script_document.h"
 
+#include "mcp_script_member_selector.h"
+
 #include "modules/gdscript/language_server/gdscript_extend_parser.h"
 
 namespace {
-
-struct ScriptMemberMatch {
-	const LSP::DocumentSymbol *symbol = nullptr;
-	String kind;
-	bool parameter = false;
-};
-
-static const GDScriptParser::FunctionNode *_find_function_node(const GDScriptParser::ClassNode *p_class, int p_line);
-static const GDScriptParser::SignalNode *_find_signal_node(const GDScriptParser::ClassNode *p_class, int p_line);
 
 static Error _fail(const String &p_message, String *r_error, Error p_error = ERR_INVALID_PARAMETER) {
 	if (r_error) {
@@ -73,106 +66,6 @@ static String _symbol_kind(const LSP::DocumentSymbol &p_symbol) {
 	}
 }
 
-static bool _kind_matches(const String &p_requested, const String &p_actual) {
-	if (p_requested == p_actual) {
-		return true;
-	}
-	return (p_requested == "variable" || p_requested == "parameter") && p_actual == "property";
-}
-
-static const LSP::DocumentSymbol *_find_class(const LSP::DocumentSymbol &p_class, const String &p_name) {
-	if (p_name.is_empty() || p_class.name == p_name) {
-		return &p_class;
-	}
-	for (const LSP::DocumentSymbol &child : p_class.children) {
-		if (child.kind == LSP::SymbolKind::Class) {
-			if (child.name == p_name) {
-				return &child;
-			}
-			if (const LSP::DocumentSymbol *nested = _find_class(child, p_name)) {
-				return nested;
-			}
-		}
-	}
-	return nullptr;
-}
-
-static bool _is_parameter(const ExtendGDScriptParser &p_parser, const LSP::DocumentSymbol &p_owner, const LSP::DocumentSymbol &p_candidate) {
-	const GDScriptParser::ClassNode *tree = p_parser.get_tree();
-	if (!tree) {
-		return false;
-	}
-	if (p_owner.kind == LSP::SymbolKind::Method || p_owner.kind == LSP::SymbolKind::Function) {
-		const GDScriptParser::FunctionNode *function = _find_function_node(tree, p_owner.range.start.line);
-		if (!function) {
-			return false;
-		}
-		for (const GDScriptParser::ParameterNode *parameter : function->parameters) {
-			if (parameter->identifier->name == p_candidate.name && parameter->start_line - 1 == p_candidate.range.start.line) {
-				return true;
-			}
-		}
-		return function->rest_parameter && function->rest_parameter->identifier->name == p_candidate.name &&
-				function->rest_parameter->start_line - 1 == p_candidate.range.start.line;
-	}
-	if (p_owner.kind == LSP::SymbolKind::Event) {
-		const GDScriptParser::SignalNode *signal = _find_signal_node(tree, p_owner.range.start.line);
-		if (!signal) {
-			return false;
-		}
-		for (const GDScriptParser::ParameterNode *parameter : signal->parameters) {
-			if (parameter->identifier->name == p_candidate.name && parameter->start_line - 1 == p_candidate.range.start.line) {
-				return true;
-			}
-		}
-	}
-	return false;
-}
-
-static ScriptMemberMatch _find_member(const ExtendGDScriptParser &p_parser, const LSP::DocumentSymbol &p_root, const Dictionary &p_query) {
-	ScriptMemberMatch match;
-	const String requested_kind = p_query.get("kind", String());
-	const String requested_name = p_query.get("name", String());
-	const String owner = p_query.get("owner", String());
-
-	if (requested_kind == "parameter") {
-		for (const LSP::DocumentSymbol &member : p_root.children) {
-			if ((member.kind == LSP::SymbolKind::Method || member.kind == LSP::SymbolKind::Function || member.kind == LSP::SymbolKind::Event) &&
-					member.name == owner) {
-				for (const LSP::DocumentSymbol &child : member.children) {
-					if (child.name == requested_name && child.kind == LSP::SymbolKind::Variable && _is_parameter(p_parser, member, child)) {
-						match.symbol = &child;
-						match.kind = "parameter";
-						match.parameter = true;
-						return match;
-					}
-				}
-			}
-			if (member.kind == LSP::SymbolKind::Class) {
-				match = _find_member(p_parser, member, p_query);
-				if (match.symbol) {
-					return match;
-				}
-			}
-		}
-		return match;
-	}
-
-	const LSP::DocumentSymbol *owner_class = _find_class(p_root, owner);
-	if (!owner_class) {
-		return match;
-	}
-	for (const LSP::DocumentSymbol &member : owner_class->children) {
-		const String actual_kind = _symbol_kind(member);
-		if (member.name == requested_name && _kind_matches(requested_kind, actual_kind)) {
-			match.symbol = &member;
-			match.kind = actual_kind;
-			return match;
-		}
-	}
-	return match;
-}
-
 static Dictionary _make_line(int p_line, const String &p_text, const String &p_role) {
 	Dictionary line;
 	line["line"] = p_line;
@@ -181,44 +74,14 @@ static Dictionary _make_line(int p_line, const String &p_text, const String &p_r
 	return line;
 }
 
-static const GDScriptParser::FunctionNode *_find_function_node(const GDScriptParser::ClassNode *p_class, int p_line) {
-	if (!p_class) {
-		return nullptr;
+static String _declaration_text(const ExtendGDScriptParser &p_parser, const LSP::DocumentSymbol &p_symbol,
+		const GDScriptParser::ParameterNode *p_parameter, bool p_rest) {
+	if (p_parameter) {
+		return MCPScriptMemberSelector::parameter_source_slice(p_parser, p_parameter, p_rest).text;
 	}
-	for (const GDScriptParser::ClassNode::Member &member : p_class->members) {
-		if (member.type == GDScriptParser::ClassNode::Member::FUNCTION && member.function->start_line - 1 == p_line) {
-			return member.function;
-		}
-		if (member.type == GDScriptParser::ClassNode::Member::CLASS) {
-			if (const GDScriptParser::FunctionNode *nested = _find_function_node(member.m_class, p_line)) {
-				return nested;
-			}
-		}
-	}
-	return nullptr;
-}
-
-static const GDScriptParser::SignalNode *_find_signal_node(const GDScriptParser::ClassNode *p_class, int p_line) {
-	if (!p_class) {
-		return nullptr;
-	}
-	for (const GDScriptParser::ClassNode::Member &member : p_class->members) {
-		if (member.type == GDScriptParser::ClassNode::Member::SIGNAL && member.signal->start_line - 1 == p_line) {
-			return member.signal;
-		}
-		if (member.type == GDScriptParser::ClassNode::Member::CLASS) {
-			if (const GDScriptParser::SignalNode *nested = _find_signal_node(member.m_class, p_line)) {
-				return nested;
-			}
-		}
-	}
-	return nullptr;
-}
-
-static String _declaration_text(const ExtendGDScriptParser &p_parser, const LSP::DocumentSymbol &p_symbol, bool p_parameter) {
 	const Vector<String> &source_lines = p_parser.get_lines();
 	const int line = p_symbol.selectionRange.start.line;
-	if (!p_parameter && line >= 0 && line < source_lines.size()) {
+	if (line >= 0 && line < source_lines.size()) {
 		const String source = source_lines[line];
 		const String trimmed = source.strip_edges();
 		const bool complete_method = p_symbol.kind != LSP::SymbolKind::Method && p_symbol.kind != LSP::SymbolKind::Function || trimmed.ends_with(":");
@@ -227,9 +90,6 @@ static String _declaration_text(const ExtendGDScriptParser &p_parser, const LSP:
 		}
 	}
 	String detail = p_symbol.detail;
-	if (p_parameter) {
-		return detail.trim_prefix("var ");
-	}
 	if (p_symbol.kind == LSP::SymbolKind::Event) {
 		detail = "signal " + p_symbol.name + "(";
 		for (int i = 0; i < p_symbol.children.size(); i++) {
@@ -247,15 +107,20 @@ static String _declaration_text(const ExtendGDScriptParser &p_parser, const LSP:
 }
 
 static Dictionary _render_document_member(const ExtendGDScriptParser &p_parser, const LSP::DocumentSymbol &p_symbol,
-		const String &p_kind, bool p_include_comments, bool p_parameter, const String &p_owner) {
+		const String &p_kind, bool p_include_comments, const GDScriptParser::ParameterNode *p_parameter, bool p_rest,
+		const String &p_owner, const String &p_class_path = String()) {
 	Dictionary member;
-	member["text"] = _declaration_text(p_parser, p_symbol, p_parameter);
-	member["line"] = p_symbol.selectionRange.start.line + 1;
+	const MCPScriptSourceSlice parameter_slice = MCPScriptMemberSelector::parameter_source_slice(p_parser, p_parameter, p_rest);
+	member["text"] = _declaration_text(p_parser, p_symbol, p_parameter, p_rest);
+	member["line"] = p_parameter ? parameter_slice.start.line + 1 : p_symbol.selectionRange.start.line + 1;
 	if (p_include_comments && !p_symbol.documentation.is_empty()) {
 		member["doc"] = p_symbol.documentation;
 	}
 	if (!p_owner.is_empty()) {
 		member["owner"] = p_owner;
+	}
+	if (!p_class_path.is_empty()) {
+		member["classPath"] = p_class_path;
 	}
 	return member;
 }
@@ -299,9 +164,10 @@ static void _render_class_members(const ExtendGDScriptParser &p_parser, const LS
 		if (kind.is_empty()) {
 			continue;
 		}
-		_append_grouped(r_groups, kind, _render_document_member(p_parser, symbol, kind, p_include_comments, false, p_owner));
+		_append_grouped(r_groups, kind, _render_document_member(p_parser, symbol, kind, p_include_comments, nullptr, false, p_owner));
 		if (symbol.kind == LSP::SymbolKind::Class) {
-			_render_class_members(p_parser, symbol, p_include_comments, symbol.name, r_groups);
+			const String child_path = p_owner.is_empty() ? symbol.name : p_owner + "." + symbol.name;
+			_render_class_members(p_parser, symbol, p_include_comments, child_path, r_groups);
 		}
 	}
 }
@@ -345,6 +211,28 @@ static String _join_lines(const Array &p_lines) {
 	return text;
 }
 
+static Array _render_source_slice_lines(const ExtendGDScriptParser &p_parser, const MCPScriptSourceSlice &p_slice, bool p_include_comments) {
+	Array result;
+	const PackedStringArray lines = p_slice.text.split("\n", true);
+	for (int i = 0; i < lines.size(); i++) {
+		String text = lines[i];
+		if (!p_include_comments) {
+			const GDScriptTokenizer::CommentData *comment = p_parser.comment_data.getptr(p_slice.start.line + i + 1);
+			if (comment) {
+				if (comment->new_line) {
+					continue;
+				}
+				const int comment_start = text.rfind(comment->comment);
+				if (comment_start >= 0) {
+					text = text.left(comment_start).strip_edges(false, true);
+				}
+			}
+		}
+		result.push_back(_make_line(p_slice.start.line + i + 1, text, "source"));
+	}
+	return result;
+}
+
 } // namespace
 
 Error MCPScriptDocument::render(const ExtendGDScriptParser &p_parser, const String &p_view, bool p_include_comments,
@@ -358,27 +246,36 @@ Error MCPScriptDocument::render(const ExtendGDScriptParser &p_parser, const Stri
 	}
 
 	const LSP::DocumentSymbol &root = p_parser.get_symbols();
-	ScriptMemberMatch selected;
+	MCPScriptMemberMatch selected;
 	if (!p_member.is_empty()) {
-		selected = _find_member(p_parser, root, p_member);
-		if (!selected.symbol) {
-			return _fail("The requested script member was not found.", r_error, ERR_DOES_NOT_EXIST);
+		const Error select_error = MCPScriptMemberSelector::find(p_parser, p_member, selected, r_error);
+		if (select_error != OK) {
+			return select_error;
 		}
 	}
 
 	Dictionary groups;
 	if (p_view == "full") {
-		int start_line = 0;
-		int end_line = p_parser.get_lines().size() - 1;
-		if (selected.symbol) {
-			start_line = selected.symbol->range.start.line;
-			end_line = selected.symbol->range.end.line;
+		Array lines;
+		if (selected.parameter_node) {
+			const MCPScriptSourceSlice slice = MCPScriptMemberSelector::parameter_source_slice(p_parser, selected.parameter_node, selected.rest_parameter);
+			lines = _render_source_slice_lines(p_parser, slice, p_include_comments);
+			r_document["text"] = _join_lines(lines);
+		} else {
+			int start_line = 0;
+			int end_line = p_parser.get_lines().size() - 1;
+			if (selected.symbol) {
+				start_line = selected.symbol->range.start.line;
+				end_line = selected.symbol->range.end.line;
+			}
+			lines = _render_full_lines(p_parser, start_line, end_line, p_include_comments);
+			r_document["text"] = _join_lines(lines);
 		}
-		const Array lines = _render_full_lines(p_parser, start_line, end_line, p_include_comments);
 		r_document["lines"] = lines;
-		r_document["text"] = _join_lines(lines);
 	} else if (selected.symbol) {
-		_append_grouped(groups, selected.kind, _render_document_member(p_parser, *selected.symbol, selected.kind, p_include_comments, selected.parameter, p_member.get("owner", String())));
+		_append_grouped(groups, selected.kind, _render_document_member(p_parser, *selected.symbol, selected.kind, p_include_comments,
+				selected.parameter_node, selected.rest_parameter, selected.callable_name.is_empty() ? selected.owner_path : selected.callable_name,
+				selected.parameter_node ? selected.owner_path : String()));
 	} else {
 		if (p_include_comments && !root.documentation.is_empty()) {
 			r_document["documentation"] = root.documentation;

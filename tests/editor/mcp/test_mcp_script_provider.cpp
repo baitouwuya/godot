@@ -70,6 +70,10 @@ TEST_CASE("[MCP][Provider] Script tools register with optimistic edit requiremen
 	CHECK(get_properties.has("view"));
 	CHECK(get_properties.has("includeComments"));
 	CHECK(get_properties.has("member"));
+	const Dictionary member_schema = get_properties.get("member", Dictionary());
+	const Dictionary member_properties = member_schema.get("properties", Dictionary());
+	CHECK(member_properties.has("owner"));
+	CHECK(member_properties.has("classPath"));
 	CHECK(Array(get_schema.get("oneOf", Array())).size() == 2);
 	const Dictionary edit_schema = Dictionary(definitions[2]).get("inputSchema", Dictionary());
 	const Dictionary properties = edit_schema.get("properties", Dictionary());

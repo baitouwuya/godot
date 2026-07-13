@@ -56,7 +56,15 @@ static Error _sanitize_native(const Variant &p_value, Variant &r_value, String *
 
 	switch (p_value.get_type()) {
 		case Variant::OBJECT: {
-			Object *object = p_value.get_validated_object();
+			bool previously_freed = false;
+			Object *object = p_value.get_validated_object_with_check(previously_freed);
+			if (previously_freed) {
+				return _fail("Object reference is no longer valid.", r_error);
+			}
+			if (!object) {
+				r_value = Variant();
+				return OK;
+			}
 			Resource *resource = Object::cast_to<Resource>(object);
 			if (!resource) {
 				return _fail("Only project Resource references can be encoded as objects.", r_error);

@@ -31,6 +31,7 @@
 #include "mcp_tool_utils.h"
 
 #include "core/io/json.h"
+#include "core/object/property_info.h"
 
 namespace MCPToolUtils {
 
@@ -50,6 +51,18 @@ Dictionary make_tool_definition(const String &p_name, const String &p_descriptio
 	definition["description"] = p_description;
 	definition["inputSchema"] = p_input_schema.duplicate(true);
 	return definition;
+}
+
+Dictionary make_property_description(const PropertyInfo &p_property) {
+	Dictionary description;
+	description["name"] = p_property.name;
+	description["type"] = Variant::get_type_name(p_property.type);
+	description["typeId"] = int(p_property.type);
+	description["className"] = String(p_property.class_name);
+	description["hint"] = int(p_property.hint);
+	description["hintString"] = p_property.hint_string;
+	description["usage"] = int64_t(p_property.usage);
+	return description;
 }
 
 Dictionary make_success_result(const Dictionary &p_structured_content) {

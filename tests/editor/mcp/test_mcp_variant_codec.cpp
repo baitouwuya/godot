@@ -75,6 +75,28 @@ TEST_CASE("[MCP][Provider] Unsafe object-like Variant types are rejected") {
 	CHECK(MCPVariantCodec::encode(unpathed_resource, encoded, &error) == ERR_INVALID_DATA);
 }
 
+TEST_CASE("[MCP][Provider] Null object values use a safe JSON null representation") {
+	Object *null_object = nullptr;
+	const Variant null_object_value = null_object;
+	REQUIRE(null_object_value.get_type() == Variant::OBJECT);
+
+	Variant encoded;
+	String error;
+	REQUIRE(MCPVariantCodec::encode(null_object_value, encoded, &error) == OK);
+	CHECK(error.is_empty());
+	CHECK(encoded.get_type() == Variant::NIL);
+
+	Variant decoded;
+	REQUIRE(MCPVariantCodec::decode(encoded, decoded, &error) == OK);
+	CHECK(decoded.get_type() == Variant::NIL);
+
+	Object *object = memnew(Object);
+	Variant freed_object_value = object;
+	memdelete(object);
+	CHECK(MCPVariantCodec::encode(freed_object_value, encoded, &error) == ERR_INVALID_DATA);
+	CHECK(error.contains("no longer valid"));
+}
+
 TEST_CASE("[MCP][Provider] Resource references round-trip by safe res path") {
 	const String resource_path = "res://tests/editor/mcp/data/mcp_codec_resource.tres";
 	REQUIRE(ResourceLoader::exists(resource_path));

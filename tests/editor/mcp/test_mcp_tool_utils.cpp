@@ -29,12 +29,26 @@
 /**************************************************************************/
 
 #include "core/io/json.h"
+#include "core/object/property_info.h"
 #include "editor/mcp/providers/mcp_tool_utils.h"
 #include "tests/test_macros.h"
 
 TEST_FORCE_LINK(test_mcp_tool_utils);
 
 namespace TestMCPToolUtils {
+
+TEST_CASE("[MCP][Provider] Property descriptions use a shared stable shape") {
+	const PropertyInfo property(Variant::OBJECT, "target", PROPERTY_HINT_NODE_TYPE, "Node", PROPERTY_USAGE_EDITOR | PROPERTY_USAGE_READ_ONLY, "Node");
+	const Dictionary description = MCPToolUtils::make_property_description(property);
+
+	CHECK(description.get("name", String()) == "target");
+	CHECK(description.get("type", String()) == "Object");
+	CHECK(int(description.get("typeId", -1)) == Variant::OBJECT);
+	CHECK(description.get("className", String()) == "Node");
+	CHECK(int(description.get("hint", -1)) == PROPERTY_HINT_NODE_TYPE);
+	CHECK(description.get("hintString", String()) == "Node");
+	CHECK(int64_t(description.get("usage", 0)) == (PROPERTY_USAGE_EDITOR | PROPERTY_USAGE_READ_ONLY));
+}
 
 TEST_CASE("[MCP][Provider] Success results expose matching text and structured content") {
 	Dictionary nested;

@@ -118,17 +118,8 @@ static bool _make_option_descriptions(const String &p_source_path, const MCPReso
 			return false;
 		}
 
-		Dictionary property;
-		property["name"] = option.option.name;
-		property["type"] = Variant::get_type_name(option.option.type);
-		property["typeId"] = int(option.option.type);
-		property["className"] = String(option.option.class_name);
-		property["hint"] = int(option.option.hint);
-		property["hintString"] = option.option.hint_string;
-		property["usage"] = int64_t(option.option.usage);
-
 		Dictionary description;
-		description["property"] = property;
+		description["property"] = MCPToolUtils::make_property_description(option.option);
 		description["defaultValue"] = encoded_default;
 		description["value"] = encoded_value;
 		description["visible"] = p_resolution.importer->get_option_visibility(p_source_path, option.option.name, p_resolution.values);

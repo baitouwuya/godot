@@ -36,6 +36,7 @@
 #include "editor/mcp/providers/mcp_node_provider.h"
 #include "editor/mcp/providers/mcp_undo_redo_action.h"
 #include "editor/mcp/providers/mcp_variant_codec.h"
+#include "scene/gui/rich_text_label.h"
 #include "scene/main/node.h"
 #include "scene/main/scene_tree.h"
 #include "scene/main/window.h"
@@ -168,14 +169,14 @@ private:
 
 class ScopedGDScriptLanguage {
 public:
-	ScopedGDScriptLanguage() {
+	explicit ScopedGDScriptLanguage(bool p_scripting_enabled = true) {
 		language = GDScriptLanguage::get_singleton();
 		previous_scripting_enabled = ScriptServer::is_scripting_enabled();
 		if (language && !language->has_any_global_constant(SNAME("PI"))) {
 			language->init();
 			initialized_here = true;
 		}
-		ScriptServer::set_scripting_enabled(true);
+		ScriptServer::set_scripting_enabled(p_scripting_enabled);
 	}
 
 	~ScopedGDScriptLanguage() {
@@ -211,6 +212,26 @@ static bool _check_tool_success(const MCPToolRegistry::CallResult &p_result) {
 	const bool is_error = p_result.result.get("isError", false);
 	CHECK_FALSE(is_error);
 	return !is_error;
+}
+
+static Dictionary _find_property(const Array &p_properties, const StringName &p_name) {
+	for (int i = 0; i < p_properties.size(); i++) {
+		const Dictionary property = p_properties[i];
+		if (StringName(property.get("name", StringName())) == p_name) {
+			return property;
+		}
+	}
+	return Dictionary();
+}
+
+static Dictionary _find_layout_entry(const Array &p_layout, const String &p_kind, const StringName &p_name) {
+	for (int i = 0; i < p_layout.size(); i++) {
+		const Dictionary entry = p_layout[i];
+		if (entry.get("kind", String()) == p_kind && StringName(entry.get("name", StringName())) == p_name) {
+			return entry;
+		}
+	}
+	return Dictionary();
 }
 
 TEST_CASE("[MCP][Provider] Node tools expose encoded property and undoable mutation schemas") {
@@ -318,6 +339,34 @@ TEST_CASE("[SceneTree][MCP][Provider] Node tools share undoable actions and leav
 	CHECK(fixture.undo_redo.is_unsaved());
 }
 
+TEST_CASE("[SceneTree][MCP][Provider] Native properties carrying script usage remain native") {
+	NodeProviderFixture fixture;
+	RichTextLabel *rich_text_label = memnew(RichTextLabel);
+	rich_text_label->set_name("RichTextLabel");
+	fixture.scene_root->add_child(rich_text_label);
+	rich_text_label->set_owner(fixture.scene_root);
+	REQUIRE(fixture.provider->register_tools(&fixture.registry) == OK);
+
+	Dictionary arguments;
+	arguments["path"] = "RichTextLabel";
+	const MCPToolRegistry::CallResult result = _call_tool(fixture.registry, "godot.node.get_properties", arguments);
+	if (!_check_tool_success(result)) {
+		return;
+	}
+
+	const Dictionary content = result.result.get("structuredContent", Dictionary());
+	CHECK(int(content.get("scriptPropertyCount", -1)) == 0);
+	const Dictionary effects_property = _find_property(content.get("properties", Array()), "custom_effects");
+	REQUIRE_FALSE(effects_property.is_empty());
+	CHECK((int64_t(effects_property.get("usage", 0)) & PROPERTY_USAGE_SCRIPT_VARIABLE) != 0);
+	CHECK(effects_property.get("source", String()) == "native");
+	CHECK_FALSE(bool(effects_property.get("scriptExposed", true)));
+
+	const Dictionary markup_group = _find_layout_entry(content.get("propertyLayout", Array()), "group", "Markup");
+	REQUIRE_FALSE(markup_group.is_empty());
+	CHECK(markup_group.get("source", String()) == "native");
+}
+
 #ifdef MODULE_GDSCRIPT_ENABLED
 TEST_CASE("[SceneTree][MCP][Provider][GDScript] Node script attachment is undoable") {
 	ScopedProjectResourcePath project_resource_path;
@@ -358,6 +407,105 @@ TEST_CASE("[SceneTree][MCP][Provider][GDScript] Node script attachment is undoab
 		return;
 	}
 	CHECK(attached_script->get_path() == script_path);
+
+	Node *target = memnew(Node);
+	target->set_name("Target");
+	created->add_child(target);
+	target->set_owner(fixture.scene_root);
+	created->set("exported_node", target);
+
+	Dictionary get_arguments;
+	get_arguments["path"] = "Created";
+	MCPToolRegistry::CallResult get_result = _call_tool(fixture.registry, "godot.node.get_properties", get_arguments);
+	if (!_check_tool_success(get_result)) {
+		return;
+	}
+	Dictionary properties_content = get_result.result.get("structuredContent", Dictionary());
+	CHECK(properties_content.get("scriptPath", String()) == script_path);
+	CHECK(int(properties_content.get("propertyCount", 0)) > 3);
+	CHECK(int(properties_content.get("scriptPropertyCount", 0)) == 4);
+
+	const Array properties = properties_content.get("properties", Array());
+	const Dictionary speed_property = _find_property(properties, "exported_speed");
+	REQUIRE_FALSE(speed_property.is_empty());
+	CHECK(speed_property.get("source", String()) == "script");
+	CHECK(bool(speed_property.get("scriptExposed", false)));
+	CHECK(speed_property.get("scriptPath", String()) == script_path);
+	CHECK(speed_property.get("type", String()) == "float");
+	CHECK(int(speed_property.get("typeId", -1)) == Variant::FLOAT);
+	CHECK(int(speed_property.get("hint", -1)) == PROPERTY_HINT_RANGE);
+	CHECK(speed_property.get("hintString", String()) == "0.0,10.0,0.5");
+	CHECK(bool(speed_property.get("valueAvailable", false)));
+	CHECK(bool(speed_property.get("encodable", false)));
+	CHECK(speed_property.get("value", Variant()) == "f:2.5");
+
+	const Dictionary path_property = _find_property(properties, "exported_path");
+	REQUIRE_FALSE(path_property.is_empty());
+	CHECK(path_property.get("source", String()) == "script");
+	CHECK(path_property.get("value", Variant()) == "np:.");
+	const String base_script_path = "res://tests/editor/mcp/data/mcp_node_base_script.gd";
+	const Dictionary base_property = _find_property(properties, "exported_base");
+	REQUIRE_FALSE(base_property.is_empty());
+	CHECK(base_property.get("source", String()) == "script");
+	CHECK(base_property.get("scriptPath", String()) == base_script_path);
+	CHECK(base_property.get("value", Variant()) == "i:11");
+
+	const Dictionary node_property = _find_property(properties, "exported_node");
+	REQUIRE_FALSE(node_property.is_empty());
+	CHECK(node_property.get("source", String()) == "script");
+	CHECK(bool(node_property.get("valueAvailable", false)));
+	CHECK_FALSE(bool(node_property.get("encodable", true)));
+	CHECK_FALSE(String(node_property.get("encodingError", String())).is_empty());
+	const Dictionary node_reference = node_property.get("valueReference", Dictionary());
+	REQUIRE_FALSE(node_reference.is_empty());
+	CHECK(node_reference.get("kind", String()) == "node");
+	CHECK(node_reference.get("scope", String()) == "editedScene");
+	CHECK(node_reference.get("path", String()) == "Created/Target");
+	CHECK(node_reference.get("type", String()) == "Node");
+
+	CHECK(_find_property(properties, "runtime_only").is_empty());
+	CHECK(_find_property(properties, "stored_only").is_empty());
+	const Dictionary native_property = _find_property(properties, "process_mode");
+	REQUIRE_FALSE(native_property.is_empty());
+	CHECK(native_property.get("source", String()) == "native");
+	CHECK_FALSE(bool(native_property.get("scriptExposed", true)));
+
+	const Array property_layout = properties_content.get("propertyLayout", Array());
+	const Dictionary custom_category = _find_layout_entry(property_layout, "category", "MCP Test");
+	REQUIRE_FALSE(custom_category.is_empty());
+	CHECK(custom_category.get("source", String()) == "script");
+	CHECK(custom_category.get("scriptPath", String()) == script_path);
+	CHECK_FALSE(_find_layout_entry(property_layout, "group", "Values").is_empty());
+	CHECK_FALSE(_find_layout_entry(property_layout, "subgroup", "References").is_empty());
+	const Dictionary speed_layout = _find_layout_entry(property_layout, "property", "exported_speed");
+	REQUIRE_FALSE(speed_layout.is_empty());
+	CHECK(speed_layout.get("source", String()) == "script");
+	const int speed_index = speed_layout.get("propertyIndex", -1);
+	REQUIRE(speed_index >= 0);
+	REQUIRE(speed_index < properties.size());
+	CHECK(StringName(Dictionary(properties[speed_index]).get("name", StringName())) == "exported_speed");
+	const Dictionary base_category = _find_layout_entry(property_layout, "category", "mcp_node_base_script.gd");
+	REQUIRE_FALSE(base_category.is_empty());
+	CHECK(base_category.get("scriptPath", String()) == base_script_path);
+
+	Dictionary property_arguments;
+	property_arguments["path"] = "Created";
+	property_arguments["property"] = "exported_speed";
+	property_arguments["value"] = "f:4.5";
+	const MCPToolRegistry::CallResult property_result = _call_tool(fixture.registry, "godot.node.set_property", property_arguments);
+	if (!_check_tool_success(property_result)) {
+		return;
+	}
+	CHECK(double(created->get("exported_speed")) == doctest::Approx(4.5));
+	const bool property_undone = fixture.undo_redo.undo();
+	REQUIRE(property_undone);
+	CHECK(double(created->get("exported_speed")) == doctest::Approx(2.5));
+	const bool property_redone = fixture.undo_redo.redo();
+	REQUIRE(property_redone);
+	CHECK(double(created->get("exported_speed")) == doctest::Approx(4.5));
+	REQUIRE(fixture.undo_redo.undo());
+	CHECK(double(created->get("exported_speed")) == doctest::Approx(2.5));
+
 	const bool attachment_undone = fixture.undo_redo.undo();
 	REQUIRE(attachment_undone);
 	if (!attachment_undone) {
@@ -377,6 +525,101 @@ TEST_CASE("[SceneTree][MCP][Provider][GDScript] Node script attachment is undoab
 	}
 	CHECK(attached_script->get_path() == script_path);
 	CHECK(fixture.undo_redo.is_unsaved());
+}
+
+TEST_CASE("[SceneTree][Editor][MCP][Provider][GDScript] Placeholder node properties retain script source and layout") {
+	ScopedProjectResourcePath project_resource_path;
+	REQUIRE(project_resource_path.is_valid());
+	if (!project_resource_path.is_valid()) {
+		return;
+	}
+	ScopedGDScriptLanguage gdscript_language(false);
+	REQUIRE(gdscript_language.is_available());
+	if (!gdscript_language.is_available()) {
+		return;
+	}
+
+	NodeProviderFixture fixture;
+	Node *created = memnew(Node);
+	created->set_name("Created");
+	fixture.scene_root->add_child(created);
+	created->set_owner(fixture.scene_root);
+	REQUIRE(fixture.provider->register_tools(&fixture.registry) == OK);
+
+	const String script_path = "res://tests/editor/mcp/data/mcp_node_script.gd";
+	Dictionary script_arguments;
+	script_arguments["path"] = "Created";
+	script_arguments["scriptPath"] = script_path;
+	const MCPToolRegistry::CallResult attach_result = _call_tool(fixture.registry, "godot.node.attach_script", script_arguments);
+	if (!_check_tool_success(attach_result)) {
+		return;
+	}
+
+	Dictionary get_arguments;
+	get_arguments["path"] = "Created";
+	const MCPToolRegistry::CallResult get_result = _call_tool(fixture.registry, "godot.node.get_properties", get_arguments);
+	if (!_check_tool_success(get_result)) {
+		return;
+	}
+	const Dictionary content = get_result.result.get("structuredContent", Dictionary());
+	CHECK(content.get("scriptPath", String()) == script_path);
+	CHECK(int(content.get("scriptPropertyCount", 0)) == 4);
+
+	const Array properties = content.get("properties", Array());
+	const Dictionary speed_property = _find_property(properties, "exported_speed");
+	REQUIRE_FALSE(speed_property.is_empty());
+	CHECK((int64_t(speed_property.get("usage", 0)) & PROPERTY_USAGE_SCRIPT_VARIABLE) == 0);
+	CHECK(speed_property.get("source", String()) == "script");
+	CHECK(bool(speed_property.get("scriptExposed", false)));
+	CHECK(speed_property.get("scriptPath", String()) == script_path);
+	CHECK(_find_property(properties, "runtime_only").is_empty());
+	CHECK(_find_property(properties, "stored_only").is_empty());
+	const String base_script_path = "res://tests/editor/mcp/data/mcp_node_base_script.gd";
+	const Dictionary base_property = _find_property(properties, "exported_base");
+	REQUIRE_FALSE(base_property.is_empty());
+	CHECK(base_property.get("source", String()) == "script");
+	CHECK(base_property.get("scriptPath", String()) == base_script_path);
+
+	const Array property_layout = content.get("propertyLayout", Array());
+	const Dictionary custom_category = _find_layout_entry(property_layout, "category", "MCP Test");
+	REQUIRE_FALSE(custom_category.is_empty());
+	CHECK(custom_category.get("source", String()) == "script");
+	CHECK_FALSE(_find_layout_entry(property_layout, "group", "Values").is_empty());
+	CHECK_FALSE(_find_layout_entry(property_layout, "subgroup", "References").is_empty());
+	const Dictionary base_category = _find_layout_entry(property_layout, "category", "mcp_node_base_script.gd");
+	REQUIRE_FALSE(base_category.is_empty());
+	CHECK(base_category.get("scriptPath", String()) == base_script_path);
+
+	Node *in_memory_node = memnew(Node);
+	in_memory_node->set_name("InMemory");
+	fixture.scene_root->add_child(in_memory_node);
+	in_memory_node->set_owner(fixture.scene_root);
+	Ref<GDScript> in_memory_script;
+	in_memory_script.instantiate();
+	in_memory_script->set_source_code("extends Node\n@export_group(\"Memory\")\n@export var in_memory_value: int = 7\n");
+	REQUIRE(in_memory_script->reload() == OK);
+	in_memory_node->set_script(in_memory_script);
+	REQUIRE(in_memory_node->get_script_instance() != nullptr);
+
+	Dictionary in_memory_arguments;
+	in_memory_arguments["path"] = "InMemory";
+	const MCPToolRegistry::CallResult in_memory_result = _call_tool(fixture.registry, "godot.node.get_properties", in_memory_arguments);
+	if (!_check_tool_success(in_memory_result)) {
+		return;
+	}
+	const Dictionary in_memory_content = in_memory_result.result.get("structuredContent", Dictionary());
+	CHECK_FALSE(in_memory_content.has("scriptPath"));
+	CHECK(int(in_memory_content.get("scriptPropertyCount", 0)) == 1);
+	const Dictionary in_memory_property = _find_property(in_memory_content.get("properties", Array()), "in_memory_value");
+	REQUIRE_FALSE(in_memory_property.is_empty());
+	CHECK(in_memory_property.get("source", String()) == "script");
+	CHECK(bool(in_memory_property.get("scriptExposed", false)));
+	CHECK_FALSE(in_memory_property.has("scriptPath"));
+	CHECK(in_memory_property.get("value", Variant()) == "i:7");
+	const Dictionary memory_group = _find_layout_entry(in_memory_content.get("propertyLayout", Array()), "group", "Memory");
+	REQUIRE_FALSE(memory_group.is_empty());
+	CHECK(memory_group.get("source", String()) == "script");
+	CHECK_FALSE(memory_group.has("scriptPath"));
 }
 #endif
 

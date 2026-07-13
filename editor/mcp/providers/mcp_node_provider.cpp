@@ -118,6 +118,65 @@ static bool _validate_string_argument(const Dictionary &p_arguments, const Strin
 	return true;
 }
 
+static bool _is_script_path(const Ref<Script> &p_script, const String &p_path) {
+	if (p_path.is_empty()) {
+		return false;
+	}
+	Ref<Script> script = p_script;
+	while (script.is_valid()) {
+		if (script->get_path() == p_path) {
+			return true;
+		}
+		script = script->get_base_script();
+	}
+	return false;
+}
+
+static String _get_layout_kind(const PropertyInfo &p_property) {
+	if (p_property.usage & PROPERTY_USAGE_CATEGORY) {
+		return "category";
+	}
+	if (p_property.usage & PROPERTY_USAGE_GROUP) {
+		return "group";
+	}
+	if (p_property.usage & PROPERTY_USAGE_SUBGROUP) {
+		return "subgroup";
+	}
+	return String();
+}
+
+static bool _is_native_class_category(Node *p_node, const PropertyInfo &p_property) {
+	return (p_property.usage & PROPERTY_USAGE_CATEGORY) &&
+			p_property.hint_string == String(p_property.name) && p_node->is_class(p_property.name);
+}
+
+static Dictionary _make_node_value_reference(Node *p_scene_root, const Variant &p_value) {
+	if (p_value.get_type() != Variant::OBJECT) {
+		return Dictionary();
+	}
+	Node *referenced_node = Object::cast_to<Node>(p_value.get_validated_object());
+	if (!referenced_node) {
+		return Dictionary();
+	}
+
+	Dictionary reference;
+	if (MCPSceneUtils::is_node_in_scene(p_scene_root, referenced_node)) {
+		reference = MCPSceneUtils::make_node_summary(p_scene_root, referenced_node);
+		reference["scope"] = "editedScene";
+	} else {
+		reference["name"] = String(referenced_node->get_name());
+		reference["type"] = referenced_node->get_class();
+		if (referenced_node->is_inside_tree()) {
+			reference["path"] = String(referenced_node->get_path());
+			reference["scope"] = "sceneTree";
+		} else {
+			reference["scope"] = "detached";
+		}
+	}
+	reference["kind"] = "node";
+	return reference;
+}
+
 static void _set_error(String *r_error, const String &p_message) {
 	if (r_error) {
 		*r_error = p_message;
@@ -153,7 +212,7 @@ Error MCPNodeProvider::register_tools(MCPToolRegistry *p_registry, String *r_err
 	}
 
 	Error err = p_registry->register_tool(
-			MCPToolUtils::make_tool_definition("godot.node.get_properties", "Get editor-visible properties for a node.", _path_schema()),
+			MCPToolUtils::make_tool_definition("godot.node.get_properties", "Get all native and script-exposed node properties marked for editor use.", _path_schema()),
 			callable_mp(this, &MCPNodeProvider::get_properties), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
 	if (err == OK) {
 		err = p_registry->register_tool(
@@ -208,42 +267,99 @@ Dictionary MCPNodeProvider::get_properties(const Dictionary &p_arguments, const 
 		return MCPToolUtils::make_error_result("NODE_NOT_FOUND", "Node was not found: " + path);
 	}
 
+	const Ref<Script> node_script = node->get_script();
+	const String attached_script_path = node_script.is_valid() ? node_script->get_path() : String();
+	bool in_script_section = node->get_script_instance() != nullptr;
+	String current_script_path = attached_script_path;
 	Array properties;
+	Array property_layout;
+	int script_property_count = 0;
 	List<PropertyInfo> property_list;
-	node->get_property_list(&property_list);
+	node->get_property_list(&property_list, true);
 	for (const PropertyInfo &property : property_list) {
-		if (!(property.usage & PROPERTY_USAGE_EDITOR) ||
-				(property.usage & (PROPERTY_USAGE_CATEGORY | PROPERTY_USAGE_GROUP | PROPERTY_USAGE_SUBGROUP))) {
+		const String layout_kind = _get_layout_kind(property);
+		if (!layout_kind.is_empty()) {
+			if (layout_kind == "category" && in_script_section) {
+				if (_is_native_class_category(node, property)) {
+					in_script_section = false;
+					current_script_path = String();
+				} else if (_is_script_path(node_script, property.hint_string) ||
+						property.hint_string.begins_with("res://")) {
+					current_script_path = property.hint_string;
+				}
+			}
+			Dictionary layout_entry = MCPToolUtils::make_property_description(property);
+			layout_entry["kind"] = layout_kind;
+			if (in_script_section) {
+				layout_entry["source"] = "script";
+				if (!current_script_path.is_empty()) {
+					layout_entry["scriptPath"] = current_script_path;
+				}
+			} else {
+				layout_entry["source"] = "native";
+			}
+			property_layout.push_back(layout_entry);
 			continue;
+		}
+		if (!(property.usage & PROPERTY_USAGE_EDITOR)) {
+			continue;
+		}
+
+		const bool script_exposed = in_script_section;
+		const String property_script_path = !current_script_path.is_empty() ? current_script_path : attached_script_path;
+		Dictionary item = MCPToolUtils::make_property_description(property);
+		item["readOnly"] = bool(property.usage & PROPERTY_USAGE_READ_ONLY);
+		item["scriptExposed"] = script_exposed;
+		item["source"] = script_exposed ? "script" : "native";
+		if (script_exposed && !property_script_path.is_empty()) {
+			item["scriptPath"] = property_script_path;
 		}
 
 		bool valid = false;
 		const Variant value = node->get(property.name, &valid);
+		item["valueAvailable"] = valid;
 		if (!valid) {
-			continue;
-		}
-		Dictionary item;
-		item["name"] = String(property.name);
-		item["type"] = Variant::get_type_name(property.type);
-		item["hint"] = int(property.hint);
-		item["hintString"] = property.hint_string;
-		item["usage"] = int64_t(property.usage);
-		item["readOnly"] = bool(property.usage & PROPERTY_USAGE_READ_ONLY);
-
-		Variant encoded_value;
-		String encoding_error;
-		if (MCPVariantCodec::encode(value, encoded_value, &encoding_error) == OK) {
-			item["encodable"] = true;
-			item["value"] = encoded_value;
-		} else {
 			item["encodable"] = false;
-			item["encodingError"] = encoding_error;
+			item["encodingError"] = "Property value is unavailable.";
+		} else {
+			Variant encoded_value;
+			String encoding_error;
+			if (MCPVariantCodec::encode(value, encoded_value, &encoding_error) == OK) {
+				item["encodable"] = true;
+				item["value"] = encoded_value;
+			} else {
+				item["encodable"] = false;
+				item["encodingError"] = encoding_error;
+				const Dictionary value_reference = _make_node_value_reference(scene_root, value);
+				if (!value_reference.is_empty()) {
+					item["valueReference"] = value_reference;
+				}
+			}
 		}
+
+		Dictionary layout_entry;
+		layout_entry["kind"] = "property";
+		layout_entry["name"] = String(property.name);
+		layout_entry["propertyIndex"] = properties.size();
+		layout_entry["source"] = item["source"];
+		if (script_exposed && !property_script_path.is_empty()) {
+			layout_entry["scriptPath"] = property_script_path;
+		}
+		property_layout.push_back(layout_entry);
 		properties.push_back(item);
+		if (script_exposed) {
+			script_property_count++;
+		}
 	}
 
 	Dictionary result = MCPSceneUtils::make_node_summary(scene_root, node);
+	if (!attached_script_path.is_empty()) {
+		result["scriptPath"] = attached_script_path;
+	}
+	result["propertyCount"] = properties.size();
+	result["scriptPropertyCount"] = script_property_count;
 	result["properties"] = properties;
+	result["propertyLayout"] = property_layout;
 	return MCPToolUtils::make_success_result(result);
 }
 

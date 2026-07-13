@@ -40,4 +40,3 @@ public:
 	static Error render(const ExtendGDScriptParser &p_parser, const String &p_view, bool p_include_comments,
 			const Dictionary &p_member, Dictionary &r_document, String *r_error = nullptr);
 };
-

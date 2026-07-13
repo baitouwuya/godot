@@ -32,6 +32,8 @@
 
 #include "mcp_script_analysis_sync.h"
 #include "mcp_script_buffer.h"
+#include "mcp_script_document.h"
+#include "mcp_scene_utils.h"
 #include "mcp_tool_utils.h"
 
 #include "core/io/dir_access.h"
@@ -39,6 +41,9 @@
 #include "core/mcp/mcp_tool_registry.h"
 #include "core/object/callable_mp.h"
 #include "editor/file_system/editor_file_system.h"
+#include "modules/gdscript/language_server/gdscript_analysis_session.h"
+#include "modules/gdscript/language_server/gdscript_extend_parser.h"
+#include "scene/main/node.h"
 
 namespace {
 
@@ -58,12 +63,27 @@ static Dictionary _object_schema(const Dictionary &p_properties, const PackedStr
 	return schema;
 }
 
-static Dictionary _path_schema() {
+static Dictionary _script_selector_schema(const Dictionary &p_extra_properties = Dictionary()) {
 	Dictionary properties;
-	properties["path"] = _property_schema("string", "External GDScript path beginning with res://.");
-	PackedStringArray required;
-	required.push_back("path");
-	return _object_schema(properties, required);
+	properties["path"] = _property_schema("string", "External GDScript or built-in res:// resource path.");
+	properties["nodePath"] = _property_schema("string", "Node path in the edited scene whose attached GDScript should be used.");
+	for (const KeyValue<Variant, Variant> &property : p_extra_properties) {
+		properties[property.key] = property.value;
+	}
+	Dictionary schema = _object_schema(properties, PackedStringArray());
+	Dictionary path_required;
+	PackedStringArray path_names;
+	path_names.push_back("path");
+	path_required["required"] = path_names;
+	Dictionary node_required;
+	PackedStringArray node_names;
+	node_names.push_back("nodePath");
+	node_required["required"] = node_names;
+	Array one_of;
+	one_of.push_back(path_required);
+	one_of.push_back(node_required);
+	schema["oneOf"] = one_of;
+	return schema;
 }
 
 static Dictionary _create_schema() {
@@ -76,9 +96,47 @@ static Dictionary _create_schema() {
 	return _object_schema(properties, required);
 }
 
+static Dictionary _member_schema() {
+	Dictionary properties;
+	Dictionary kind = _property_schema("string", "Member kind to read.");
+	PackedStringArray kinds;
+	kinds.push_back("class");
+	kinds.push_back("property");
+	kinds.push_back("variable");
+	kinds.push_back("constant");
+	kinds.push_back("enum");
+	kinds.push_back("enumValue");
+	kinds.push_back("signal");
+	kinds.push_back("method");
+	kinds.push_back("parameter");
+	kind["enum"] = kinds;
+	properties["kind"] = kind;
+	properties["name"] = _property_schema("string", "Exact member name.");
+	properties["owner"] = _property_schema("string", "Optional inner class name, or required method/signal name for a parameter.");
+	PackedStringArray required;
+	required.push_back("kind");
+	required.push_back("name");
+	return _object_schema(properties, required);
+}
+
+static Dictionary _get_schema() {
+	Dictionary properties;
+	Dictionary view = _property_schema("string", "documentation omits implementations; full returns authoritative source lines.");
+	PackedStringArray views;
+	views.push_back("documentation");
+	views.push_back("full");
+	view["enum"] = views;
+	view["default"] = "documentation";
+	properties["view"] = view;
+	Dictionary include_comments = _property_schema("boolean", "Include documentation or source comments.");
+	include_comments["default"] = true;
+	properties["includeComments"] = include_comments;
+	properties["member"] = _member_schema();
+	return _script_selector_schema(properties);
+}
+
 static Dictionary _edit_schema() {
 	Dictionary properties;
-	properties["path"] = _property_schema("string", "External GDScript path beginning with res://.");
 	properties["text"] = _property_schema("string", "Complete replacement source text.");
 
 	Dictionary expected_revision = _property_schema("integer", "TextEdit revision returned by godot.script.get.");
@@ -90,10 +148,11 @@ static Dictionary _edit_schema() {
 	expected_sha256["pattern"] = "^[0-9a-fA-F]{64}$";
 	properties["expected_sha256"] = expected_sha256;
 
+	Dictionary schema = _script_selector_schema(properties);
 	PackedStringArray required;
-	required.push_back("path");
 	required.push_back("text");
-	Dictionary schema = _object_schema(properties, required);
+	Dictionary text_required;
+	text_required["required"] = required;
 
 	PackedStringArray revision_required;
 	revision_required.push_back("expected_revision");
@@ -106,7 +165,12 @@ static Dictionary _edit_schema() {
 	Array any_of;
 	any_of.push_back(revision_option);
 	any_of.push_back(sha_option);
-	schema["anyOf"] = any_of;
+	Array all_of;
+	all_of.push_back(text_required);
+	Dictionary revision_choice;
+	revision_choice["anyOf"] = any_of;
+	all_of.push_back(revision_choice);
+	schema["allOf"] = all_of;
 	return schema;
 }
 
@@ -143,6 +207,67 @@ static Dictionary _open_buffer(const String &p_path, MCPScriptBuffer &r_buffer) 
 	return err == OK ? Dictionary() : MCPToolUtils::make_error_result(_buffer_error_code(err), error);
 }
 
+static Dictionary _open_selected_buffer(const Dictionary &p_arguments, MCPScriptBuffer &r_buffer) {
+	const Variant path_value = p_arguments.get("path", Variant());
+	const Variant node_path_value = p_arguments.get("nodePath", Variant());
+	const bool has_path = path_value.get_type() == Variant::STRING && !String(path_value).is_empty();
+	const bool has_node_path = node_path_value.get_type() == Variant::STRING && !String(node_path_value).is_empty();
+	if (has_path == has_node_path) {
+		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "Exactly one non-empty path or nodePath is required.");
+	}
+	if (has_path) {
+		return _open_buffer(path_value, r_buffer);
+	}
+
+	Node *scene_root = MCPSceneUtils::get_edited_scene_root();
+	if (!scene_root) {
+		return MCPToolUtils::make_error_result("NO_SCENE", "No edited scene is open.");
+	}
+	Node *node = MCPSceneUtils::find_node(scene_root, node_path_value);
+	if (!node) {
+		return MCPToolUtils::make_error_result("NODE_NOT_FOUND", "Node was not found: " + String(node_path_value));
+	}
+	const Ref<Script> script = node->get_script();
+	if (script.is_null()) {
+		return MCPToolUtils::make_error_result("SCRIPT_NOT_FOUND", "The selected node does not have an attached script.");
+	}
+	String error;
+	const Error err = MCPScriptBuffer::open(script, r_buffer, &error);
+	return err == OK ? Dictionary() : MCPToolUtils::make_error_result(_buffer_error_code(err), error);
+}
+
+static bool _get_script_view(const Dictionary &p_arguments, String &r_view, bool &r_include_comments, Dictionary &r_member, String &r_error) {
+	r_view = p_arguments.get("view", "documentation");
+	r_include_comments = p_arguments.get("includeComments", true);
+	r_member = p_arguments.get("member", Dictionary());
+	if ((r_view != "documentation" && r_view != "full") ||
+			(p_arguments.has("view") && p_arguments["view"].get_type() != Variant::STRING) ||
+			(p_arguments.has("includeComments") && p_arguments["includeComments"].get_type() != Variant::BOOL) ||
+			(p_arguments.has("member") && p_arguments["member"].get_type() != Variant::DICTIONARY)) {
+		r_error = "view, includeComments, or member has an invalid type or value.";
+		return false;
+	}
+	if (!r_member.is_empty()) {
+		String unknown;
+		PackedStringArray allowed;
+		allowed.push_back("kind");
+		allowed.push_back("name");
+		allowed.push_back("owner");
+		if (!MCPToolUtils::has_only_arguments(r_member, allowed, unknown) ||
+				r_member.get("kind", Variant()).get_type() != Variant::STRING || String(r_member.get("kind", String())).is_empty() ||
+				r_member.get("name", Variant()).get_type() != Variant::STRING || String(r_member.get("name", String())).is_empty() ||
+				(r_member.has("owner") && r_member["owner"].get_type() != Variant::STRING)) {
+			r_error = "member requires non-empty string kind and name fields, with an optional string owner.";
+			return false;
+		}
+		if (String(r_member.get("kind", String())) == "parameter" && String(r_member.get("owner", String())).is_empty()) {
+			r_error = "A parameter member query requires its method or signal owner.";
+			return false;
+		}
+	}
+	return true;
+}
+
 static void _set_error(String *r_error, const String &p_message) {
 	if (r_error) {
 		*r_error = p_message;
@@ -159,13 +284,12 @@ MCPScriptProvider::~MCPScriptProvider() {
 	unregister_tools();
 }
 
-bool MCPScriptProvider::_resolve_analysis_context(const Dictionary &p_context, String &r_session_id, String &r_error) {
+bool MCPScriptProvider::_resolve_analysis_context(const Dictionary &p_context, String &r_session_id, Ref<GDScriptAnalysisSession> &r_session, String &r_error) {
 	if (session_manager.is_null()) {
 		r_error = "A GDScript analysis session manager is required.";
 		return false;
 	}
-	Ref<GDScriptAnalysisSession> session;
-	return session_manager->resolve_context(p_context, r_session_id, session, &r_error) == OK;
+	return session_manager->resolve_context(p_context, r_session_id, r_session, &r_error) == OK;
 }
 
 Error MCPScriptProvider::register_tools(MCPToolRegistry *p_registry, String *r_error) {
@@ -186,7 +310,7 @@ Error MCPScriptProvider::register_tools(MCPToolRegistry *p_registry, String *r_e
 			callable_mp(this, &MCPScriptProvider::create), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
 	if (err == OK) {
 		err = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.script.get", "Read the authoritative Script editor buffer.", _path_schema()),
+				MCPToolUtils::make_tool_definition("godot.script.get", "Read a GDScript as documentation, a member, or full source.", _get_schema()),
 				callable_mp(this, &MCPScriptProvider::get), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
 	}
 	if (err == OK) {
@@ -196,7 +320,7 @@ Error MCPScriptProvider::register_tools(MCPToolRegistry *p_registry, String *r_e
 	}
 	if (err == OK) {
 		err = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.script.save", "Explicitly save an authoritative Script editor buffer.", _path_schema()),
+				MCPToolUtils::make_tool_definition("godot.script.save", "Explicitly save an authoritative Script editor buffer.", _script_selector_schema()),
 				callable_mp(this, &MCPScriptProvider::save), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
 	}
 	if (err != OK) {
@@ -232,8 +356,9 @@ Dictionary MCPScriptProvider::create(const Dictionary &p_arguments, const Dictio
 	}
 	text = p_arguments["text"];
 	String session_id;
+	Ref<GDScriptAnalysisSession> session;
 	String analysis_error;
-	if (!_resolve_analysis_context(p_context, session_id, analysis_error)) {
+	if (!_resolve_analysis_context(p_context, session_id, session, analysis_error)) {
 		return MCPToolUtils::make_error_result("ANALYSIS_UNAVAILABLE", analysis_error);
 	}
 
@@ -297,22 +422,30 @@ Dictionary MCPScriptProvider::create(const Dictionary &p_arguments, const Dictio
 Dictionary MCPScriptProvider::get(const Dictionary &p_arguments, const Dictionary &p_context) {
 	PackedStringArray allowed_arguments;
 	allowed_arguments.push_back("path");
+	allowed_arguments.push_back("nodePath");
+	allowed_arguments.push_back("view");
+	allowed_arguments.push_back("includeComments");
+	allowed_arguments.push_back("member");
 	String unknown_argument;
 	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed_arguments, unknown_argument)) {
 		return _unknown_argument_error(unknown_argument);
 	}
-	String path;
-	if (!_get_required_string(p_arguments, "path", path)) {
-		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "A non-empty string path is required.");
+	String view;
+	bool include_comments = true;
+	Dictionary member;
+	String argument_error;
+	if (!_get_script_view(p_arguments, view, include_comments, member, argument_error)) {
+		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", argument_error);
 	}
 	String session_id;
+	Ref<GDScriptAnalysisSession> session;
 	String analysis_error;
-	if (!_resolve_analysis_context(p_context, session_id, analysis_error)) {
+	if (!_resolve_analysis_context(p_context, session_id, session, analysis_error)) {
 		return MCPToolUtils::make_error_result("ANALYSIS_UNAVAILABLE", analysis_error);
 	}
 
 	MCPScriptBuffer buffer;
-	const Dictionary buffer_error = _open_buffer(path, buffer);
+	const Dictionary buffer_error = _open_selected_buffer(p_arguments, buffer);
 	if (!buffer_error.is_empty()) {
 		return buffer_error;
 	}
@@ -321,6 +454,20 @@ Dictionary MCPScriptProvider::get(const Dictionary &p_arguments, const Dictionar
 	if (MCPScriptAnalysisSync::sync_snapshot(session_manager, session_id, result, diagnostics, &analysis_error) != OK) {
 		return MCPScriptAnalysisSync::make_failure(result, false, false, false, analysis_error);
 	}
+	ExtendGDScriptParser *parser = session->get_parse_result(result.get("path", String()));
+	if (!parser) {
+		return MCPToolUtils::make_error_result("ANALYSIS_UNAVAILABLE", "The synchronized GDScript parser result is unavailable.");
+	}
+	Dictionary document;
+	String document_error;
+	const Error render_error = MCPScriptDocument::render(*parser, view, include_comments, member, document, &document_error);
+	if (render_error != OK) {
+		return MCPToolUtils::make_error_result(render_error == ERR_DOES_NOT_EXIST ? "MEMBER_NOT_FOUND" : "INVALID_ARGUMENTS", document_error);
+	}
+	result.erase("text");
+	for (const KeyValue<Variant, Variant> &entry : document) {
+		result[entry.key] = entry.value;
+	}
 	result["diagnostics"] = diagnostics;
 	return MCPToolUtils::make_success_result(result);
 }
@@ -328,6 +475,7 @@ Dictionary MCPScriptProvider::get(const Dictionary &p_arguments, const Dictionar
 Dictionary MCPScriptProvider::edit(const Dictionary &p_arguments, const Dictionary &p_context) {
 	PackedStringArray allowed_arguments;
 	allowed_arguments.push_back("path");
+	allowed_arguments.push_back("nodePath");
 	allowed_arguments.push_back("text");
 	allowed_arguments.push_back("expected_revision");
 	allowed_arguments.push_back("expected_sha256");
@@ -336,18 +484,18 @@ Dictionary MCPScriptProvider::edit(const Dictionary &p_arguments, const Dictiona
 		return _unknown_argument_error(unknown_argument);
 	}
 
-	String path;
-	if (!_get_required_string(p_arguments, "path", path) || p_arguments.get("text", Variant()).get_type() != Variant::STRING) {
-		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "A non-empty path and string text are required.");
+	if (p_arguments.get("text", Variant()).get_type() != Variant::STRING) {
+		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "A string text replacement is required.");
 	}
 	String session_id;
+	Ref<GDScriptAnalysisSession> session;
 	String analysis_error;
-	if (!_resolve_analysis_context(p_context, session_id, analysis_error)) {
+	if (!_resolve_analysis_context(p_context, session_id, session, analysis_error)) {
 		return MCPToolUtils::make_error_result("ANALYSIS_UNAVAILABLE", analysis_error);
 	}
 
 	MCPScriptBuffer buffer;
-	const Dictionary buffer_error = _open_buffer(path, buffer);
+	const Dictionary buffer_error = _open_selected_buffer(p_arguments, buffer);
 	if (!buffer_error.is_empty()) {
 		return buffer_error;
 	}
@@ -359,7 +507,7 @@ Dictionary MCPScriptProvider::edit(const Dictionary &p_arguments, const Dictiona
 			p_arguments.get("expected_sha256", Variant()), changed, current_state, &edit_error);
 	if (err == ERR_BUSY) {
 		const Dictionary snapshot = buffer.get_snapshot();
-		current_state["path"] = snapshot.get("path", path);
+		current_state["path"] = snapshot.get("path", p_arguments.get("path", String()));
 		current_state["unsaved"] = snapshot.get("unsaved", false);
 		return MCPToolUtils::make_error_result(STALE_REVISION_ERROR_CODE, edit_error, current_state);
 	}
@@ -380,22 +528,20 @@ Dictionary MCPScriptProvider::edit(const Dictionary &p_arguments, const Dictiona
 Dictionary MCPScriptProvider::save(const Dictionary &p_arguments, const Dictionary &p_context) {
 	PackedStringArray allowed_arguments;
 	allowed_arguments.push_back("path");
+	allowed_arguments.push_back("nodePath");
 	String unknown_argument;
 	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed_arguments, unknown_argument)) {
 		return _unknown_argument_error(unknown_argument);
 	}
-	String path;
-	if (!_get_required_string(p_arguments, "path", path)) {
-		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "A non-empty string path is required.");
-	}
 	String session_id;
+	Ref<GDScriptAnalysisSession> session;
 	String analysis_error;
-	if (!_resolve_analysis_context(p_context, session_id, analysis_error)) {
+	if (!_resolve_analysis_context(p_context, session_id, session, analysis_error)) {
 		return MCPToolUtils::make_error_result("ANALYSIS_UNAVAILABLE", analysis_error);
 	}
 
 	MCPScriptBuffer buffer;
-	const Dictionary buffer_error = _open_buffer(path, buffer);
+	const Dictionary buffer_error = _open_selected_buffer(p_arguments, buffer);
 	if (!buffer_error.is_empty()) {
 		return buffer_error;
 	}

@@ -16,6 +16,7 @@ if not (
         "mcp_gdscript_session_manager.cpp",
         "mcp_gdscript_tool_utils.cpp",
         "mcp_script_analysis_sync.cpp",
+		"mcp_script_document.cpp",
         "mcp_script_provider.cpp",
     }
     sources = [source for source in sources if source not in gdscript_sources]

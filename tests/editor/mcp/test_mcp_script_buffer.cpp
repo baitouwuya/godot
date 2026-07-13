@@ -92,6 +92,33 @@ TEST_CASE("[MCP][Provider] Script paths are limited to external gd files") {
 	CHECK(absolute_path.is_empty());
 }
 
+TEST_CASE("[MCP][Provider] Script paths accept project built-in GDScript subresources") {
+	Error temp_error = OK;
+	Ref<DirAccess> temporary_directory = DirAccess::create_temp("mcp_script_builtin_root", false, &temp_error);
+	REQUIRE(temp_error == OK);
+	REQUIRE(temporary_directory.is_valid());
+	REQUIRE(temporary_directory->make_dir("project") == OK);
+	const String project_root = temporary_directory->get_current_dir().path_join("project");
+
+	String resource_path;
+	String absolute_path;
+	String error;
+	bool built_in = false;
+	REQUIRE(MCPScriptBuffer::resolve_script_path_for_root(
+				"res://main.tscn::GDScript_actor", project_root, resource_path, absolute_path, built_in, &error) == OK);
+	CHECK(built_in);
+	CHECK(resource_path == "res://main.tscn::GDScript_actor");
+	CHECK(absolute_path == project_root.path_join("main.tscn").simplify_path());
+	CHECK(error.is_empty());
+
+	CHECK(MCPScriptBuffer::resolve_script_path_for_root(
+			  "res://main.tscn::", project_root, resource_path, absolute_path, built_in, &error) == ERR_INVALID_PARAMETER);
+	CHECK(MCPScriptBuffer::resolve_script_path_for_root(
+			  "res://main.tscn::nested/id", project_root, resource_path, absolute_path, built_in, &error) == ERR_INVALID_PARAMETER);
+	CHECK(MCPScriptBuffer::resolve_script_path_for_root(
+			  "res://../outside.tscn::GDScript_actor", project_root, resource_path, absolute_path, built_in, &error) != OK);
+}
+
 TEST_CASE("[MCP][Provider] Authoritative script paths accept project absolutes and reject escape links") {
 	Error temp_error = OK;
 	Ref<DirAccess> temporary_directory = DirAccess::create_temp("mcp_script_authoritative", false, &temp_error);

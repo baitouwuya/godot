@@ -199,7 +199,8 @@ bool MCPGDScriptProvider::_parse_path(const Dictionary &p_arguments, String &r_p
 
 	String resource_path;
 	String absolute_path;
-	const Error path_error = MCPScriptBuffer::resolve_path_for_root(r_path, _get_project_root(), resource_path, absolute_path, &r_error);
+	bool built_in = false;
+	const Error path_error = MCPScriptBuffer::resolve_script_path_for_root(r_path, _get_project_root(), resource_path, absolute_path, built_in, &r_error);
 	if (path_error != OK) {
 		r_path = String();
 		return false;

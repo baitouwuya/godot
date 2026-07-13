@@ -63,11 +63,22 @@ TEST_CASE("[MCP][Provider] Script tools register with optimistic edit requiremen
 
 	const Array definitions = registry.get_tool_definitions(MCPToolRegistry::TOOL_SURFACE_MCP);
 	REQUIRE(definitions.size() == 4);
+	const Dictionary get_schema = Dictionary(definitions[1]).get("inputSchema", Dictionary());
+	const Dictionary get_properties = get_schema.get("properties", Dictionary());
+	CHECK(get_properties.has("path"));
+	CHECK(get_properties.has("nodePath"));
+	CHECK(get_properties.has("view"));
+	CHECK(get_properties.has("includeComments"));
+	CHECK(get_properties.has("member"));
+	CHECK(Array(get_schema.get("oneOf", Array())).size() == 2);
 	const Dictionary edit_schema = Dictionary(definitions[2]).get("inputSchema", Dictionary());
 	const Dictionary properties = edit_schema.get("properties", Dictionary());
+	CHECK(properties.has("nodePath"));
 	CHECK(properties.has("expected_revision"));
 	CHECK(properties.has("expected_sha256"));
-	CHECK(Array(edit_schema.get("anyOf", Array())).size() == 2);
+	const Array edit_constraints = edit_schema.get("allOf", Array());
+	REQUIRE(edit_constraints.size() == 2);
+	CHECK(Array(Dictionary(edit_constraints[1]).get("anyOf", Array())).size() == 2);
 
 	MCPToolCallContext context;
 	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;

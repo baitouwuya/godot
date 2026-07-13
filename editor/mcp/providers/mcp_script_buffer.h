@@ -35,6 +35,7 @@
 #include "core/variant/variant.h"
 
 class CodeEdit;
+class Script;
 class ScriptEditorBase;
 class TextEditorBase;
 
@@ -44,9 +45,12 @@ public:
 	static Error normalize_path(const String &p_path, String &r_resource_path, String &r_absolute_path, String *r_error = nullptr);
 	static Error resolve_path_for_root(const String &p_path, const String &p_project_root, String &r_resource_path, String &r_absolute_path, String *r_error = nullptr);
 	static Error resolve_path(const String &p_path, String &r_resource_path, String &r_absolute_path, String *r_error = nullptr);
+	static Error resolve_script_path_for_root(const String &p_path, const String &p_project_root, String &r_resource_path, String &r_absolute_path, bool &r_built_in, String *r_error = nullptr);
+	static Error resolve_script_path(const String &p_path, String &r_resource_path, String &r_absolute_path, bool &r_built_in, String *r_error = nullptr);
 	static Error read_authoritative_snapshot_for_root(const String &p_path, const String &p_project_root, Dictionary &r_snapshot, String *r_error = nullptr);
 	static Error read_authoritative_snapshot(const String &p_path, Dictionary &r_snapshot, String *r_error = nullptr);
 	static Error open(const String &p_path, MCPScriptBuffer &r_buffer, String *r_error = nullptr);
+	static Error open(const Ref<Script> &p_script, MCPScriptBuffer &r_buffer, String *r_error = nullptr);
 	static void apply_text_edit(CodeEdit *p_text_edit, const String &p_text);
 
 	bool is_valid() const;
@@ -57,6 +61,8 @@ public:
 
 private:
 	String path;
+	String scene_path;
+	bool built_in = false;
 	ScriptEditorBase *editor = nullptr;
 	TextEditorBase *text_editor = nullptr;
 	CodeEdit *code_edit = nullptr;

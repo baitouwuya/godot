@@ -526,7 +526,7 @@ try {
 		method = "tools/list"
 		params = @{}
 	} | ConvertTo-Json -Depth 4 -Compress
-	$initialScriptText = "extends Node`nvar value: int = 1`n"
+	$initialScriptText = "## Smoke script.`nextends Node`n`n## Stored value.`nvar value: int = 1`n"
 	$initialScriptSha = Get-TextSha256 -Text $initialScriptText
 	$createScriptRequest = New-ToolCallRequest -Id 3 -Name "godot.script.create" -Arguments @{
 		path = "res://mcp_smoke_script.gd"
@@ -610,6 +610,12 @@ try {
 
 	$getResult = $scriptResponses["11"].result.structuredContent
 	Assert-Condition ([string]$getResult.sha256 -ceq $initialScriptSha) "a second MCP session did not read the authoritative initial ScriptEditor buffer."
+	Assert-Condition ([string]$getResult.view -ceq "documentation") "script/get did not default to the documentation view."
+	Assert-Condition (-not ($getResult.PSObject.Properties.Name -contains "lines")) "documentation script/get duplicated members into a top-level lines array."
+	Assert-Condition ([string]$getResult.documentation -ceq "Smoke script.") "documentation script/get did not return parsed class documentation."
+	Assert-Condition (@($getResult.members).Count -eq 1) "documentation script/get returned an unexpected member count."
+	Assert-Condition ([string]$getResult.members[0].declaration -ceq "var value: int = 1") "documentation script/get returned an unexpected declaration."
+	Assert-Condition ([int]$getResult.members[0].line -eq 5) "documentation script/get did not return a 1-based source line."
 	$editResult = $scriptResponses["12"].result.structuredContent
 	Assert-Condition (-not (Test-ToolResultError -Result $scriptResponses["12"].result)) "script/edit returned a tool error."
 	Assert-Condition ([string]$editResult.sha256 -ceq $dirtyScriptSha) "script/edit returned an unexpected dirty SHA-256."

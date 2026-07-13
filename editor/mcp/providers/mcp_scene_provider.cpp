@@ -163,10 +163,12 @@ Dictionary MCPSceneProvider::get_tree(const Dictionary &p_arguments, const Dicti
 	const Variant root_path_value = p_arguments.get("rootPath", ".");
 	const Variant max_depth_value = p_arguments.get("maxDepth", -1);
 	const Variant include_internal_value = p_arguments.get("includeInternal", false);
-	if (root_path_value.get_type() != Variant::STRING || max_depth_value.get_type() != Variant::INT ||
+	int64_t max_depth = 0;
+	if (root_path_value.get_type() != Variant::STRING ||
+			!MCPToolUtils::try_get_json_integer(max_depth_value, -1, 64, max_depth) ||
 			include_internal_value.get_type() != Variant::BOOL) {
 		return MCPToolUtils::make_error_result(
-				"INVALID_ARGUMENTS", "rootPath must be a string, maxDepth an integer, and includeInternal a boolean.");
+				"INVALID_ARGUMENTS", "rootPath must be a string, maxDepth an integer from -1 to 64, and includeInternal a boolean.");
 	}
 
 	Node *scene_root = _get_scene_root();
@@ -180,7 +182,7 @@ Dictionary MCPSceneProvider::get_tree(const Dictionary &p_arguments, const Dicti
 
 	Dictionary tree;
 	String tree_error;
-	const Error err = MCPSceneUtils::make_tree(scene_root, tree_root, int(max_depth_value), bool(include_internal_value), tree, &tree_error);
+	const Error err = MCPSceneUtils::make_tree(scene_root, tree_root, int(max_depth), bool(include_internal_value), tree, &tree_error);
 	if (err != OK) {
 		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", tree_error);
 	}

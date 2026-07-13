@@ -33,9 +33,25 @@
 #include "editor/mcp/providers/mcp_tool_utils.h"
 #include "tests/test_macros.h"
 
+#include <limits>
+
 TEST_FORCE_LINK(test_mcp_tool_utils);
 
 namespace TestMCPToolUtils {
+
+TEST_CASE("[MCP][Provider] JSON integers accept exact parser doubles and enforce ranges") {
+	int64_t value = 0;
+	CHECK(MCPToolUtils::try_get_json_integer(int64_t(-7), -10, 10, value));
+	CHECK(value == -7);
+	CHECK(MCPToolUtils::try_get_json_integer(3.0, -10, 10, value));
+	CHECK(value == 3);
+	CHECK_FALSE(MCPToolUtils::try_get_json_integer(3.5, -10, 10, value));
+	CHECK_FALSE(MCPToolUtils::try_get_json_integer(std::numeric_limits<double>::infinity(), -10, 10, value));
+	CHECK_FALSE(MCPToolUtils::try_get_json_integer(9007199254740992.0, INT64_MIN, INT64_MAX, value));
+	CHECK_FALSE(MCPToolUtils::try_get_json_integer("3", -10, 10, value));
+	CHECK_FALSE(MCPToolUtils::try_get_json_integer(11.0, -10, 10, value));
+	CHECK_FALSE(MCPToolUtils::try_get_json_integer(0, 1, -1, value));
+}
 
 TEST_CASE("[MCP][Provider] Property descriptions use a shared stable shape") {
 	const PropertyInfo property(Variant::OBJECT, "target", PROPERTY_HINT_NODE_TYPE, "Node", PROPERTY_USAGE_EDITOR | PROPERTY_USAGE_READ_ONLY, "Node");

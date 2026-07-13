@@ -592,7 +592,7 @@ try {
 		(New-ToolCallRequest -Id 12 -Name "godot.script.edit" -Arguments @{
 			path = "res://mcp_smoke_script.gd"
 			text = $dirtyScriptText
-			expected_sha256 = $initialScriptSha
+			expected_revision = [int64]$createResult.revision
 		}),
 		(New-ToolCallRequest -Id 13 -Name "godot.gdscript.diagnostics" -Arguments @{ path = "res://mcp_smoke_script.gd" }),
 		(New-ToolCallRequest -Id 14 -Name "godot.script.edit" -Arguments @{
@@ -642,7 +642,7 @@ try {
 		$initializeRequest,
 		$initializedNotification,
 		(New-ToolCallRequest -Id 21 -Name "godot.node.create" -Arguments @{ type = "Node"; name = "McpChild"; parentPath = "." }),
-		(New-ToolCallRequest -Id 22 -Name "godot.scene.get_tree" -Arguments @{}),
+		(New-ToolCallRequest -Id 22 -Name "godot.scene.get_tree" -Arguments @{ maxDepth = 3 }),
 		(New-ToolCallRequest -Id 23 -Name "godot.editor.get_state" -Arguments @{}),
 		(New-ToolCallRequest -Id 24 -Name "godot.editor.undo" -Arguments @{}),
 		(New-ToolCallRequest -Id 25 -Name "godot.scene.get_tree" -Arguments @{}),

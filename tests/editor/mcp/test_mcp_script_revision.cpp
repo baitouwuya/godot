@@ -42,6 +42,7 @@ TEST_CASE("[MCP][Provider] Script revisions accept exact revision or SHA expecta
 	String error;
 
 	CHECK(MCPScriptRevision::validate(text, revision, int64_t(revision), Variant(), state, &error) == OK);
+	CHECK(MCPScriptRevision::validate(text, revision, double(revision), Variant(), state, &error) == OK);
 	CHECK(error.is_empty());
 	CHECK(int64_t(state.get("currentRevision", -1)) == revision);
 	CHECK(state.get("currentSha256", String()) == text.sha256_text());
@@ -69,7 +70,9 @@ TEST_CASE("[MCP][Provider] Script revisions reject missing and malformed expecta
 	String error;
 	CHECK(MCPScriptRevision::validate("text", 1, Variant(), Variant(), state, &error) == ERR_INVALID_PARAMETER);
 	CHECK(MCPScriptRevision::validate("text", 1, "1", Variant(), state, &error) == ERR_INVALID_PARAMETER);
+	CHECK(MCPScriptRevision::validate("text", 1, 1.5, Variant(), state, &error) == ERR_INVALID_PARAMETER);
 	CHECK(MCPScriptRevision::validate("text", 1, -1, Variant(), state, &error) == ERR_PARAMETER_RANGE_ERROR);
+	CHECK(MCPScriptRevision::validate("text", 1, 4294967296.0, Variant(), state, &error) == ERR_PARAMETER_RANGE_ERROR);
 	CHECK(MCPScriptRevision::validate("text", 1, Variant(), "not-a-sha", state, &error) == ERR_INVALID_PARAMETER);
 }
 

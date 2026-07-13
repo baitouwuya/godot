@@ -66,7 +66,7 @@ static Error _write_text(const String &p_path, const String &p_text) {
 TEST_CASE("[MCP][Provider] GDScript tool utilities preserve argument and completion mappings") {
 	Dictionary arguments;
 	arguments["path"] = "res://tool_utils.gd";
-	arguments["line"] = 7;
+	arguments["line"] = 7.0;
 	PackedStringArray allowed;
 	allowed.push_back("path");
 	allowed.push_back("line");
@@ -79,6 +79,12 @@ TEST_CASE("[MCP][Provider] GDScript tool utilities preserve argument and complet
 	int line = 0;
 	CHECK(MCPGDScriptToolUtils::get_position_argument(arguments, "line", line, error));
 	CHECK(line == 7);
+	arguments["line"] = 7.5;
+	CHECK_FALSE(MCPGDScriptToolUtils::get_position_argument(arguments, "line", line, error));
+	CHECK(error == "line must be an integer.");
+	arguments["line"] = double(INT32_MAX) + 1.0;
+	CHECK_FALSE(MCPGDScriptToolUtils::get_position_argument(arguments, "line", line, error));
+	CHECK(error == "line must be a non-negative 32-bit integer.");
 
 	arguments["unknown"] = true;
 	CHECK_FALSE(MCPGDScriptToolUtils::validate_arguments(arguments, allowed, error));

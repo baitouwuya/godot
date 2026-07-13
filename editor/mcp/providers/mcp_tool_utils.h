@@ -42,5 +42,6 @@ Dictionary make_property_description(const PropertyInfo &p_property);
 Dictionary make_success_result(const Dictionary &p_structured_content);
 Dictionary make_error_result(const String &p_code, const String &p_message, const Dictionary &p_details = Dictionary());
 bool has_only_arguments(const Dictionary &p_arguments, const PackedStringArray &p_allowed_names, String &r_unknown_name);
+bool try_get_json_integer(const Variant &p_value, int64_t p_minimum, int64_t p_maximum, int64_t &r_value);
 
 } // namespace MCPToolUtils

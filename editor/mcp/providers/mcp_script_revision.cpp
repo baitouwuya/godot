@@ -30,6 +30,8 @@
 
 #include "mcp_script_revision.h"
 
+#include "mcp_tool_utils.h"
+
 namespace MCPScriptRevision {
 
 static Error _fail(const String &p_message, String *r_error, Error p_error) {
@@ -57,10 +59,10 @@ Error validate(const String &p_text, uint32_t p_revision, const Variant &p_expec
 
 	bool stale = false;
 	if (has_expected_revision) {
-		if (p_expected_revision.get_type() != Variant::INT) {
+		int64_t expected_revision = 0;
+		if (!MCPToolUtils::try_get_json_integer(p_expected_revision, INT64_MIN, INT64_MAX, expected_revision)) {
 			return _fail("expected_revision must be an integer.", r_error, ERR_INVALID_PARAMETER);
 		}
-		const int64_t expected_revision = p_expected_revision;
 		if (expected_revision < 0 || expected_revision > 0xFFFFFFFFLL) {
 			return _fail("expected_revision is outside the uint32 range.", r_error, ERR_PARAMETER_RANGE_ERROR);
 		}

@@ -175,11 +175,11 @@ bool get_string_argument(const Dictionary &p_arguments, const String &p_name, St
 
 bool get_position_argument(const Dictionary &p_arguments, const String &p_name, int &r_value, String &r_error) {
 	const Variant value = p_arguments.get(p_name, Variant());
-	if (value.get_type() != Variant::INT) {
+	int64_t integer = 0;
+	if (!MCPToolUtils::try_get_json_integer(value, INT64_MIN, INT64_MAX, integer)) {
 		r_error = p_name + " must be an integer.";
 		return false;
 	}
-	const int64_t integer = value;
 	if (integer < 0 || integer > INT32_MAX) {
 		r_error = p_name + " must be a non-negative 32-bit integer.";
 		return false;

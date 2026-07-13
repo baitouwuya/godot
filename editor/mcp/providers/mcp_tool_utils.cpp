@@ -31,6 +31,7 @@
 #include "mcp_tool_utils.h"
 
 #include "core/io/json.h"
+#include "core/math/math_funcs.h"
 #include "core/object/property_info.h"
 
 namespace MCPToolUtils {
@@ -105,6 +106,33 @@ bool has_only_arguments(const Dictionary &p_arguments, const PackedStringArray &
 			return false;
 		}
 	}
+	return true;
+}
+
+bool try_get_json_integer(const Variant &p_value, int64_t p_minimum, int64_t p_maximum, int64_t &r_value) {
+	if (p_minimum > p_maximum) {
+		return false;
+	}
+
+	int64_t value = 0;
+	if (p_value.get_type() == Variant::INT) {
+		value = p_value;
+	} else if (p_value.get_type() == Variant::FLOAT) {
+		constexpr double MAX_SAFE_JSON_INTEGER = 9007199254740991.0;
+		const double json_number = p_value;
+		if (!Math::is_finite(json_number) || json_number < -MAX_SAFE_JSON_INTEGER || json_number > MAX_SAFE_JSON_INTEGER ||
+				Math::floor(json_number) != json_number) {
+			return false;
+		}
+		value = int64_t(json_number);
+	} else {
+		return false;
+	}
+
+	if (value < p_minimum || value > p_maximum) {
+		return false;
+	}
+	r_value = value;
 	return true;
 }
 

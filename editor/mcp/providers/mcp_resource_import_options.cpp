@@ -172,11 +172,12 @@ bool MCPResourceImportOptions::resolve(const Dictionary &p_arguments, const Stri
 	r_resolution.preset_explicit = p_arguments.has("preset");
 	if (r_resolution.preset_explicit) {
 		const Variant preset_value = p_arguments["preset"];
-		if (preset_value.get_type() != Variant::INT || int64_t(preset_value) < 0 || int64_t(preset_value) > 0x7FFFFFFF) {
+		int64_t preset = 0;
+		if (!MCPToolUtils::try_get_json_integer(preset_value, 0, INT32_MAX, preset)) {
 			r_error = MCPToolUtils::make_error_result("INVALID_PRESET", "preset must be a non-negative integer.");
 			return false;
 		}
-		r_resolution.preset = int(preset_value);
+		r_resolution.preset = int(preset);
 	}
 
 	const int preset_count = r_resolution.importer->get_preset_count();

@@ -381,12 +381,15 @@ TEST_CASE("[MCP][Provider] Resource options expose candidates, presets, Property
 	CHECK_FALSE(bool(detail_override.get("visible", true)));
 
 	arguments.erase("options");
-	arguments["preset"] = 1;
+	arguments["preset"] = 1.0;
 	call_result = registry.call_tool("godot.resource.import_options", arguments, context);
 	REQUIRE_FALSE(bool(call_result.result.get("isError", false)));
 	const Dictionary preset_result = call_result.result.get("structuredContent", Dictionary());
 	CHECK_FALSE(bool(preset_result.get("projectDefaultsApplied", true)));
 	CHECK(bool(_find_option(Array(preset_result.get("options", Array())), "enabled").get("value", false)));
+	arguments["preset"] = 1.5;
+	call_result = registry.call_tool("godot.resource.import_options", arguments, context);
+	CHECK(_error_code(call_result) == "INVALID_PRESET");
 
 	arguments.erase("preset");
 	arguments["importer"] = "missing_importer";

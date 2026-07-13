@@ -85,7 +85,7 @@ TEST_CASE("[MCP][Provider] Scene tree tool returns the injected edited scene") {
 
 	Dictionary arguments;
 	arguments["rootPath"] = ".";
-	arguments["maxDepth"] = 1;
+	arguments["maxDepth"] = 1.0;
 	arguments["includeInternal"] = false;
 	MCPToolCallContext context;
 	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
@@ -100,6 +100,13 @@ TEST_CASE("[MCP][Provider] Scene tree tool returns the injected edited scene") {
 	const Array children = root.get("children", Array());
 	REQUIRE(children.size() == 1);
 	CHECK(Dictionary(children[0]).get("path", String()) == "Child");
+
+	arguments["maxDepth"] = 1.5;
+	CHECK(bool(registry.call_tool("godot.scene.get_tree", arguments, context).result.get("isError", false)));
+	arguments["maxDepth"] = -2.0;
+	CHECK(bool(registry.call_tool("godot.scene.get_tree", arguments, context).result.get("isError", false)));
+	arguments["maxDepth"] = 65.0;
+	CHECK(bool(registry.call_tool("godot.scene.get_tree", arguments, context).result.get("isError", false)));
 
 	provider->unregister_tools();
 	memdelete(provider);

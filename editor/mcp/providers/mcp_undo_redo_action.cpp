@@ -32,7 +32,9 @@
 
 #include "mcp_scene_utils.h"
 
+#include "editor/docks/scene_tree_dock.h"
 #include "editor/editor_undo_redo_manager.h"
+#include "scene/main/node.h"
 
 MCPEditorUndoRedoAction::MCPEditorUndoRedoAction(EditorUndoRedoManager *p_undo_redo) :
 		undo_redo(p_undo_redo) {
@@ -65,6 +67,36 @@ void MCPEditorUndoRedoAction::add_undo_property(Object *p_object, const StringNa
 void MCPEditorUndoRedoAction::add_do_reference(Object *p_object) {
 	ERR_FAIL_NULL(undo_redo);
 	undo_redo->add_do_reference(p_object);
+}
+
+void MCPEditorUndoRedoAction::add_undo_reference(Object *p_object) {
+	ERR_FAIL_NULL(undo_redo);
+	undo_redo->add_undo_reference(p_object);
+}
+
+bool MCPEditorUndoRedoAction::can_update_node_paths() const {
+	return SceneTreeDock::get_singleton() != nullptr;
+}
+
+void MCPEditorUndoRedoAction::add_node_path_updates(Node *p_node, Node *p_new_parent, const StringName &p_new_name) {
+	ERR_FAIL_NULL(p_node);
+	SceneTreeDock *scene_tree_dock = SceneTreeDock::get_singleton();
+	ERR_FAIL_NULL_MSG(scene_tree_dock, "The scene tree dock is required to update node path references.");
+
+	HashMap<Node *, NodePath> path_renames;
+	scene_tree_dock->fill_path_renames(p_node, p_new_parent, &path_renames);
+	if (!p_new_name.is_empty()) {
+		const NodePath *root_path = path_renames.getptr(p_node);
+		ERR_FAIL_NULL(root_path);
+		const int renamed_name_index = root_path->get_name_count() - 1;
+		for (KeyValue<Node *, NodePath> &entry : path_renames) {
+			Vector<StringName> names = entry.value.get_names();
+			ERR_CONTINUE(renamed_name_index < 0 || renamed_name_index >= names.size());
+			names.write[renamed_name_index] = p_new_name;
+			entry.value = NodePath(names, true);
+		}
+	}
+	scene_tree_dock->perform_node_renames(nullptr, &path_renames);
 }
 
 void MCPEditorUndoRedoAction::commit_action() {

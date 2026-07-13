@@ -222,8 +222,18 @@ enabled=PackedStringArray("res://addons/mcp_smoke_cleanup/plugin.cfg")
 
 	$nodeScript = @'
 extends Node
+@export var target: NodePath
 '@
 	Set-Content -LiteralPath (Join-Path $Path "node_script.gd") -Value $nodeScript -Encoding utf8NoBOM
+
+	$childScene = @'
+[gd_scene format=3]
+
+[node name="ChildScene" type="Node"]
+
+[node name="Nested" type="Node" parent="."]
+'@
+	Set-Content -LiteralPath (Join-Path $Path "child_scene.tscn") -Value $childScene -Encoding utf8NoBOM
 
 	$pluginConfig = @"
 [plugin]
@@ -557,6 +567,12 @@ try {
 		"godot.node.create",
 		"godot.node.set_property",
 		"godot.node.attach_script",
+		"godot.node.delete",
+		"godot.node.rename",
+		"godot.node.reparent",
+		"godot.node.move",
+		"godot.node.duplicate",
+		"godot.node.instantiate_scene",
 		"godot.script.create",
 		"godot.script.get",
 		"godot.script.usages",
@@ -573,8 +589,8 @@ try {
 		"godot.gdscript.rename"
 	) | Sort-Object
 	$actualTools = @($responsesById["2"].result.tools | ForEach-Object { [string]$_.name } | Sort-Object)
-	Assert-Condition ($actualTools.Count -eq 27) "tools/list returned $($actualTools.Count) tools instead of 27."
-	Assert-Condition (($actualTools -join "`n") -ceq ($expectedTools -join "`n")) "tools/list did not expose the expected 27-tool surface."
+	Assert-Condition ($actualTools.Count -eq 33) "tools/list returned $($actualTools.Count) tools instead of 33."
+	Assert-Condition (($actualTools -join "`n") -ceq ($expectedTools -join "`n")) "tools/list did not expose the expected 33-tool surface."
 	$createResult = $responsesById["3"].result.structuredContent
 	Assert-Condition (-not (Test-ToolResultError -Result $responsesById["3"].result)) "script/create returned a tool error."
 	Assert-Condition ([string]$createResult.sha256 -ceq $initialScriptSha) "script/create returned an unexpected SHA-256."
@@ -677,11 +693,29 @@ try {
 		(New-ToolCallRequest -Id 34 -Name "godot.editor.undo" -Arguments @{}),
 		(New-ToolCallRequest -Id 35 -Name "godot.node.get_properties" -Arguments @{ path = "McpChild" }),
 		(New-ToolCallRequest -Id 36 -Name "godot.editor.redo" -Arguments @{}),
-		(New-ToolCallRequest -Id 37 -Name "godot.scene.save" -Arguments @{}),
-		(New-ToolCallRequest -Id 38 -Name "godot.editor.get_state" -Arguments @{})
+		(New-ToolCallRequest -Id 37 -Name "godot.node.attach_script" -Arguments @{ path = "."; scriptPath = "res://node_script.gd" }),
+		(New-ToolCallRequest -Id 38 -Name "godot.node.set_property" -Arguments @{ path = "."; property = "target"; value = "np:McpChild" }),
+		(New-ToolCallRequest -Id 39 -Name "godot.node.rename" -Arguments @{ path = "McpChild"; name = "McpRenamed" }),
+		(New-ToolCallRequest -Id 40 -Name "godot.node.get_properties" -Arguments @{ path = "." }),
+		(New-ToolCallRequest -Id 41 -Name "godot.node.duplicate" -Arguments @{ path = "McpRenamed"; name = "McpClone" }),
+		(New-ToolCallRequest -Id 42 -Name "godot.node.set_property" -Arguments @{ path = "."; property = "target"; value = "np:McpClone" }),
+		(New-ToolCallRequest -Id 43 -Name "godot.node.create" -Arguments @{ type = "Node"; name = "Container"; parentPath = "." }),
+		(New-ToolCallRequest -Id 44 -Name "godot.node.reparent" -Arguments @{ path = "McpClone"; parentPath = "Container"; index = 0 }),
+		(New-ToolCallRequest -Id 45 -Name "godot.node.get_properties" -Arguments @{ path = "." }),
+		(New-ToolCallRequest -Id 46 -Name "godot.node.create" -Arguments @{ type = "Node"; name = "Sibling"; parentPath = "Container" }),
+		(New-ToolCallRequest -Id 47 -Name "godot.node.move" -Arguments @{ path = "Container/McpClone"; index = -1 }),
+		(New-ToolCallRequest -Id 48 -Name "godot.node.instantiate_scene" -Arguments @{ scenePath = "res://child_scene.tscn"; parentPath = "Container"; name = "Instanced"; index = 0 }),
+		(New-ToolCallRequest -Id 49 -Name "godot.node.delete" -Arguments @{ path = "Container/McpClone" }),
+		(New-ToolCallRequest -Id 50 -Name "godot.node.get_properties" -Arguments @{ path = "." }),
+		(New-ToolCallRequest -Id 51 -Name "godot.editor.undo" -Arguments @{}),
+		(New-ToolCallRequest -Id 52 -Name "godot.node.get_properties" -Arguments @{ path = "." }),
+		(New-ToolCallRequest -Id 53 -Name "godot.scene.get_tree" -Arguments @{ maxDepth = 3 }),
+		(New-ToolCallRequest -Id 54 -Name "godot.editor.redo" -Arguments @{}),
+		(New-ToolCallRequest -Id 55 -Name "godot.scene.save" -Arguments @{}),
+		(New-ToolCallRequest -Id 56 -Name "godot.editor.get_state" -Arguments @{})
 	)
-	$nodeResponses = Convert-JsonRpcResponseMap -Result $nodeFlow -ExpectedCount 19 -Label "stdio node undo/redo flow"
-	foreach ($responseId in @("1") + (21..38 | ForEach-Object { [string]$_ })) {
+	$nodeResponses = Convert-JsonRpcResponseMap -Result $nodeFlow -ExpectedCount 37 -Label "stdio node undo/redo flow"
+	foreach ($responseId in @("1") + (21..56 | ForEach-Object { [string]$_ })) {
 		Assert-Condition ($nodeResponses.ContainsKey($responseId)) "node flow response $responseId is missing."
 		if ($responseId -ne "1") {
 			$result = $nodeResponses[$responseId].result
@@ -716,8 +750,32 @@ try {
 	$detachedProperties = @($nodeResponses["35"].result.structuredContent.properties)
 	$detachedScript = @($detachedProperties | Where-Object { [string]$_.name -ceq "script" })
 	Assert-Condition ($detachedScript.Count -eq 1 -and $null -eq $detachedScript[0].value) "undo did not detach the node script."
-	Assert-Condition ([bool]$nodeResponses["37"].result.structuredContent.saved) "scene/save did not report success."
-	Assert-Condition (-not (@($nodeResponses["38"].result.structuredContent.unsavedScenes) -ccontains "res://main.tscn")) "scene/save left main.tscn unsaved."
+	Assert-Condition ([string]$nodeResponses["39"].result.structuredContent.path -ceq "McpRenamed") "node/rename returned the wrong path."
+	$renamedRootProperties = @($nodeResponses["40"].result.structuredContent.properties)
+	$renamedTarget = @($renamedRootProperties | Where-Object { [string]$_.name -ceq "target" })
+	Assert-Condition ($renamedTarget.Count -eq 1 -and [string]$renamedTarget[0].value -ceq "np:McpRenamed") "node/rename did not rewrite the exported NodePath."
+	Assert-Condition ([string]$nodeResponses["41"].result.structuredContent.path -ceq "McpClone") "node/duplicate returned the wrong path."
+	Assert-Condition ([string]$nodeResponses["44"].result.structuredContent.path -ceq "Container/McpClone") "node/reparent returned the wrong path."
+	$reparentedRootProperties = @($nodeResponses["45"].result.structuredContent.properties)
+	$reparentedTarget = @($reparentedRootProperties | Where-Object { [string]$_.name -ceq "target" })
+	Assert-Condition ($reparentedTarget.Count -eq 1 -and [string]$reparentedTarget[0].value -ceq "np:Container/McpClone") "node/reparent did not rewrite the exported NodePath."
+	Assert-Condition ([int]$nodeResponses["47"].result.structuredContent.index -eq 1) "node/move did not move the node to the final sibling index."
+	Assert-Condition ([string]$nodeResponses["48"].result.structuredContent.sceneFilePath -ceq "res://child_scene.tscn") "node/instantiate_scene returned the wrong scene path."
+	Assert-Condition ([string]$nodeResponses["49"].result.structuredContent.deleted.path -ceq "Container/McpClone") "node/delete returned the wrong deleted path."
+	$deletedRootProperties = @($nodeResponses["50"].result.structuredContent.properties)
+	$deletedTarget = @($deletedRootProperties | Where-Object { [string]$_.name -ceq "target" })
+	Assert-Condition ($deletedTarget.Count -eq 1 -and [string]$deletedTarget[0].value -ceq "np:") "node/delete did not clear the exported NodePath."
+	Assert-Condition ([bool]$nodeResponses["51"].result.structuredContent.performed) "editor/undo did not restore the deleted node."
+	$restoredRootProperties = @($nodeResponses["52"].result.structuredContent.properties)
+	$restoredTarget = @($restoredRootProperties | Where-Object { [string]$_.name -ceq "target" })
+	Assert-Condition ($restoredTarget.Count -eq 1 -and [string]$restoredTarget[0].value -ceq "np:Container/McpClone") "undo did not restore the exported NodePath."
+	$containerTree = @($nodeResponses["53"].result.structuredContent.root.children | Where-Object { [string]$_.name -ceq "Container" })
+	Assert-Condition ($containerTree.Count -eq 1) "the structure flow did not create Container."
+	$containerChildren = @($containerTree[0].children | ForEach-Object { [string]$_.name })
+	Assert-Condition ($containerChildren -ccontains "McpClone" -and $containerChildren -ccontains "Sibling" -and $containerChildren -ccontains "Instanced") "undo did not restore the expected Container subtree."
+	Assert-Condition ([bool]$nodeResponses["54"].result.structuredContent.performed) "editor/redo did not delete the restored node again."
+	Assert-Condition ([bool]$nodeResponses["55"].result.structuredContent.saved) "scene/save did not report success."
+	Assert-Condition (-not (@($nodeResponses["56"].result.structuredContent.unsavedScenes) -ccontains "res://main.tscn")) "scene/save left main.tscn unsaved."
 	Assert-Condition (Test-Path -LiteralPath (Join-Path $projectA "main.tscn") -PathType Leaf) "scene/save did not preserve main.tscn on disk."
 
 	Write-Host "[9/9] Rechecking project B after project A stdio traffic"

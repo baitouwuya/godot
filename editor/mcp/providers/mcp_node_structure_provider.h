@@ -1,0 +1,62 @@
+/**************************************************************************/
+/*  mcp_node_structure_provider.h                                         */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including   */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
+
+#pragma once
+
+#include "core/object/object.h"
+#include "core/variant/dictionary.h"
+
+class MCPToolRegistry;
+class MCPUndoRedoAction;
+class Node;
+
+class MCPNodeStructureProvider : public Object {
+public:
+	MCPNodeStructureProvider(Node *p_scene_root = nullptr, MCPUndoRedoAction *p_undo_redo = nullptr);
+	~MCPNodeStructureProvider();
+
+	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr);
+	void unregister_tools();
+
+	Dictionary delete_node(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary rename_node(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary reparent_node(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary move_node(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary duplicate_node(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary instantiate_scene(const Dictionary &p_arguments, const Dictionary &p_context);
+
+private:
+	Node *_get_scene_root() const;
+	MCPUndoRedoAction *_get_undo_redo(class MCPEditorUndoRedoAction &r_editor_undo_redo) const;
+
+	MCPToolRegistry *tool_registry = nullptr;
+	Node *scene_root_override = nullptr;
+	MCPUndoRedoAction *undo_redo_override = nullptr;
+};

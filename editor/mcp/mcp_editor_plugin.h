@@ -43,6 +43,7 @@ class MCPFileProvider;
 class MCPGDScriptProvider;
 class MCPGDScriptSessionManager;
 class MCPNodeProvider;
+class MCPNodeStructureProvider;
 class MCPResourceProvider;
 class MCPSceneProvider;
 class MCPScriptProvider;
@@ -80,6 +81,7 @@ class MCPEditorPlugin : public EditorPlugin, public MCPHostSessionObserver {
 	MCPFileProvider *file_provider = nullptr;
 	MCPSceneProvider *scene_provider = nullptr;
 	MCPNodeProvider *node_provider = nullptr;
+	MCPNodeStructureProvider *node_structure_provider = nullptr;
 	MCPScriptProvider *script_provider = nullptr;
 	MCPResourceProvider *resource_provider = nullptr;
 	MCPGDScriptProvider *gdscript_provider = nullptr;

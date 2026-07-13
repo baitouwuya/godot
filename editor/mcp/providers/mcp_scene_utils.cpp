@@ -34,6 +34,7 @@
 #include "editor/editor_node.h"
 #include "editor/editor_undo_redo_manager.h"
 #include "scene/main/node.h"
+#include "scene/resources/packed_scene.h"
 
 namespace MCPSceneUtils {
 
@@ -70,7 +71,12 @@ bool is_node_in_scene(Node *p_scene_root, Node *p_node) {
 }
 
 bool is_node_editable(Node *p_scene_root, Node *p_node) {
-	return is_node_in_scene(p_scene_root, p_node) && (p_node == p_scene_root || p_node->get_owner() == p_scene_root);
+	if (!is_node_in_scene(p_scene_root, p_node) || (p_node != p_scene_root && p_node->get_owner() != p_scene_root)) {
+		return false;
+	}
+	const Ref<SceneState> inherited_state = p_scene_root->get_scene_inherited_state();
+	return p_node == p_scene_root || inherited_state.is_null() ||
+			inherited_state->find_node_by_path(p_scene_root->get_path_to(p_node)) < 0;
 }
 
 Node *find_node(Node *p_scene_root, const String &p_path) {

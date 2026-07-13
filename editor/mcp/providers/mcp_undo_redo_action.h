@@ -34,6 +34,7 @@
 #include "core/object/object.h"
 
 class EditorUndoRedoManager;
+class Node;
 
 class MCPUndoRedoAction {
 public:
@@ -66,6 +67,9 @@ public:
 	virtual void add_do_property(Object *p_object, const StringName &p_property, const Variant &p_value) = 0;
 	virtual void add_undo_property(Object *p_object, const StringName &p_property, const Variant &p_value) = 0;
 	virtual void add_do_reference(Object *p_object) = 0;
+	virtual void add_undo_reference(Object *p_object) = 0;
+	virtual bool can_update_node_paths() const = 0;
+	virtual void add_node_path_updates(Node *p_node, Node *p_new_parent, const StringName &p_new_name = StringName()) = 0;
 	virtual void commit_action() = 0;
 };
 
@@ -79,6 +83,9 @@ public:
 	void add_do_property(Object *p_object, const StringName &p_property, const Variant &p_value) override;
 	void add_undo_property(Object *p_object, const StringName &p_property, const Variant &p_value) override;
 	void add_do_reference(Object *p_object) override;
+	void add_undo_reference(Object *p_object) override;
+	bool can_update_node_paths() const override;
+	void add_node_path_updates(Node *p_node, Node *p_new_parent, const StringName &p_new_name = StringName()) override;
 	void commit_action() override;
 
 private:

@@ -79,6 +79,7 @@ public:
 
 	bool has_document(const String &p_path) const;
 	const DocumentState *get_document(const String &p_path) const;
+	const HashMap<String, DocumentState> &get_documents() const { return documents; }
 	ExtendGDScriptParser *get_parse_result(const String &p_path);
 	Array get_diagnostics(const String &p_path, Error *r_error = nullptr);
 	void clear_transient_parsers();

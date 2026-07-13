@@ -602,7 +602,7 @@ Dictionary MCPGDScriptProvider::references(const Dictionary &p_arguments, const 
 	if (!params.context.includeDeclaration) {
 		Vector<LSP::Location> filtered;
 		for (const LSP::Location &usage : usages) {
-			if (usage.range == symbol->range) {
+			if (_get_workspace()->is_declaration_location(*symbol, usage)) {
 				continue;
 			}
 			filtered.push_back(usage);

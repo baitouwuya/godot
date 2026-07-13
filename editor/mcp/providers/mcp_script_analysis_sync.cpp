@@ -71,6 +71,32 @@ Error MCPScriptAnalysisSync::sync_authoritative_path(const Ref<MCPGDScriptSessio
 	return sync_snapshot(p_session_manager, p_session_id, r_snapshot, r_diagnostics, r_error);
 }
 
+Error MCPScriptAnalysisSync::sync_open_buffers(const Ref<MCPGDScriptSessionManager> &p_session_manager, const String &p_session_id, String *r_error) {
+	Array snapshots;
+	const Error read_error = MCPScriptBuffer::read_open_snapshots(snapshots, r_error);
+	if (read_error != OK) {
+		return read_error;
+	}
+	HashSet<String> open_paths;
+	for (int i = 0; i < snapshots.size(); i++) {
+		const Dictionary snapshot = snapshots[i];
+		const Variant path_value = snapshot.get("path", Variant());
+		if (path_value.get_type() != Variant::STRING || String(path_value).is_empty()) {
+			if (r_error) {
+				*r_error = "An open ScriptEditor snapshot has no path.";
+			}
+			return ERR_INVALID_DATA;
+		}
+		Array diagnostics;
+		const Error sync_error = sync_snapshot(p_session_manager, p_session_id, snapshot, diagnostics, r_error);
+		if (sync_error != OK) {
+			return sync_error;
+		}
+		open_paths.insert(path_value);
+	}
+	return p_session_manager->reconcile_open_editor_documents(p_session_id, open_paths, r_error);
+}
+
 Error MCPScriptAnalysisSync::sync_saved_snapshot(const Ref<MCPGDScriptSessionManager> &p_session_manager, const String &p_session_id, Dictionary &r_snapshot, String *r_error) {
 	const Variant unsaved_value = r_snapshot.get("unsaved", Variant());
 	if (unsaved_value.get_type() != Variant::BOOL || bool(unsaved_value)) {

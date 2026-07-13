@@ -32,6 +32,7 @@
 
 #include "core/object/ref_counted.h"
 #include "core/templates/hash_map.h"
+#include "core/templates/hash_set.h"
 
 #include "modules/gdscript/language_server/gdscript_analysis_service.h"
 
@@ -56,6 +57,7 @@ public:
 	Ref<GDScriptAnalysisSession> get_session(const String &p_session_id) const;
 	Error resolve_context(const Dictionary &p_context, String &r_session_id, Ref<GDScriptAnalysisSession> &r_session, String *r_error = nullptr);
 	Error sync_document(const String &p_session_id, const String &p_path, const String &p_text, int64_t p_client_version, Array &r_diagnostics, String *r_error = nullptr);
+	Error reconcile_open_editor_documents(const String &p_session_id, const HashSet<String> &p_open_paths, String *r_error = nullptr);
 	bool release_session(const String &p_session_id);
 	void clear();
 	int get_session_count() const { return sessions.size(); }

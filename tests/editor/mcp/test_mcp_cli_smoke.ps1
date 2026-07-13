@@ -526,7 +526,7 @@ try {
 		method = "tools/list"
 		params = @{}
 	} | ConvertTo-Json -Depth 4 -Compress
-	$initialScriptText = "## Smoke script.`nextends Node`n`n## Stored value.`nvar value: int = 1`n"
+	$initialScriptText = "## Smoke script.`nextends Node`n`n## Stored value.`nvar value: int = 1`n`nfunc get_value() -> int:`n`treturn value`n"
 	$initialScriptSha = Get-TextSha256 -Text $initialScriptText
 	$createScriptRequest = New-ToolCallRequest -Id 3 -Name "godot.script.create" -Arguments @{
 		path = "res://mcp_smoke_script.gd"
@@ -559,6 +559,7 @@ try {
 		"godot.node.attach_script",
 		"godot.script.create",
 		"godot.script.get",
+		"godot.script.usages",
 		"godot.script.edit",
 		"godot.script.save",
 		"godot.gdscript.diagnostics",
@@ -572,8 +573,8 @@ try {
 		"godot.gdscript.rename"
 	) | Sort-Object
 	$actualTools = @($responsesById["2"].result.tools | ForEach-Object { [string]$_.name } | Sort-Object)
-	Assert-Condition ($actualTools.Count -eq 26) "tools/list returned $($actualTools.Count) tools instead of 26."
-	Assert-Condition (($actualTools -join "`n") -ceq ($expectedTools -join "`n")) "tools/list did not expose the expected 26-tool surface."
+	Assert-Condition ($actualTools.Count -eq 27) "tools/list returned $($actualTools.Count) tools instead of 27."
+	Assert-Condition (($actualTools -join "`n") -ceq ($expectedTools -join "`n")) "tools/list did not expose the expected 27-tool surface."
 	$createResult = $responsesById["3"].result.structuredContent
 	Assert-Condition (-not (Test-ToolResultError -Result $responsesById["3"].result)) "script/create returned a tool error."
 	Assert-Condition ([string]$createResult.sha256 -ceq $initialScriptSha) "script/create returned an unexpected SHA-256."
@@ -589,6 +590,10 @@ try {
 		$initializeRequest,
 		$initializedNotification,
 		(New-ToolCallRequest -Id 11 -Name "godot.script.get" -Arguments @{ path = "res://mcp_smoke_script.gd" }),
+		(New-ToolCallRequest -Id 17 -Name "godot.script.usages" -Arguments @{
+			path = "res://mcp_smoke_script.gd"
+			member = @{ kind = "property"; name = "value" }
+		}),
 		(New-ToolCallRequest -Id 12 -Name "godot.script.edit" -Arguments @{
 			path = "res://mcp_smoke_script.gd"
 			text = $dirtyScriptText
@@ -603,8 +608,8 @@ try {
 		(New-ToolCallRequest -Id 15 -Name "godot.script.save" -Arguments @{ path = "res://mcp_smoke_script.gd" }),
 		(New-ToolCallRequest -Id 16 -Name "godot.gdscript.diagnostics" -Arguments @{ path = "res://mcp_smoke_script.gd" })
 	)
-	$scriptResponses = Convert-JsonRpcResponseMap -Result $scriptFlow -ExpectedCount 7 -Label "stdio dirty-script flow"
-	foreach ($responseId in @("1", "11", "12", "13", "14", "15", "16")) {
+	$scriptResponses = Convert-JsonRpcResponseMap -Result $scriptFlow -ExpectedCount 8 -Label "stdio dirty-script flow"
+	foreach ($responseId in @("1", "11", "12", "13", "14", "15", "16", "17")) {
 		Assert-Condition ($scriptResponses.ContainsKey($responseId)) "dirty-script flow response $responseId is missing."
 	}
 
@@ -644,6 +649,12 @@ try {
 	$afterSaveDiagnostics = $scriptResponses["16"].result.structuredContent
 	Assert-Condition ([string]$afterSaveDiagnostics.sha256 -ceq [string]$saveResult.sha256) "saved diagnostics and ScriptEditor SHA-256 differ."
 	Assert-Condition ([int64]$afterSaveDiagnostics.revision -eq [int64]$saveResult.revision) "saved diagnostics and ScriptEditor revision differ."
+	$usageResult = $scriptResponses["17"].result.structuredContent
+	Assert-Condition (-not (Test-ToolResultError -Result $scriptResponses["17"].result)) "script/usages returned a tool error."
+	Assert-Condition ([string]$usageResult.member.kind -ceq "property") "script/usages returned the wrong member kind."
+	Assert-Condition ([string]$usageResult.member.name -ceq "value") "script/usages returned the wrong member name."
+	Assert-Condition ([int]$usageResult.count -eq 1) "script/usages returned $($usageResult.count) semantic property usages instead of 1: $($usageResult.locations | ConvertTo-Json -Depth 10 -Compress)"
+	Assert-Condition ([int]$usageResult.locations[0].range.start.line -eq 7) "script/usages returned the wrong zero-based usage line."
 
 	Write-Host "[8/9] Checking Node undo/redo, script attachment, and explicit scene save"
 	Wait-ForHostFile -McpHost $hostA -RelativePath ".mcp-smoke-scene-ready" -Label "project A scene"

@@ -45,6 +45,12 @@ TEST_FORCE_LINK(test_mcp_script_provider);
 
 namespace TestMCPScriptProvider {
 
+static String _error_code(const Dictionary &p_result) {
+	const Dictionary structured = p_result.get("structuredContent", Dictionary());
+	const Dictionary error = structured.get("error", Dictionary());
+	return error.get("code", String());
+}
+
 TEST_CASE("[MCP][Provider] Script tools register with optimistic edit requirements") {
 	CHECK(String(MCPScriptProvider::STALE_REVISION_ERROR_CODE) == "stale_revision");
 
@@ -54,15 +60,16 @@ TEST_CASE("[MCP][Provider] Script tools register with optimistic edit requiremen
 	CHECK(provider->register_tools(&registry) == ERR_ALREADY_IN_USE);
 
 	const PackedStringArray names = registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_MCP);
-	REQUIRE(names.size() == 4);
+	REQUIRE(names.size() == 5);
 	CHECK(names[0] == "godot.script.create");
 	CHECK(names[1] == "godot.script.get");
-	CHECK(names[2] == "godot.script.edit");
-	CHECK(names[3] == "godot.script.save");
+	CHECK(names[2] == "godot.script.usages");
+	CHECK(names[3] == "godot.script.edit");
+	CHECK(names[4] == "godot.script.save");
 	CHECK(registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_CLI).is_empty());
 
 	const Array definitions = registry.get_tool_definitions(MCPToolRegistry::TOOL_SURFACE_MCP);
-	REQUIRE(definitions.size() == 4);
+	REQUIRE(definitions.size() == 5);
 	const Dictionary get_schema = Dictionary(definitions[1]).get("inputSchema", Dictionary());
 	const Dictionary get_properties = get_schema.get("properties", Dictionary());
 	CHECK(get_properties.has("path"));
@@ -75,7 +82,12 @@ TEST_CASE("[MCP][Provider] Script tools register with optimistic edit requiremen
 	CHECK(member_properties.has("owner"));
 	CHECK(member_properties.has("classPath"));
 	CHECK(Array(get_schema.get("oneOf", Array())).size() == 2);
-	const Dictionary edit_schema = Dictionary(definitions[2]).get("inputSchema", Dictionary());
+	const Dictionary usages_schema = Dictionary(definitions[2]).get("inputSchema", Dictionary());
+	const Dictionary usages_properties = usages_schema.get("properties", Dictionary());
+	CHECK(usages_properties.has("member"));
+	CHECK(usages_properties.has("includeDeclaration"));
+	CHECK(PackedStringArray(usages_schema.get("required", PackedStringArray())).has("member"));
+	const Dictionary edit_schema = Dictionary(definitions[3]).get("inputSchema", Dictionary());
 	const Dictionary properties = edit_schema.get("properties", Dictionary());
 	CHECK(properties.has("nodePath"));
 	CHECK(properties.has("expected_revision"));
@@ -89,6 +101,20 @@ TEST_CASE("[MCP][Provider] Script tools register with optimistic edit requiremen
 	const MCPToolRegistry::CallResult invalid_call = registry.call_tool("godot.script.create", Dictionary(), context);
 	REQUIRE(invalid_call.status == MCPToolRegistry::CALL_OK);
 	CHECK(bool(invalid_call.result.get("isError", false)));
+
+	Dictionary invalid_member;
+	invalid_member["kind"] = "banana";
+	invalid_member["name"] = "value";
+	Dictionary member_arguments;
+	member_arguments["path"] = "res://missing.gd";
+	member_arguments["member"] = invalid_member;
+	CHECK(_error_code(registry.call_tool("godot.script.get", member_arguments, context).result) == "INVALID_ARGUMENTS");
+	CHECK(_error_code(registry.call_tool("godot.script.usages", member_arguments, context).result) == "INVALID_ARGUMENTS");
+
+	invalid_member["kind"] = "parameter";
+	invalid_member["owner"] = "Outer.call";
+	member_arguments["member"] = invalid_member;
+	CHECK(_error_code(registry.call_tool("godot.script.usages", member_arguments, context).result) == "INVALID_ARGUMENTS");
 
 	provider->unregister_tools();
 	CHECK(registry.get_tool_names().is_empty());

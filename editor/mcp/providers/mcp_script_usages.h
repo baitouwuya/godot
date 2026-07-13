@@ -1,9 +1,8 @@
 /**************************************************************************/
-/*  mcp_script_provider.h                                                 */
+/*  mcp_script_usages.h                                                   */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
-/*                        https://godotengine.org                         */
 /**************************************************************************/
 /* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
 /* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
@@ -30,35 +29,17 @@
 
 #pragma once
 
-#include "mcp_gdscript_session_manager.h"
-
-#include "core/object/object.h"
+#include "core/error/error_list.h"
+#include "core/object/ref_counted.h"
 #include "core/variant/dictionary.h"
 
-class MCPToolRegistry;
+class ExtendGDScriptParser;
 class GDScriptAnalysisSession;
+class GDScriptWorkspace;
 
-class MCPScriptProvider : public Object {
+class MCPScriptUsages {
 public:
-	static constexpr const char *STALE_REVISION_ERROR_CODE = "stale_revision";
-
-	MCPScriptProvider(const Ref<MCPGDScriptSessionManager> &p_session_manager = Ref<MCPGDScriptSessionManager>());
-	~MCPScriptProvider();
-
-	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr);
-	void unregister_tools();
-	void set_session_manager(const Ref<MCPGDScriptSessionManager> &p_session_manager) { session_manager = p_session_manager; }
-	const Ref<MCPGDScriptSessionManager> &get_session_manager() const { return session_manager; }
-
-	Dictionary create(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary get(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary usages(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary edit(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary save(const Dictionary &p_arguments, const Dictionary &p_context);
-
-private:
-	MCPToolRegistry *tool_registry = nullptr;
-	Ref<MCPGDScriptSessionManager> session_manager;
-
-	bool _resolve_analysis_context(const Dictionary &p_context, String &r_session_id, Ref<GDScriptAnalysisSession> &r_session, String &r_error);
+	static Error find(const Ref<GDScriptWorkspace> &p_workspace, const Ref<GDScriptAnalysisSession> &p_session,
+			const ExtendGDScriptParser &p_parser, const Dictionary &p_member, bool p_include_declaration,
+			Dictionary &r_result, String *r_error = nullptr);
 };

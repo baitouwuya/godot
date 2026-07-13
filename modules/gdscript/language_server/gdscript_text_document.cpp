@@ -214,7 +214,7 @@ Array GDScriptTextDocument::references(const Dictionary &p_params) {
 		int declaration_adjustment = 0;
 		for (int i = 0; i < usages.size(); i++) {
 			LSP::Location usage = usages[i];
-			if (!params.context.includeDeclaration && usage.range == symbol->range) {
+			if (!params.context.includeDeclaration && GDScriptLanguageProtocol::get_singleton()->get_workspace()->is_declaration_location(*symbol, usage)) {
 				declaration_adjustment++;
 				continue;
 			}

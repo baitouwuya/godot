@@ -140,6 +140,30 @@ Error MCPGDScriptSessionManager::sync_document(const String &p_session_id, const
 	return OK;
 }
 
+Error MCPGDScriptSessionManager::reconcile_open_editor_documents(const String &p_session_id, const HashSet<String> &p_open_paths, String *r_error) {
+	if (r_error) {
+		*r_error = String();
+	}
+	Ref<GDScriptAnalysisSession> session = p_session_id.is_empty() ? fallback_session : get_session(p_session_id);
+	if (session.is_null()) {
+		return _session_manager_fail("The MCP GDScript analysis session is unavailable.", r_error, ERR_UNCONFIGURED);
+	}
+
+	Vector<String> closed_paths;
+	for (const KeyValue<String, GDScriptAnalysisSession::DocumentState> &entry : session->get_documents()) {
+		if (entry.value.source_state == GDScriptAnalysisSession::SOURCE_STATE_OPEN_DOCUMENT && !p_open_paths.has(entry.key)) {
+			closed_paths.push_back(entry.key);
+		}
+	}
+	for (const String &path : closed_paths) {
+		const Error close_error = session->close_document(path);
+		if (close_error != OK && close_error != ERR_DOES_NOT_EXIST) {
+			return _session_manager_fail("A closed ScriptEditor document could not be released from MCP analysis.", r_error, close_error);
+		}
+	}
+	return OK;
+}
+
 bool MCPGDScriptSessionManager::release_session(const String &p_session_id) {
 	const Ref<GDScriptAnalysisSession> *session = sessions.getptr(p_session_id);
 	if (!session) {

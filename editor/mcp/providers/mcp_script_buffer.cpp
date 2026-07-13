@@ -92,6 +92,14 @@ static bool _is_gdscript(const Ref<Script> &p_script) {
 	return p_script.is_valid() && p_script->get_language() && p_script->get_language()->get_extension() == "gd";
 }
 
+static String _get_editor_script_path(const Ref<Script> &p_script) {
+	String script_path = p_script.is_valid() ? p_script->get_path() : String();
+	if (script_path.is_empty() || script_path.begins_with("::") || script_path.begins_with("local://")) {
+		script_path = "res://__mcp_unsaved_scene__.tscn::GDScript_" + itos(p_script->get_instance_id());
+	}
+	return script_path;
+}
+
 static Ref<Script> _find_live_script(Node *p_node, const String &p_path) {
 	if (!p_node) {
 		return Ref<Script>();
@@ -351,6 +359,36 @@ Error MCPScriptBuffer::read_authoritative_snapshot(const String &p_path, Diction
 	return read_authoritative_snapshot_for_root(p_path, project_settings->get_resource_path(), r_snapshot, r_error);
 }
 
+Error MCPScriptBuffer::read_open_snapshots(Array &r_snapshots, String *r_error) {
+	r_snapshots.clear();
+	if (r_error) {
+		*r_error = String();
+	}
+	ScriptEditor *script_editor = ScriptEditor::get_singleton();
+	if (!script_editor) {
+		return _script_buffer_fail("The Script editor is not available.", r_error, ERR_UNCONFIGURED);
+	}
+
+	const Array open_editors = script_editor->call("get_open_script_editors");
+	for (int i = 0; i < open_editors.size(); i++) {
+		ScriptEditorBase *editor = Object::cast_to<ScriptEditorBase>(open_editors[i]);
+		Ref<Script> script;
+		if (editor) {
+			script = editor->get_edited_resource();
+		}
+		if (!_is_gdscript(script)) {
+			continue;
+		}
+		MCPScriptBuffer buffer;
+		const Error error = _from_editor(_get_editor_script_path(script), editor, buffer, r_error);
+		if (error != OK) {
+			return error;
+		}
+		r_snapshots.push_back(buffer.get_snapshot());
+	}
+	return OK;
+}
+
 Error MCPScriptBuffer::open(const String &p_path, MCPScriptBuffer &r_buffer, String *r_error) {
 	r_buffer = MCPScriptBuffer();
 	if (r_error) {
@@ -408,11 +446,7 @@ Error MCPScriptBuffer::open(const Ref<Script> &p_script, MCPScriptBuffer &r_buff
 		editor = _find_open_editor(script_editor, p_script);
 	}
 
-	String script_path = p_script->get_path();
-	if (script_path.is_empty() || script_path.begins_with("::") || script_path.begins_with("local://")) {
-		script_path = "res://__mcp_unsaved_scene__.tscn::GDScript_" + itos(p_script->get_instance_id());
-	}
-	return _from_editor(script_path, editor, r_buffer, r_error);
+	return _from_editor(_get_editor_script_path(p_script), editor, r_buffer, r_error);
 }
 
 void MCPScriptBuffer::apply_text_edit(CodeEdit *p_text_edit, const String &p_text) {

@@ -36,6 +36,7 @@ class MCPScriptAnalysisSync {
 public:
 	static Error sync_snapshot(const Ref<MCPGDScriptSessionManager> &p_session_manager, const String &p_session_id, const Dictionary &p_snapshot, Array &r_diagnostics, String *r_error = nullptr);
 	static Error sync_authoritative_path(const Ref<MCPGDScriptSessionManager> &p_session_manager, const String &p_session_id, const String &p_path, const String &p_project_root, Dictionary &r_snapshot, Array &r_diagnostics, String *r_error = nullptr);
+	static Error sync_open_buffers(const Ref<MCPGDScriptSessionManager> &p_session_manager, const String &p_session_id, String *r_error = nullptr);
 	static Error sync_saved_snapshot(const Ref<MCPGDScriptSessionManager> &p_session_manager, const String &p_session_id, Dictionary &r_snapshot, String *r_error = nullptr);
 	static Dictionary make_failure(const Dictionary &p_snapshot, bool p_applied, bool p_changed, bool p_created, const String &p_message);
 };

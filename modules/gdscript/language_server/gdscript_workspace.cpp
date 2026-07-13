@@ -32,6 +32,7 @@
 
 #include "../gdscript.h"
 #include "../gdscript_parser.h"
+#include "../gdscript_tokenizer.h"
 #include "gdscript_analysis_session.h"
 #include "gdscript_language_protocol.h"
 
@@ -454,42 +455,31 @@ Vector<LSP::Location> GDScriptWorkspace::find_usages_in_file(const Ref<GDScriptA
 	const String &identifier = p_symbol.name;
 	const ExtendGDScriptParser *parser = p_session.is_valid() ? p_session->get_parse_result(p_file_path) : nullptr;
 	if (parser) {
-		const PackedStringArray &content = parser->get_lines();
-		for (int i = 0; i < content.size(); ++i) {
-			String line = content[i];
+		GDScriptTokenizerText tokenizer;
+		tokenizer.set_source_code(parser->get_source_text());
+		while (true) {
+			const GDScriptTokenizer::Token token = tokenizer.scan();
+			if (token.type == GDScriptTokenizer::Token::TK_EOF) {
+				break;
+			}
+			if (token.type != GDScriptTokenizer::Token::IDENTIFIER || String(token.literal) != identifier) {
+				continue;
+			}
 
-			int character = line.find(identifier);
-			while (character > -1) {
-				LSP::TextDocumentPositionParams params;
+			LSP::TextDocumentPositionParams params;
+			params.textDocument.uri = get_file_uri(p_file_path);
+			params.position = parser->to_lsp_position(token.start_line, token.start_column);
 
-				LSP::TextDocumentIdentifier text_doc;
-				text_doc.uri = get_file_uri(p_file_path);
-
-				params.textDocument = text_doc;
-				params.position = GDScriptAnalysisSession::codepoint_to_lsp_position(parser->get_source_text(), LSP::Position(i, character));
-
-				LSP::Range range;
-				String identifier_under_cursor = parser->get_symbol_name_under_position(params.position, range);
-
-				if (identifier_under_cursor == identifier) {
-					const LSP::DocumentSymbol *other_symbol = resolve_symbol(p_session, params);
-
-					if (other_symbol == &p_symbol) {
-						LSP::Location loc;
-						loc.uri = text_doc.uri;
-						loc.range = range;
-						usages.append(loc);
-					}
-				}
-
-				if (identifier_under_cursor.length() < identifier.length()) {
-					// `get_symbol_name_under_position` is supposed to recognize all possible symbol names. Since a simple string search already confirmed
-					// the presence of `p_symbol.name` in the text, this case has to be a bug.
-					ERR_PRINT(vformat("LSP Bug, please report. \"get_symbol_name_under_position\" did not correctly resolve \"%s\"", identifier));
-					character = line.find(identifier, character + 1);
-				} else {
-					character = line.find(identifier, character + MAX(1, identifier.length()));
-				}
+			LSP::Range range;
+			if (parser->get_symbol_name_under_position(params.position, range) != identifier) {
+				continue;
+			}
+			const LSP::DocumentSymbol *other_symbol = resolve_symbol(p_session, params);
+			if (other_symbol == &p_symbol) {
+				LSP::Location location;
+				location.uri = params.textDocument.uri;
+				location.range = range;
+				usages.push_back(location);
 			}
 		}
 	}
@@ -509,12 +499,38 @@ Vector<LSP::Location> GDScriptWorkspace::find_all_usages(const Ref<GDScriptAnaly
 	// Search in all documents.
 	List<String> paths;
 	list_script_files("res://", paths);
+	HashSet<String> known_paths;
+	for (const String &path : paths) {
+		known_paths.insert(path);
+	}
+	if (!p_symbol.script_path.is_empty() && !known_paths.has(p_symbol.script_path)) {
+		paths.push_back(p_symbol.script_path);
+		known_paths.insert(p_symbol.script_path);
+	}
+	if (p_session.is_valid()) {
+		Vector<String> cached_paths;
+		for (const KeyValue<String, ExtendGDScriptParser *> &entry : p_session->get_cached_parsers()) {
+			if (!known_paths.has(entry.key)) {
+				cached_paths.push_back(entry.key);
+				known_paths.insert(entry.key);
+			}
+		}
+		cached_paths.sort();
+		for (const String &path : cached_paths) {
+			paths.push_back(path);
+		}
+	}
 
 	Vector<LSP::Location> usages;
 	for (const String &path : paths) {
 		usages.append_array(find_usages_in_file(p_session, p_symbol, path));
 	}
 	return usages;
+}
+
+bool GDScriptWorkspace::is_declaration_location(const LSP::DocumentSymbol &p_symbol, const LSP::Location &p_location) const {
+	return !p_symbol.script_path.is_empty() && p_location.uri == get_file_uri(p_symbol.script_path) &&
+			p_location.range == p_symbol.selectionRange;
 }
 
 String GDScriptWorkspace::get_file_path(const String &p_uri) {

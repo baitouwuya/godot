@@ -49,6 +49,7 @@ public:
 	static Error resolve_script_path(const String &p_path, String &r_resource_path, String &r_absolute_path, bool &r_built_in, String *r_error = nullptr);
 	static Error read_authoritative_snapshot_for_root(const String &p_path, const String &p_project_root, Dictionary &r_snapshot, String *r_error = nullptr);
 	static Error read_authoritative_snapshot(const String &p_path, Dictionary &r_snapshot, String *r_error = nullptr);
+	static Error read_open_snapshots(Array &r_snapshots, String *r_error = nullptr);
 	static Error open(const String &p_path, MCPScriptBuffer &r_buffer, String *r_error = nullptr);
 	static Error open(const Ref<Script> &p_script, MCPScriptBuffer &r_buffer, String *r_error = nullptr);
 	static void apply_text_edit(CodeEdit *p_text_edit, const String &p_text);

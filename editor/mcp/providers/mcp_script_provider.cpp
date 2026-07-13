@@ -33,6 +33,7 @@
 #include "mcp_script_analysis_sync.h"
 #include "mcp_script_buffer.h"
 #include "mcp_script_document.h"
+#include "mcp_script_usages.h"
 #include "mcp_scene_utils.h"
 #include "mcp_tool_utils.h"
 
@@ -136,6 +137,19 @@ static Dictionary _get_schema() {
 	return _script_selector_schema(properties);
 }
 
+static Dictionary _usages_schema() {
+	Dictionary properties;
+	properties["member"] = _member_schema();
+	Dictionary include_declaration = _property_schema("boolean", "Include the selected member declaration in the returned LSP locations.");
+	include_declaration["default"] = false;
+	properties["includeDeclaration"] = include_declaration;
+	Dictionary schema = _script_selector_schema(properties);
+	PackedStringArray required;
+	required.push_back("member");
+	schema["required"] = required;
+	return schema;
+}
+
 static Dictionary _edit_schema() {
 	Dictionary properties;
 	properties["text"] = _property_schema("string", "Complete replacement source text.");
@@ -192,6 +206,11 @@ static bool _is_valid_class_path(const String &p_path) {
 	return !p_path.is_empty() && !p_path.begins_with(".") && !p_path.ends_with(".") && !p_path.contains("..");
 }
 
+static bool _is_valid_member_kind(const String &p_kind) {
+	return p_kind == "class" || p_kind == "property" || p_kind == "variable" || p_kind == "constant" ||
+			p_kind == "enum" || p_kind == "enumValue" || p_kind == "signal" || p_kind == "method" || p_kind == "parameter";
+}
+
 static String _buffer_error_code(Error p_error) {
 	switch (p_error) {
 		case ERR_FILE_NOT_FOUND:
@@ -241,49 +260,62 @@ static Dictionary _open_selected_buffer(const Dictionary &p_arguments, MCPScript
 	return err == OK ? Dictionary() : MCPToolUtils::make_error_result(_buffer_error_code(err), error);
 }
 
-static bool _get_script_view(const Dictionary &p_arguments, String &r_view, bool &r_include_comments, Dictionary &r_member, String &r_error) {
-	r_view = p_arguments.get("view", "documentation");
-	r_include_comments = p_arguments.get("includeComments", true);
-	r_member = p_arguments.get("member", Dictionary());
-	if ((r_view != "documentation" && r_view != "full") ||
-			(p_arguments.has("view") && p_arguments["view"].get_type() != Variant::STRING) ||
-			(p_arguments.has("includeComments") && p_arguments["includeComments"].get_type() != Variant::BOOL) ||
-			(p_arguments.has("member") && p_arguments["member"].get_type() != Variant::DICTIONARY)) {
-		r_error = "view, includeComments, or member has an invalid type or value.";
-		return false;
-	}
-	if (!r_member.is_empty()) {
+static bool _validate_member_query(const Dictionary &p_member, String &r_error) {
+	if (!p_member.is_empty()) {
 		String unknown;
 		PackedStringArray allowed;
 		allowed.push_back("kind");
 		allowed.push_back("name");
 		allowed.push_back("owner");
 		allowed.push_back("classPath");
-		if (!MCPToolUtils::has_only_arguments(r_member, allowed, unknown) ||
-				r_member.get("kind", Variant()).get_type() != Variant::STRING || String(r_member.get("kind", String())).is_empty() ||
-				r_member.get("name", Variant()).get_type() != Variant::STRING || String(r_member.get("name", String())).is_empty() ||
-				(r_member.has("owner") && r_member["owner"].get_type() != Variant::STRING) ||
-				(r_member.has("classPath") && (r_member["classPath"].get_type() != Variant::STRING || String(r_member["classPath"]).is_empty()))) {
+		if (!MCPToolUtils::has_only_arguments(p_member, allowed, unknown) ||
+				p_member.get("kind", Variant()).get_type() != Variant::STRING || String(p_member.get("kind", String())).is_empty() ||
+				p_member.get("name", Variant()).get_type() != Variant::STRING || String(p_member.get("name", String())).is_empty() ||
+				(p_member.has("owner") && p_member["owner"].get_type() != Variant::STRING) ||
+				(p_member.has("classPath") && (p_member["classPath"].get_type() != Variant::STRING || String(p_member["classPath"]).is_empty()))) {
 			r_error = "member requires non-empty string kind and name fields, with optional string owner and classPath fields.";
 			return false;
 		}
-		const bool parameter = String(r_member.get("kind", String())) == "parameter";
-		if (parameter && String(r_member.get("owner", String())).is_empty()) {
+		const bool parameter = String(p_member.get("kind", String())) == "parameter";
+		if (!_is_valid_member_kind(p_member.get("kind", String()))) {
+			r_error = "member kind is not supported.";
+			return false;
+		}
+		if (parameter && String(p_member.get("owner", String())).is_empty()) {
 			r_error = "A parameter member query requires its method or signal owner.";
 			return false;
 		}
-		if (!parameter && r_member.has("classPath")) {
+		if (!parameter && p_member.has("classPath")) {
 			r_error = "classPath is only valid for parameter member queries.";
 			return false;
 		}
-		const String class_path = r_member.get("classPath", String());
-		const String owner = r_member.get("owner", String());
+		const String class_path = p_member.get("classPath", String());
+		const String owner = p_member.get("owner", String());
+		if (parameter && owner.contains(".")) {
+			r_error = "A parameter member owner must be an unqualified method or signal name.";
+			return false;
+		}
 		if ((!class_path.is_empty() && !_is_valid_class_path(class_path)) || (!parameter && owner.contains(".") && !_is_valid_class_path(owner))) {
 			r_error = "Qualified class paths cannot start or end with a period or contain empty segments.";
 			return false;
 		}
 	}
 	return true;
+}
+
+static bool _get_script_view(const Dictionary &p_arguments, String &r_view, bool &r_include_comments, Dictionary &r_member, String &r_error) {
+	r_view = p_arguments.get("view", "documentation");
+	r_include_comments = p_arguments.get("includeComments", true);
+	const Variant member_value = p_arguments.get("member", Dictionary());
+	if ((r_view != "documentation" && r_view != "full") ||
+			(p_arguments.has("view") && p_arguments["view"].get_type() != Variant::STRING) ||
+			(p_arguments.has("includeComments") && p_arguments["includeComments"].get_type() != Variant::BOOL) ||
+			member_value.get_type() != Variant::DICTIONARY) {
+		r_error = "view, includeComments, or member has an invalid type or value.";
+		return false;
+	}
+	r_member = member_value;
+	return _validate_member_query(r_member, r_error);
 }
 
 static void _set_error(String *r_error, const String &p_message) {
@@ -330,6 +362,11 @@ Error MCPScriptProvider::register_tools(MCPToolRegistry *p_registry, String *r_e
 		err = p_registry->register_tool(
 				MCPToolUtils::make_tool_definition("godot.script.get", "Read a GDScript as documentation, a member, or full source.", _get_schema()),
 				callable_mp(this, &MCPScriptProvider::get), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
+	}
+	if (err == OK) {
+		err = p_registry->register_tool(
+				MCPToolUtils::make_tool_definition("godot.script.usages", "Find semantic LSP usages of a named GDScript member.", _usages_schema()),
+				callable_mp(this, &MCPScriptProvider::usages), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
 	}
 	if (err == OK) {
 		err = p_registry->register_tool(
@@ -489,6 +526,74 @@ Dictionary MCPScriptProvider::get(const Dictionary &p_arguments, const Dictionar
 		result[entry.key] = entry.value;
 	}
 	result["diagnostics"] = diagnostics;
+	return MCPToolUtils::make_success_result(result);
+}
+
+Dictionary MCPScriptProvider::usages(const Dictionary &p_arguments, const Dictionary &p_context) {
+	PackedStringArray allowed_arguments;
+	allowed_arguments.push_back("path");
+	allowed_arguments.push_back("nodePath");
+	allowed_arguments.push_back("member");
+	allowed_arguments.push_back("includeDeclaration");
+	String unknown_argument;
+	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed_arguments, unknown_argument)) {
+		return _unknown_argument_error(unknown_argument);
+	}
+	const Variant member_value = p_arguments.get("member", Variant());
+	const Variant include_declaration_value = p_arguments.get("includeDeclaration", false);
+	if (member_value.get_type() != Variant::DICTIONARY || Dictionary(member_value).is_empty() || include_declaration_value.get_type() != Variant::BOOL) {
+		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "A non-empty member object and optional boolean includeDeclaration are required.");
+	}
+	const Dictionary member = member_value;
+	String argument_error;
+	if (!_validate_member_query(member, argument_error)) {
+		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", argument_error);
+	}
+
+	String session_id;
+	Ref<GDScriptAnalysisSession> session;
+	String analysis_error;
+	if (!_resolve_analysis_context(p_context, session_id, session, analysis_error)) {
+		return MCPToolUtils::make_error_result("ANALYSIS_UNAVAILABLE", analysis_error);
+	}
+
+	MCPScriptBuffer buffer;
+	const Dictionary buffer_error = _open_selected_buffer(p_arguments, buffer);
+	if (!buffer_error.is_empty()) {
+		return buffer_error;
+	}
+	Dictionary result = buffer.get_snapshot();
+	Array diagnostics;
+	if (MCPScriptAnalysisSync::sync_snapshot(session_manager, session_id, result, diagnostics, &analysis_error) != OK) {
+		return MCPScriptAnalysisSync::make_failure(result, false, false, false, analysis_error);
+	}
+	if (MCPScriptAnalysisSync::sync_open_buffers(session_manager, session_id, &analysis_error) != OK) {
+		return MCPScriptAnalysisSync::make_failure(result, false, false, false, analysis_error);
+	}
+	const String path = result.get("path", String());
+	ExtendGDScriptParser *parser = session->get_parse_result(path);
+	if (!parser || session->get_workspace().is_null()) {
+		return MCPToolUtils::make_error_result("ANALYSIS_UNAVAILABLE", "The synchronized GDScript parser or workspace is unavailable.");
+	}
+
+	Dictionary usage_result;
+	String usage_error;
+	const Error error = MCPScriptUsages::find(session->get_workspace(), session, *parser, member, include_declaration_value, usage_result, &usage_error);
+	if (error != OK) {
+		String error_code = "USAGE_QUERY_FAILED";
+		if (error == ERR_DOES_NOT_EXIST) {
+			error_code = "MEMBER_NOT_FOUND";
+		} else if (error == ERR_ALREADY_EXISTS) {
+			error_code = "MEMBER_AMBIGUOUS";
+		} else if (error == ERR_UNCONFIGURED) {
+			error_code = "ANALYSIS_UNAVAILABLE";
+		}
+		return MCPToolUtils::make_error_result(error_code, usage_error);
+	}
+	result.erase("text");
+	for (const KeyValue<Variant, Variant> &entry : usage_result) {
+		result[entry.key] = entry.value;
+	}
 	return MCPToolUtils::make_success_result(result);
 }
 

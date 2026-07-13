@@ -1,9 +1,8 @@
 /**************************************************************************/
-/*  mcp_script_provider.h                                                 */
+/*  mcp_script_usages.cpp                                                 */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
-/*                        https://godotengine.org                         */
 /**************************************************************************/
 /* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
 /* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
@@ -28,37 +27,62 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#pragma once
+#include "mcp_script_usages.h"
 
-#include "mcp_gdscript_session_manager.h"
+#include "mcp_script_member_selector.h"
 
-#include "core/object/object.h"
-#include "core/variant/dictionary.h"
+#include "modules/gdscript/language_server/gdscript_analysis_session.h"
+#include "modules/gdscript/language_server/gdscript_extend_parser.h"
+#include "modules/gdscript/language_server/gdscript_workspace.h"
 
-class MCPToolRegistry;
-class GDScriptAnalysisSession;
+Error MCPScriptUsages::find(const Ref<GDScriptWorkspace> &p_workspace, const Ref<GDScriptAnalysisSession> &p_session,
+		const ExtendGDScriptParser &p_parser, const Dictionary &p_member, bool p_include_declaration,
+		Dictionary &r_result, String *r_error) {
+	r_result = Dictionary();
+	if (r_error) {
+		*r_error = String();
+	}
+	if (p_workspace.is_null() || p_session.is_null()) {
+		if (r_error) {
+			*r_error = "A GDScript workspace and analysis session are required.";
+		}
+		return ERR_UNCONFIGURED;
+	}
 
-class MCPScriptProvider : public Object {
-public:
-	static constexpr const char *STALE_REVISION_ERROR_CODE = "stale_revision";
+	MCPScriptMemberMatch match;
+	const Error selection_error = MCPScriptMemberSelector::find(p_parser, p_member, match, r_error);
+	if (selection_error != OK) {
+		return selection_error;
+	}
+	if (!match.symbol) {
+		if (r_error) {
+			*r_error = "The selected script member does not have an LSP symbol.";
+		}
+		return ERR_BUG;
+	}
 
-	MCPScriptProvider(const Ref<MCPGDScriptSessionManager> &p_session_manager = Ref<MCPGDScriptSessionManager>());
-	~MCPScriptProvider();
+	const Vector<LSP::Location> usages = p_workspace->find_all_usages(p_session, *match.symbol);
+	Array locations;
+	for (const LSP::Location &usage : usages) {
+		if (!p_include_declaration && p_workspace->is_declaration_location(*match.symbol, usage)) {
+			continue;
+		}
+		locations.push_back(usage.to_json());
+	}
 
-	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr);
-	void unregister_tools();
-	void set_session_manager(const Ref<MCPGDScriptSessionManager> &p_session_manager) { session_manager = p_session_manager; }
-	const Ref<MCPGDScriptSessionManager> &get_session_manager() const { return session_manager; }
-
-	Dictionary create(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary get(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary usages(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary edit(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary save(const Dictionary &p_arguments, const Dictionary &p_context);
-
-private:
-	MCPToolRegistry *tool_registry = nullptr;
-	Ref<MCPGDScriptSessionManager> session_manager;
-
-	bool _resolve_analysis_context(const Dictionary &p_context, String &r_session_id, Ref<GDScriptAnalysisSession> &r_session, String &r_error);
-};
+	Dictionary member;
+	member["kind"] = match.kind;
+	member["name"] = match.symbol->name;
+	if (match.kind == "parameter") {
+		member["owner"] = match.callable_name;
+		if (!match.owner_path.is_empty()) {
+			member["classPath"] = match.owner_path;
+		}
+	} else if (!match.owner_path.is_empty()) {
+		member["owner"] = match.owner_path;
+	}
+	r_result["member"] = member;
+	r_result["locations"] = locations;
+	r_result["count"] = locations.size();
+	return OK;
+}

@@ -254,6 +254,10 @@ Error MCPScriptMemberSelector::find(const ExtendGDScriptParser &p_parser, const 
 			return OK;
 		}
 		ambiguous = matches.size() > 1;
+	} else if (requested_kind == "class" && requested_name == root.name && (owner.is_empty() || owner == root.name)) {
+		r_match.symbol = &root;
+		r_match.kind = "class";
+		return OK;
 	} else {
 		const LSP::DocumentSymbol *owner_class = _resolve_owner_class(root, owner, r_match.owner_path, ambiguous);
 		if (owner_class) {

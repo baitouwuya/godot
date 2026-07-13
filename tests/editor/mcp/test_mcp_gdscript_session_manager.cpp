@@ -119,6 +119,38 @@ TEST_CASE("[MCP][Provider] GDScript session manager synchronizes authoritative s
 	CHECK(manager->get_session_count() == 0);
 }
 
+TEST_CASE("[MCP][Provider] GDScript session manager releases closed editor documents per session") {
+	Ref<GDScriptWorkspace> workspace;
+	workspace.instantiate();
+	Ref<GDScriptAnalysisService> service;
+	service.instantiate();
+	service->configure("res://", workspace);
+	Ref<MCPGDScriptSessionManager> manager = memnew(MCPGDScriptSessionManager(service));
+
+	const String first_id = "editor-documents-first";
+	const String second_id = "editor-documents-second";
+	const String kept_path = "res://scene.tscn::GDScript_kept";
+	const String closed_path = "res://scene.tscn::GDScript_closed";
+	Array diagnostics;
+	String error;
+	REQUIRE(manager->sync_document(first_id, kept_path, "var kept := true\n", 1, diagnostics, &error) == OK);
+	REQUIRE(manager->sync_document(first_id, closed_path, "var stale := true\n", 2, diagnostics, &error) == OK);
+	REQUIRE(manager->sync_document(second_id, closed_path, "var isolated := true\n", 3, diagnostics, &error) == OK);
+
+	HashSet<String> open_paths;
+	open_paths.insert(kept_path);
+	REQUIRE(manager->reconcile_open_editor_documents(first_id, open_paths, &error) == OK);
+	Ref<GDScriptAnalysisSession> first_session = manager->get_session(first_id);
+	Ref<GDScriptAnalysisSession> second_session = manager->get_session(second_id);
+	REQUIRE(first_session.is_valid());
+	REQUIRE(second_session.is_valid());
+	CHECK(first_session->has_document(kept_path));
+	CHECK_FALSE(first_session->has_document(closed_path));
+	CHECK(first_session->get_parse_result(closed_path) == nullptr);
+	CHECK(second_session->has_document(closed_path));
+	CHECK(second_session->get_parse_result(closed_path) != nullptr);
+}
+
 } // namespace TestMCPGDScriptSessionManager
 
 #endif // MODULE_GDSCRIPT_ENABLED && !GDSCRIPT_NO_LSP

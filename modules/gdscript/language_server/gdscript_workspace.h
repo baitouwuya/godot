@@ -110,6 +110,7 @@ public:
 	Vector<LSP::Location> find_usages_in_file(const Ref<GDScriptAnalysisSession> &p_session, const LSP::DocumentSymbol &p_symbol, const String &p_file_path);
 	Vector<LSP::Location> find_all_usages(const LSP::DocumentSymbol &p_symbol);
 	Vector<LSP::Location> find_all_usages(const Ref<GDScriptAnalysisSession> &p_session, const LSP::DocumentSymbol &p_symbol);
+	bool is_declaration_location(const LSP::DocumentSymbol &p_symbol, const LSP::Location &p_location) const;
 
 	GDScriptWorkspace();
 	~GDScriptWorkspace();

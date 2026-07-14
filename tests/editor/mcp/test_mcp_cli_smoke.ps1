@@ -251,6 +251,11 @@ extends EditorPlugin
 
 const STOP_FILE := "res://.mcp-smoke-stop"
 const SCENE_READY_FILE := "res://.mcp-smoke-scene-ready"
+const DEBUG_READY_FILE := "res://.mcp-smoke-debug-ready"
+const DEBUG_REPEAT_MESSAGE := "mcp-smoke-debug-repeat-7a62f1"
+const DEBUG_SEPARATOR_MESSAGE := "mcp-smoke-debug-separator-7a62f1"
+const DEBUG_WARNING_MESSAGE := "mcp-smoke-debug-warning-7a62f1"
+const DEBUG_ERROR_MESSAGE := "mcp-smoke-debug-error-7a62f1"
 
 func _enter_tree() -> void:
 	set_process(true)
@@ -265,6 +270,15 @@ func _process(_delta: float) -> void:
 		var ready_file := FileAccess.open(SCENE_READY_FILE, FileAccess.WRITE)
 		if ready_file:
 			ready_file.store_string("ready")
+	if FileAccess.file_exists("res://mcp_smoke_script.gd") and not FileAccess.file_exists(DEBUG_READY_FILE):
+		print(DEBUG_REPEAT_MESSAGE)
+		print(DEBUG_SEPARATOR_MESSAGE)
+		print(DEBUG_REPEAT_MESSAGE)
+		push_warning(DEBUG_WARNING_MESSAGE)
+		push_error(DEBUG_ERROR_MESSAGE)
+		var debug_ready_file := FileAccess.open(DEBUG_READY_FILE, FileAccess.WRITE)
+		if debug_ready_file:
+			debug_ready_file.store_string("ready")
 '@
 	Set-Content -LiteralPath (Join-Path $addonPath "plugin.gd") -Value $pluginScript -Encoding utf8NoBOM
 }
@@ -567,6 +581,9 @@ try {
 	$expectedTools = @(
 		"godot.class.search",
 		"godot.class.get_documentation",
+		"godot.debug.get_logs",
+		"godot.debug.get_errors",
+		"godot.debug.get_stack",
 		"godot.editor.get_state",
 		"godot.editor.undo",
 		"godot.editor.redo",
@@ -602,8 +619,8 @@ try {
 		"godot.gdscript.rename"
 	) | Sort-Object
 	$actualTools = @($responsesById["2"].result.tools | ForEach-Object { [string]$_.name } | Sort-Object)
-	Assert-Condition ($actualTools.Count -eq 35) "tools/list returned $($actualTools.Count) tools instead of 35."
-	Assert-Condition (($actualTools -join "`n") -ceq ($expectedTools -join "`n")) "tools/list did not expose the expected 35-tool surface."
+	Assert-Condition ($actualTools.Count -eq 38) "tools/list returned $($actualTools.Count) tools instead of 38."
+	Assert-Condition (($actualTools -join "`n") -ceq ($expectedTools -join "`n")) "tools/list did not expose the expected 38-tool surface."
 	$createResult = $responsesById["3"].result.structuredContent
 	Assert-Condition (-not (Test-ToolResultError -Result $responsesById["3"].result)) "script/create returned a tool error."
 	Assert-Condition ([string]$createResult.sha256 -ceq $initialScriptSha) "script/create returned an unexpected SHA-256."
@@ -621,6 +638,42 @@ try {
 	Assert-Condition ([string]$classDocumentationResult.source -ceq "native") "Node2D documentation was not classified as native."
 	Assert-Condition (@($classDocumentationResult.inheritance) -ccontains "CanvasItem") "Node2D documentation omitted its inheritance chain."
 	Assert-Condition ([int]$classDocumentationResult.counts.methods -gt 0) "Node2D documentation omitted its method count."
+
+	Wait-ForHostFile -McpHost $hostA -RelativePath ".mcp-smoke-debug-ready" -Label "project A debug events"
+	$debugFlow = Invoke-Godot -Arguments @("--verbose", "--mcp-stdio", "--path", $projectA) -InputLines @(
+		$initializeRequest,
+		$initializedNotification,
+		(New-ToolCallRequest -Id 6 -Name "godot.debug.get_logs" -Arguments @{
+			source = "editor"
+			levels = @("info")
+			query = "mcp-smoke-debug-repeat-7a62f1"
+			deduplicate = $true
+		}),
+		(New-ToolCallRequest -Id 7 -Name "godot.debug.get_errors" -Arguments @{
+			source = "editor"
+			query = "mcp-smoke-debug-"
+			includeWarnings = $true
+			deduplicate = $true
+		})
+	)
+	$debugResponses = Convert-JsonRpcResponseMap -Result $debugFlow -ExpectedCount 3 -Label "stdio debug event flow"
+	foreach ($responseId in @("1", "6", "7")) {
+		Assert-Condition ($debugResponses.ContainsKey($responseId)) "debug event flow response $responseId is missing."
+	}
+	Assert-Condition (-not (Test-ToolResultError -Result $debugResponses["6"].result)) "debug/get_logs returned a tool error."
+	$logsResult = $debugResponses["6"].result.structuredContent
+	Assert-Condition ([int64]$logsResult.rawCount -eq 2) "debug/get_logs did not retain both non-adjacent repeated events."
+	Assert-Condition (@($logsResult.groups).Count -eq 1) "debug/get_logs did not globally deduplicate the repeated events."
+	Assert-Condition ([int64]$logsResult.groups[0].count -eq 2) "debug/get_logs returned an unexpected repeated-event count."
+	Assert-Condition ([string]$logsResult.groups[0].message -ceq "mcp-smoke-debug-repeat-7a62f1") "debug/get_logs returned the wrong repeated event."
+	Assert-Condition (-not (Test-ToolResultError -Result $debugResponses["7"].result)) "debug/get_errors returned a tool error."
+	$errorsResult = $debugResponses["7"].result.structuredContent
+	$errorLevels = @($errorsResult.errors | ForEach-Object { [string]$_.level })
+	$errorMessages = @($errorsResult.errors | ForEach-Object { [string]$_.message })
+	Assert-Condition ($errorLevels -ccontains "warning") "debug/get_errors omitted the captured warning."
+	Assert-Condition ($errorLevels -ccontains "error") "debug/get_errors omitted the captured error."
+	Assert-Condition ($errorMessages -ccontains "mcp-smoke-debug-warning-7a62f1") "debug/get_errors returned the wrong warning message."
+	Assert-Condition ($errorMessages -ccontains "mcp-smoke-debug-error-7a62f1") "debug/get_errors returned the wrong error message."
 
 	Write-Host "[7/9] Checking dirty ScriptEditor authority, stale edits, diagnostics, and save"
 	$dirtyScriptText = "extends Node`nvar value: int =`n"

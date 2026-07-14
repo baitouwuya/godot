@@ -39,6 +39,9 @@
 
 class ConfirmationDialog;
 class MCPClassProvider;
+class MCPDebugCapture;
+class MCPDebugEventStore;
+class MCPDebugProvider;
 class MCPEditorProvider;
 class MCPFileProvider;
 class MCPGDScriptProvider;
@@ -79,6 +82,9 @@ class MCPEditorPlugin : public EditorPlugin, public MCPHostSessionObserver {
 	ConfirmationDialog *conflict_dialog = nullptr;
 	MCPDiscoveryRecord conflicting_owner;
 	MCPClassProvider *class_provider = nullptr;
+	MCPDebugEventStore *debug_event_store = nullptr;
+	MCPDebugCapture *debug_capture = nullptr;
+	MCPDebugProvider *debug_provider = nullptr;
 	MCPEditorProvider *editor_provider = nullptr;
 	MCPFileProvider *file_provider = nullptr;
 	MCPSceneProvider *scene_provider = nullptr;

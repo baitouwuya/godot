@@ -234,6 +234,8 @@ void EditorDebuggerNode::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("breakpoint_toggled", PropertyInfo(Variant::STRING, "path"), PropertyInfo(Variant::INT, "line"), PropertyInfo(Variant::BOOL, "enabled")));
 	ADD_SIGNAL(MethodInfo("breakpoint_set_in_tree", PropertyInfo("script"), PropertyInfo(Variant::INT, "line"), PropertyInfo(Variant::BOOL, "enabled"), PropertyInfo(Variant::INT, "debugger")));
 	ADD_SIGNAL(MethodInfo("breakpoints_cleared_in_tree", PropertyInfo(Variant::INT, "debugger")));
+	ADD_SIGNAL(MethodInfo("debug_data_received", PropertyInfo(Variant::STRING, "message"), PropertyInfo(Variant::INT, "thread_id"), PropertyInfo(Variant::ARRAY, "data"), PropertyInfo(Variant::INT, "debugger")));
+	ADD_SIGNAL(MethodInfo("debug_session_stopped", PropertyInfo(Variant::INT, "debugger")));
 }
 
 void EditorDebuggerNode::register_undo_redo(UndoRedo *p_undo_redo) {
@@ -491,6 +493,7 @@ void EditorDebuggerNode::_update_margins() {
 void EditorDebuggerNode::_debugger_stopped(int p_id) {
 	ScriptEditorDebugger *dbg = get_debugger(p_id);
 	ERR_FAIL_NULL(dbg);
+	emit_signal(SNAME("debug_session_stopped"), p_id);
 
 	bool found = false;
 	_for_all(tabs, [&](ScriptEditorDebugger *p_debugger) {
@@ -543,7 +546,9 @@ void EditorDebuggerNode::_debugger_changed(int p_tab) {
 	_break_state_changed();
 }
 
-void EditorDebuggerNode::_debug_data(const String &p_msg, const Array &p_data, int p_debugger) {
+void EditorDebuggerNode::_debug_data(const String &p_msg, uint64_t p_thread_id, const Array &p_data, int p_debugger) {
+	emit_signal(SNAME("debug_data_received"), p_msg, p_thread_id, p_data, p_debugger);
+
 	if (p_debugger != tabs->get_current_tab()) {
 		return;
 	}

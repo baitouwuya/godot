@@ -132,7 +132,7 @@ protected:
 	void _debugger_stopped(int p_id);
 	void _debugger_wants_stop(int p_id);
 	void _debugger_changed(int p_tab);
-	void _debug_data(const String &p_msg, const Array &p_data, int p_debugger);
+	void _debug_data(const String &p_msg, uint64_t p_thread_id, const Array &p_data, int p_debugger);
 	void _remote_tree_select_requested(const TypedArray<int64_t> &p_ids, int p_debugger);
 	void _remote_tree_clear_selection_requested(int p_debugger);
 	void _remote_tree_updated(int p_debugger);

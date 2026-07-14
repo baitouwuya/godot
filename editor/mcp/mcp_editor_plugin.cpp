@@ -30,6 +30,9 @@
 #include "mcp_editor_plugin.h"
 
 #include "providers/mcp_class_provider.h"
+#include "providers/mcp_debug_capture.h"
+#include "providers/mcp_debug_event_store.h"
+#include "providers/mcp_debug_provider.h"
 #include "providers/mcp_editor_provider.h"
 #include "providers/mcp_file_provider.h"
 #include "providers/mcp_node_provider.h"
@@ -88,6 +91,11 @@ Error MCPEditorPlugin::_register_tools(String &r_error) {
 
 	Error error = class_provider->register_tools(&tool_registry, &r_error);
 	if (error != OK) {
+		return error;
+	}
+	error = debug_provider->register_tools(&tool_registry, &r_error);
+	if (error != OK) {
+		_unregister_tools();
 		return error;
 	}
 	error = editor_provider->register_tools(&tool_registry, &r_error);
@@ -150,6 +158,7 @@ void MCPEditorPlugin::_unregister_tools() {
 	scene_provider->unregister_tools();
 	file_provider->unregister_tools();
 	editor_provider->unregister_tools();
+	debug_provider->unregister_tools();
 	class_provider->unregister_tools();
 }
 
@@ -220,6 +229,17 @@ Error MCPEditorPlugin::_start_mcp(String &r_error) {
 		return error;
 	}
 
+	debug_event_store->clear();
+	error = debug_capture->start();
+	if (error != OK) {
+		MCPDiscovery::remove_record(discovery_directory, project_identity.project_id, project_identity.instance_id);
+		host.stop();
+		_unregister_tools();
+		project_lease->release();
+		r_error = "Unable to start MCP debug event capture.";
+		return error;
+	}
+
 	main_thread_executor.reset();
 	last_heartbeat_usec = OS::get_singleton()->get_ticks_usec();
 	print_line(vformat("Godot MCP Host started for project %s at %s", project_identity.project_id, host.get_endpoint()));
@@ -227,6 +247,7 @@ Error MCPEditorPlugin::_start_mcp(String &r_error) {
 }
 
 void MCPEditorPlugin::_stop_mcp() {
+	debug_capture->stop();
 	main_thread_executor.shutdown();
 	if (host.is_running()) {
 		host.stop();
@@ -364,6 +385,9 @@ MCPEditorPlugin::MCPEditorPlugin() {
 	gdscript_session_manager = session_manager.ptr();
 #endif
 	class_provider = memnew(MCPClassProvider);
+	debug_event_store = memnew(MCPDebugEventStore);
+	debug_capture = memnew(MCPDebugCapture(debug_event_store));
+	debug_provider = memnew(MCPDebugProvider(debug_event_store));
 	editor_provider = memnew(MCPEditorProvider);
 	file_provider = memnew(MCPFileProvider);
 	scene_provider = memnew(MCPSceneProvider);
@@ -393,6 +417,9 @@ MCPEditorPlugin::~MCPEditorPlugin() {
 	memdelete(scene_provider);
 	memdelete(file_provider);
 	memdelete(editor_provider);
+	memdelete(debug_provider);
+	memdelete(debug_capture);
+	memdelete(debug_event_store);
 	memdelete(class_provider);
 #if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
 	gdscript_session_manager = nullptr;

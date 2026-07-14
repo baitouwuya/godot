@@ -108,6 +108,7 @@ public:
 	bool is_pressed() const; ///< return whether button is pressed (toggled in)
 	bool is_pressing() const; ///< return whether button is pressed (toggled in)
 	bool is_hovered() const;
+	void activate();
 
 	void set_pressed(bool p_pressed); // Only works in toggle mode.
 	void set_pressed_no_signal(bool p_pressed);

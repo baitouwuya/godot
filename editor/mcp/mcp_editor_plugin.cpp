@@ -34,6 +34,7 @@
 #include "providers/mcp_debug_event_store.h"
 #include "providers/mcp_debug_provider.h"
 #include "providers/mcp_editor_provider.h"
+#include "providers/mcp_editor_ui_provider.h"
 #include "providers/mcp_file_provider.h"
 #include "providers/mcp_node_provider.h"
 #include "providers/mcp_node_structure_provider.h"
@@ -103,6 +104,11 @@ Error MCPEditorPlugin::_register_tools(String &r_error) {
 		_unregister_tools();
 		return error;
 	}
+	error = editor_ui_provider->register_tools(&tool_registry, &r_error);
+	if (error != OK) {
+		_unregister_tools();
+		return error;
+	}
 	error = file_provider->register_tools(&tool_registry, &r_error);
 	if (error != OK) {
 		_unregister_tools();
@@ -157,12 +163,16 @@ void MCPEditorPlugin::_unregister_tools() {
 	node_provider->unregister_tools();
 	scene_provider->unregister_tools();
 	file_provider->unregister_tools();
+	editor_ui_provider->unregister_tools();
 	editor_provider->unregister_tools();
 	debug_provider->unregister_tools();
 	class_provider->unregister_tools();
 }
 
 void MCPEditorPlugin::on_mcp_session_removed(const String &p_session_id) {
+	if (editor_ui_provider) {
+		editor_ui_provider->release_session(p_session_id);
+	}
 #if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
 	if (gdscript_session_manager) {
 		gdscript_session_manager->release_session(p_session_id);
@@ -389,6 +399,7 @@ MCPEditorPlugin::MCPEditorPlugin() {
 	debug_capture = memnew(MCPDebugCapture(debug_event_store));
 	debug_provider = memnew(MCPDebugProvider(debug_event_store));
 	editor_provider = memnew(MCPEditorProvider);
+	editor_ui_provider = memnew(MCPEditorUIProvider);
 	file_provider = memnew(MCPFileProvider);
 	scene_provider = memnew(MCPSceneProvider);
 	node_provider = memnew(MCPNodeProvider);
@@ -416,6 +427,7 @@ MCPEditorPlugin::~MCPEditorPlugin() {
 	memdelete(node_provider);
 	memdelete(scene_provider);
 	memdelete(file_provider);
+	memdelete(editor_ui_provider);
 	memdelete(editor_provider);
 	memdelete(debug_provider);
 	memdelete(debug_capture);

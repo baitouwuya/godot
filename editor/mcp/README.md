@@ -78,6 +78,14 @@ The result includes `propertyCount`, `scriptPropertyCount`, and a `propertyLayou
 
 Unsafe object-like values remain listed with their complete property metadata but omit `value`. A non-null `Node` value additionally exposes a read-only `valueReference` descriptor, using an edited-scene-relative path when possible; this descriptor is not accepted by `godot.node.set_property`. Null object values use JSON `null`. Project `Resource` references are encoded as restricted `res://` references; other arbitrary `Object`, `Callable`, `Signal`, and `RID` values are not exposed.
 
+## Operate The Editor UI
+
+`godot.editor.ui.get_actions` returns a bounded snapshot of the currently visible editor UI. Each actionable control or logical child item includes an opaque `targetId`, role, label, class, bounds, state, and the semantic actions it accepts. Buttons, menus, option lists, text fields, numeric ranges, item lists, tabs, and tree navigation are supported. Secret `LineEdit` values are never returned. Tree values remain read-only through this generic UI layer because editor trees such as the Inspector and Scene dock require their own undo-aware domain operations.
+
+Pass the returned `snapshotId`, one `targetId`, and an advertised action to `godot.editor.ui.perform`. Supported actions are `focus`, `click`, `activate`, `select`, `set_value`, `expand`, `collapse`, `increment`, and `decrement`. Button clicks use `BaseButton`'s native semantic activation path; structured controls reuse their native selection and value APIs. A successful operation invalidates the snapshot, so inspect the current page again before performing another operation.
+
+Snapshots are isolated per MCP session. Targets are revalidated against the visible editor tree and active window before every operation. When a modal dialog or popup is active, only that scope is exposed. Raw object IDs, node paths, arbitrary callables, and screen-coordinate clicks are not accepted.
+
 ## Edit Scene Structure
 
 Node structure changes use the current scene's `EditorUndoRedoManager` history and leave the scene unsaved until `godot.scene.save` is called. The structural tools are:
@@ -114,4 +122,4 @@ pwsh -File tests/editor/mcp/test_mcp_cli_smoke.ps1 `
   -Binary bin/godot.windows.editor.dev.x86_64.console.exe
 ```
 
-Optional parameters are `-TimeoutSeconds <5-300>` and `-KeepTemporaryProjects`. The test creates two temporary projects and verifies explicit-path errors, CLI/editor conflicts, ordinary editor behavior, public discovery fields, independent multi-project routing, same-project Host exclusion, JSON-only stdio stdout, the complete 38-tool MCP surface, native class search/documentation, compressed debug output and errors, cross-session dirty ScriptEditor revision/diagnostic/save/usage behavior, structural Node edits with `NodePath` rewrites, and explicit scene save. Temporary editor plugins request clean Host shutdown; forced termination is used only as a timeout fallback.
+Optional parameters are `-TimeoutSeconds <5-300>` and `-KeepTemporaryProjects`. The test creates two temporary projects and verifies explicit-path errors, CLI/editor conflicts, ordinary editor behavior, public discovery fields, independent multi-project routing, same-project Host exclusion, JSON-only stdio stdout, the complete 40-tool MCP surface, native class search/documentation, editor UI discovery, compressed debug output and errors, cross-session dirty ScriptEditor revision/diagnostic/save/usage behavior, structural Node edits with `NodePath` rewrites, and explicit scene save. Temporary editor plugins request clean Host shutdown; forced termination is used only as a timeout fallback.

@@ -43,6 +43,7 @@ class MCPDebugCapture;
 class MCPDebugEventStore;
 class MCPDebugProvider;
 class MCPEditorProvider;
+class MCPEditorUIProvider;
 class MCPFileProvider;
 class MCPGDScriptProvider;
 class MCPGDScriptSessionManager;
@@ -86,6 +87,7 @@ class MCPEditorPlugin : public EditorPlugin, public MCPHostSessionObserver {
 	MCPDebugCapture *debug_capture = nullptr;
 	MCPDebugProvider *debug_provider = nullptr;
 	MCPEditorProvider *editor_provider = nullptr;
+	MCPEditorUIProvider *editor_ui_provider = nullptr;
 	MCPFileProvider *file_provider = nullptr;
 	MCPSceneProvider *scene_provider = nullptr;
 	MCPNodeProvider *node_provider = nullptr;

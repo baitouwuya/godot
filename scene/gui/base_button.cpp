@@ -117,12 +117,9 @@ void BaseButton::gui_input(const Ref<InputEvent> &p_event) {
 void BaseButton::_accessibility_action_click(const Variant &p_data) {
 	if (toggle_mode) {
 		status.pressed = !status.pressed;
-
-		if (status.pressed) {
-			_unpress_group();
-			if (button_group.is_valid()) {
-				button_group->emit_signal(SceneStringName(pressed), this);
-			}
+		_unpress_group();
+		if (button_group.is_valid()) {
+			button_group->emit_signal(SceneStringName(pressed), this);
 		}
 
 		_toggled(status.pressed);
@@ -132,6 +129,12 @@ void BaseButton::_accessibility_action_click(const Variant &p_data) {
 	}
 	queue_accessibility_update();
 	queue_redraw();
+}
+
+void BaseButton::activate() {
+	ERR_MAIN_THREAD_GUARD;
+	ERR_FAIL_COND(status.disabled);
+	_accessibility_action_click(Variant());
 }
 
 void BaseButton::_notification(int p_what) {
@@ -582,6 +585,7 @@ void BaseButton::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_pressed"), &BaseButton::is_pressed);
 	ClassDB::bind_method(D_METHOD("set_pressed_no_signal", "pressed"), &BaseButton::set_pressed_no_signal);
 	ClassDB::bind_method(D_METHOD("is_hovered"), &BaseButton::is_hovered);
+	ClassDB::bind_method(D_METHOD("activate"), &BaseButton::activate);
 	ClassDB::bind_method(D_METHOD("set_toggle_mode", "enabled"), &BaseButton::set_toggle_mode);
 	ClassDB::bind_method(D_METHOD("is_toggle_mode"), &BaseButton::is_toggle_mode);
 	ClassDB::bind_method(D_METHOD("set_shortcut_in_tooltip", "enabled"), &BaseButton::set_shortcut_in_tooltip);

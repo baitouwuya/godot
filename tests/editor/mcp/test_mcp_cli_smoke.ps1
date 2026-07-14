@@ -563,20 +563,26 @@ try {
 	$classDocumentationRequest = New-ToolCallRequest -Id 5 -Name "godot.class.get_documentation" -Arguments @{
 		name = "Node2D"
 	}
+	$editorUIRequest = New-ToolCallRequest -Id 6 -Name "godot.editor.ui.get_actions" -Arguments @{
+		includeValues = $false
+		limit = 32
+	}
 	$stdio = Invoke-Godot -Arguments @("--verbose", "--mcp-stdio", "--path", $projectA) -InputLines @(
 		$initializeRequest,
 		$initializedNotification,
 		$toolsListRequest,
 		$createScriptRequest,
 		$classSearchRequest,
-		$classDocumentationRequest
+		$classDocumentationRequest,
+		$editorUIRequest
 	)
-	$responsesById = Convert-JsonRpcResponseMap -Result $stdio -ExpectedCount 5 -Label "stdio initialize/tools-list/script-create/class-docs"
+	$responsesById = Convert-JsonRpcResponseMap -Result $stdio -ExpectedCount 6 -Label "stdio initialize/tools-list/script-create/class-docs/editor-ui"
 	Assert-Condition ($responsesById.ContainsKey("1")) "stdio initialize response is missing."
 	Assert-Condition ($responsesById.ContainsKey("2")) "stdio tools/list response is missing."
 	Assert-Condition ($responsesById.ContainsKey("3")) "stdio script/create response is missing."
 	Assert-Condition ($responsesById.ContainsKey("4")) "stdio class/search response is missing."
 	Assert-Condition ($responsesById.ContainsKey("5")) "stdio class/get_documentation response is missing."
+	Assert-Condition ($responsesById.ContainsKey("6")) "stdio editor/ui/get_actions response is missing."
 
 	$expectedTools = @(
 		"godot.class.search",
@@ -587,6 +593,8 @@ try {
 		"godot.editor.get_state",
 		"godot.editor.undo",
 		"godot.editor.redo",
+		"godot.editor.ui.get_actions",
+		"godot.editor.ui.perform",
 		"godot.file.create",
 		"godot.resource.import_options",
 		"godot.resource.import",
@@ -619,8 +627,8 @@ try {
 		"godot.gdscript.rename"
 	) | Sort-Object
 	$actualTools = @($responsesById["2"].result.tools | ForEach-Object { [string]$_.name } | Sort-Object)
-	Assert-Condition ($actualTools.Count -eq 38) "tools/list returned $($actualTools.Count) tools instead of 38."
-	Assert-Condition (($actualTools -join "`n") -ceq ($expectedTools -join "`n")) "tools/list did not expose the expected 38-tool surface."
+	Assert-Condition ($actualTools.Count -eq 40) "tools/list returned $($actualTools.Count) tools instead of 40."
+	Assert-Condition (($actualTools -join "`n") -ceq ($expectedTools -join "`n")) "tools/list did not expose the expected 40-tool surface."
 	$createResult = $responsesById["3"].result.structuredContent
 	Assert-Condition (-not (Test-ToolResultError -Result $responsesById["3"].result)) "script/create returned a tool error."
 	Assert-Condition ([string]$createResult.sha256 -ceq $initialScriptSha) "script/create returned an unexpected SHA-256."
@@ -633,6 +641,10 @@ try {
 	$classSearchNames = @($classSearchResult.matches | ForEach-Object { [string]$_.name })
 	Assert-Condition ($classSearchNames -ccontains "Node2D") "class/search did not find Node2D."
 	$classDocumentationResult = $responsesById["5"].result.structuredContent
+	$editorUIResult = $responsesById["6"].result.structuredContent
+	Assert-Condition (-not (Test-ToolResultError -Result $responsesById["6"].result)) "editor/ui/get_actions returned a tool error."
+	Assert-Condition (-not [string]::IsNullOrWhiteSpace([string]$editorUIResult.snapshotId)) "editor/ui/get_actions did not return a snapshotId."
+	Assert-Condition ($null -ne $editorUIResult.items) "editor/ui/get_actions did not return an items array."
 	Assert-Condition (-not (Test-ToolResultError -Result $responsesById["5"].result)) "class/get_documentation returned a tool error."
 	Assert-Condition ([string]$classDocumentationResult.name -ceq "Node2D") "class/get_documentation returned the wrong class."
 	Assert-Condition ([string]$classDocumentationResult.source -ceq "native") "Node2D documentation was not classified as native."

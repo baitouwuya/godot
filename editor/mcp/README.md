@@ -64,6 +64,12 @@ Project routing is path-based:
 
 Do not cache one endpoint globally or reuse one project's bridge configuration for another project. Create one MCP client entry per project path. Restarting an editor creates a new instance ID, endpoint, and bearer credential, so clients should rediscover through the CLI.
 
+## Search Class Documentation
+
+`godot.class.search` searches the editor's merged class documentation index, including native engine classes, extension classes, built-in Variant types, and documented project script classes. It supports fuzzy class-name matching, native/script source filtering, inheritance filtering, deprecated-class inclusion, and bounded result counts.
+
+`godot.class.get_documentation` reads one exact class from the same index. The default `overview` section returns class-level documentation, tutorials, inheritance, and grouped member counts. Select `all`, `constructors`, `methods`, `operators`, `signals`, `properties`, `constants`, `enums`, `themeItems`, or `annotations` to retrieve compact structured members. Add an exact `member` name to isolate one member, and set `view` to `full` to include member descriptions. Documentation text uses the same Markdown conversion as the built-in GDScript LSP.
+
 ## Inspect Node Properties
 
 `godot.node.get_properties` returns every property marked for editor use in the edited node's Inspector property list, including properties exported by attached and inherited scripts. The `properties` array preserves the Inspector order and identifies each entry as `native` or `script`; script entries include their owning script path when one is available. Each entry also reports its Variant type, hint, usage flags, read-only state, and whether its current value was available and safely encodable.
@@ -100,4 +106,4 @@ pwsh -File tests/editor/mcp/test_mcp_cli_smoke.ps1 `
   -Binary bin/godot.windows.editor.dev.x86_64.console.exe
 ```
 
-Optional parameters are `-TimeoutSeconds <5-300>` and `-KeepTemporaryProjects`. The test creates two temporary projects and verifies explicit-path errors, CLI/editor conflicts, ordinary editor behavior, public discovery fields, independent multi-project routing, same-project Host exclusion, JSON-only stdio stdout, the complete 33-tool MCP surface, cross-session dirty ScriptEditor revision/diagnostic/save/usage behavior, structural Node edits with `NodePath` rewrites, and explicit scene save. Temporary editor plugins request clean Host shutdown; forced termination is used only as a timeout fallback.
+Optional parameters are `-TimeoutSeconds <5-300>` and `-KeepTemporaryProjects`. The test creates two temporary projects and verifies explicit-path errors, CLI/editor conflicts, ordinary editor behavior, public discovery fields, independent multi-project routing, same-project Host exclusion, JSON-only stdio stdout, the complete 35-tool MCP surface, native class search/documentation, cross-session dirty ScriptEditor revision/diagnostic/save/usage behavior, structural Node edits with `NodePath` rewrites, and explicit scene save. Temporary editor plugins request clean Host shutdown; forced termination is used only as a timeout fallback.

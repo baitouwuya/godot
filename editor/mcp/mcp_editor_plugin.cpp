@@ -29,6 +29,7 @@
 
 #include "mcp_editor_plugin.h"
 
+#include "providers/mcp_class_provider.h"
 #include "providers/mcp_editor_provider.h"
 #include "providers/mcp_file_provider.h"
 #include "providers/mcp_node_provider.h"
@@ -85,8 +86,13 @@ Error MCPEditorPlugin::_register_tools(String &r_error) {
 	gdscript_session_manager->set_analysis_service(language_protocol->get_analysis_service());
 #endif
 
-	Error error = editor_provider->register_tools(&tool_registry, &r_error);
+	Error error = class_provider->register_tools(&tool_registry, &r_error);
 	if (error != OK) {
+		return error;
+	}
+	error = editor_provider->register_tools(&tool_registry, &r_error);
+	if (error != OK) {
+		_unregister_tools();
 		return error;
 	}
 	error = file_provider->register_tools(&tool_registry, &r_error);
@@ -144,6 +150,7 @@ void MCPEditorPlugin::_unregister_tools() {
 	scene_provider->unregister_tools();
 	file_provider->unregister_tools();
 	editor_provider->unregister_tools();
+	class_provider->unregister_tools();
 }
 
 void MCPEditorPlugin::on_mcp_session_removed(const String &p_session_id) {
@@ -356,6 +363,7 @@ MCPEditorPlugin::MCPEditorPlugin() {
 	session_manager.instantiate();
 	gdscript_session_manager = session_manager.ptr();
 #endif
+	class_provider = memnew(MCPClassProvider);
 	editor_provider = memnew(MCPEditorProvider);
 	file_provider = memnew(MCPFileProvider);
 	scene_provider = memnew(MCPSceneProvider);
@@ -385,6 +393,7 @@ MCPEditorPlugin::~MCPEditorPlugin() {
 	memdelete(scene_provider);
 	memdelete(file_provider);
 	memdelete(editor_provider);
+	memdelete(class_provider);
 #if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
 	gdscript_session_manager = nullptr;
 #endif

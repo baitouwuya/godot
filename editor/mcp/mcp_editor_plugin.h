@@ -38,6 +38,7 @@
 #include "editor/plugins/editor_plugin.h"
 
 class ConfirmationDialog;
+class MCPClassProvider;
 class MCPEditorProvider;
 class MCPFileProvider;
 class MCPGDScriptProvider;
@@ -77,6 +78,7 @@ class MCPEditorPlugin : public EditorPlugin, public MCPHostSessionObserver {
 	uint64_t last_heartbeat_usec = 0;
 	ConfirmationDialog *conflict_dialog = nullptr;
 	MCPDiscoveryRecord conflicting_owner;
+	MCPClassProvider *class_provider = nullptr;
 	MCPEditorProvider *editor_provider = nullptr;
 	MCPFileProvider *file_provider = nullptr;
 	MCPSceneProvider *scene_provider = nullptr;

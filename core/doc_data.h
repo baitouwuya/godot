@@ -34,6 +34,8 @@
 
 class DocData {
 public:
+	static String bbcode_to_markdown(const String &p_bbcode);
+
 	struct ArgumentDoc {
 		String name;
 		String type;

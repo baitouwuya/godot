@@ -542,18 +542,31 @@ try {
 		path = "res://mcp_smoke_script.gd"
 		text = $initialScriptText
 	}
+	$classSearchRequest = New-ToolCallRequest -Id 4 -Name "godot.class.search" -Arguments @{
+		query = "Node2D"
+		limit = 5
+	}
+	$classDocumentationRequest = New-ToolCallRequest -Id 5 -Name "godot.class.get_documentation" -Arguments @{
+		name = "Node2D"
+	}
 	$stdio = Invoke-Godot -Arguments @("--verbose", "--mcp-stdio", "--path", $projectA) -InputLines @(
 		$initializeRequest,
 		$initializedNotification,
 		$toolsListRequest,
-		$createScriptRequest
+		$createScriptRequest,
+		$classSearchRequest,
+		$classDocumentationRequest
 	)
-	$responsesById = Convert-JsonRpcResponseMap -Result $stdio -ExpectedCount 3 -Label "stdio initialize/tools-list/script-create"
+	$responsesById = Convert-JsonRpcResponseMap -Result $stdio -ExpectedCount 5 -Label "stdio initialize/tools-list/script-create/class-docs"
 	Assert-Condition ($responsesById.ContainsKey("1")) "stdio initialize response is missing."
 	Assert-Condition ($responsesById.ContainsKey("2")) "stdio tools/list response is missing."
 	Assert-Condition ($responsesById.ContainsKey("3")) "stdio script/create response is missing."
+	Assert-Condition ($responsesById.ContainsKey("4")) "stdio class/search response is missing."
+	Assert-Condition ($responsesById.ContainsKey("5")) "stdio class/get_documentation response is missing."
 
 	$expectedTools = @(
+		"godot.class.search",
+		"godot.class.get_documentation",
 		"godot.editor.get_state",
 		"godot.editor.undo",
 		"godot.editor.redo",
@@ -589,8 +602,8 @@ try {
 		"godot.gdscript.rename"
 	) | Sort-Object
 	$actualTools = @($responsesById["2"].result.tools | ForEach-Object { [string]$_.name } | Sort-Object)
-	Assert-Condition ($actualTools.Count -eq 33) "tools/list returned $($actualTools.Count) tools instead of 33."
-	Assert-Condition (($actualTools -join "`n") -ceq ($expectedTools -join "`n")) "tools/list did not expose the expected 33-tool surface."
+	Assert-Condition ($actualTools.Count -eq 35) "tools/list returned $($actualTools.Count) tools instead of 35."
+	Assert-Condition (($actualTools -join "`n") -ceq ($expectedTools -join "`n")) "tools/list did not expose the expected 35-tool surface."
 	$createResult = $responsesById["3"].result.structuredContent
 	Assert-Condition (-not (Test-ToolResultError -Result $responsesById["3"].result)) "script/create returned a tool error."
 	Assert-Condition ([string]$createResult.sha256 -ceq $initialScriptSha) "script/create returned an unexpected SHA-256."
@@ -598,6 +611,16 @@ try {
 	$createProjectMeta = $responsesById["3"].result._meta.'io.godot/project'
 	Assert-Condition ([string]$createProjectMeta.projectId -ceq [string]$discoveryA.projectId) "tool result projectId does not match project A discovery."
 	Assert-Condition ([string]$createProjectMeta.instanceId -ceq [string]$discoveryA.instanceId) "tool result instanceId does not match project A discovery."
+	$classSearchResult = $responsesById["4"].result.structuredContent
+	Assert-Condition (-not (Test-ToolResultError -Result $responsesById["4"].result)) "class/search returned a tool error."
+	$classSearchNames = @($classSearchResult.matches | ForEach-Object { [string]$_.name })
+	Assert-Condition ($classSearchNames -ccontains "Node2D") "class/search did not find Node2D."
+	$classDocumentationResult = $responsesById["5"].result.structuredContent
+	Assert-Condition (-not (Test-ToolResultError -Result $responsesById["5"].result)) "class/get_documentation returned a tool error."
+	Assert-Condition ([string]$classDocumentationResult.name -ceq "Node2D") "class/get_documentation returned the wrong class."
+	Assert-Condition ([string]$classDocumentationResult.source -ceq "native") "Node2D documentation was not classified as native."
+	Assert-Condition (@($classDocumentationResult.inheritance) -ccontains "CanvasItem") "Node2D documentation omitted its inheritance chain."
+	Assert-Condition ([int]$classDocumentationResult.counts.methods -gt 0) "Node2D documentation omitted its method count."
 
 	Write-Host "[7/9] Checking dirty ScriptEditor authority, stale edits, diagnostics, and save"
 	$dirtyScriptText = "extends Node`nvar value: int =`n"

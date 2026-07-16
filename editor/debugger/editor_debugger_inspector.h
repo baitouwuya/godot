@@ -89,6 +89,7 @@ public:
 
 	// Remote Object cache
 	EditorDebuggerRemoteObjects *set_objects(const Array &p_array);
+	EditorDebuggerRemoteObjects *get_cached_object(ObjectID p_id) const;
 	void clear_remote_inspector();
 	void clear_cache();
 	void invalidate_selection_from_cache(const TypedArray<uint64_t> &p_ids);

@@ -38,7 +38,7 @@
  * Returns `true` if the event was successfully encoded, `false` otherwise.
  */
 bool encode_input_event(const Ref<InputEvent> &p_event, PackedByteArray &r_data);
-void decode_input_event(const PackedByteArray &p_data, Ref<InputEvent> &r_event);
+Error decode_input_event(const PackedByteArray &p_data, Ref<InputEvent> &r_event);
 
 void encode_input_event_key(const Ref<InputEventKey> &p_event, PackedByteArray &r_data);
 void encode_input_event_mouse_button(const Ref<InputEventMouseButton> &p_event, PackedByteArray &r_data);

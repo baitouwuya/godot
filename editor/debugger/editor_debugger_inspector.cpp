@@ -395,6 +395,15 @@ EditorDebuggerRemoteObjects *EditorDebuggerInspector::set_objects(const Array &p
 	return remote_objects;
 }
 
+EditorDebuggerRemoteObjects *EditorDebuggerInspector::get_cached_object(ObjectID p_id) const {
+	for (EditorDebuggerRemoteObjects *remote_objects : remote_objects_list) {
+		if (remote_objects->remote_object_ids.size() == 1 && uint64_t(remote_objects->remote_object_ids[0]) == uint64_t(p_id)) {
+			return remote_objects;
+		}
+	}
+	return nullptr;
+}
+
 void EditorDebuggerInspector::clear_remote_inspector() {
 	if (remote_objects_list.is_empty()) {
 		return;

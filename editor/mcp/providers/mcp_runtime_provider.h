@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  mcp_debug_capture.h                                                   */
+/*  mcp_runtime_provider.h                                                */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,33 +30,31 @@
 
 #pragma once
 
-#include "core/error/error_macros.h"
 #include "core/object/object.h"
-#include "core/string/print_string.h"
-#include "core/templates/hash_map.h"
+#include "core/variant/dictionary.h"
 
-class MCPDebugEventStore;
+class MCPRuntimeDebugService;
+class MCPToolRegistry;
 
-class MCPDebugCapture : public Object {
-	MCPDebugEventStore *event_store = nullptr;
-	PrintHandlerList print_handler;
-	ErrorHandlerList error_handler;
-	HashMap<int, uint64_t> runtime_generations;
-	uint64_t next_runtime_generation = 1;
-	bool started = false;
+class MCPRuntimeProvider : public Object {
+	MCPToolRegistry *tool_registry = nullptr;
+	MCPRuntimeDebugService *runtime_service = nullptr;
 
-	static void _print_handler(void *p_self, const String &p_string, bool p_error, bool p_rich);
-	static void _error_handler(void *p_self, const char *p_function, const char *p_file, int p_line,
-			const char *p_error, const char *p_explanation, bool p_editor_notify, ErrorHandlerType p_type);
-	void _debug_data_received(const String &p_message, uint64_t p_thread_id, const Array &p_data, int p_debugger);
-	void _debug_session_stopped(int p_debugger);
+	Dictionary _get_state(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary _play(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary _stop(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary _pause(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary _resume(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary _next_frame(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary _get_tree(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary _get_properties(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary _set_property(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary _send_input(const Dictionary &p_arguments, const Dictionary &p_context);
 
 public:
-	explicit MCPDebugCapture(MCPDebugEventStore *p_event_store);
-	~MCPDebugCapture();
+	explicit MCPRuntimeProvider(MCPRuntimeDebugService *p_runtime_service);
+	~MCPRuntimeProvider();
 
-	Error start();
-	void stop();
-	bool is_started() const { return started; }
-	bool get_runtime_generation(int p_debugger_session, uint64_t &r_generation) const;
+	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr);
+	void unregister_tools();
 };

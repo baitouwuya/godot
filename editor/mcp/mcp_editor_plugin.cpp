@@ -39,6 +39,8 @@
 #include "providers/mcp_node_provider.h"
 #include "providers/mcp_node_structure_provider.h"
 #include "providers/mcp_resource_provider.h"
+#include "providers/mcp_runtime_debug_service.h"
+#include "providers/mcp_runtime_provider.h"
 #include "providers/mcp_scene_provider.h"
 
 #include "core/config/project_settings.h"
@@ -95,6 +97,11 @@ Error MCPEditorPlugin::_register_tools(String &r_error) {
 		return error;
 	}
 	error = debug_provider->register_tools(&tool_registry, &r_error);
+	if (error != OK) {
+		_unregister_tools();
+		return error;
+	}
+	error = runtime_provider->register_tools(&tool_registry, &r_error);
 	if (error != OK) {
 		_unregister_tools();
 		return error;
@@ -165,6 +172,7 @@ void MCPEditorPlugin::_unregister_tools() {
 	file_provider->unregister_tools();
 	editor_ui_provider->unregister_tools();
 	editor_provider->unregister_tools();
+	runtime_provider->unregister_tools();
 	debug_provider->unregister_tools();
 	class_provider->unregister_tools();
 }
@@ -398,6 +406,8 @@ MCPEditorPlugin::MCPEditorPlugin() {
 	debug_event_store = memnew(MCPDebugEventStore);
 	debug_capture = memnew(MCPDebugCapture(debug_event_store));
 	debug_provider = memnew(MCPDebugProvider(debug_event_store));
+	runtime_debug_service = memnew(MCPRuntimeDebugService(debug_capture));
+	runtime_provider = memnew(MCPRuntimeProvider(runtime_debug_service));
 	editor_provider = memnew(MCPEditorProvider);
 	editor_ui_provider = memnew(MCPEditorUIProvider);
 	file_provider = memnew(MCPFileProvider);
@@ -429,6 +439,8 @@ MCPEditorPlugin::~MCPEditorPlugin() {
 	memdelete(file_provider);
 	memdelete(editor_ui_provider);
 	memdelete(editor_provider);
+	memdelete(runtime_provider);
+	memdelete(runtime_debug_service);
 	memdelete(debug_provider);
 	memdelete(debug_capture);
 	memdelete(debug_event_store);

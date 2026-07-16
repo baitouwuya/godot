@@ -36,6 +36,7 @@
 #include "core/debugger/remote_debugger.h"
 #include "core/object/callable_mp.h"
 #include "editor/debugger/editor_debugger_node.h"
+#include "editor/debugger/script_editor_debugger.h"
 
 namespace {
 
@@ -90,6 +91,12 @@ Error MCPDebugCapture::start() {
 	ERR_FAIL_NULL_V(debugger, ERR_UNCONFIGURED);
 	debugger->connect("debug_data_received", callable_mp(this, &MCPDebugCapture::_debug_data_received));
 	debugger->connect("debug_session_stopped", callable_mp(this, &MCPDebugCapture::_debug_session_stopped));
+	for (int i = 0; i < debugger->get_debugger_count(); i++) {
+		ScriptEditorDebugger *session = debugger->get_debugger(i);
+		if (session && session->is_session_active()) {
+			runtime_generations[i] = next_runtime_generation++;
+		}
+	}
 	add_print_handler(&print_handler);
 	add_error_handler(&error_handler);
 	started = true;
@@ -265,4 +272,13 @@ void MCPDebugCapture::_debug_session_stopped(int p_debugger) {
 		event_store->clear_paused_stack(p_debugger);
 	}
 	runtime_generations.erase(p_debugger);
+}
+
+bool MCPDebugCapture::get_runtime_generation(int p_debugger_session, uint64_t &r_generation) const {
+	const uint64_t *generation = runtime_generations.getptr(p_debugger_session);
+	if (!generation) {
+		return false;
+	}
+	r_generation = *generation;
+	return true;
 }

@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  mcp_debug_capture.h                                                   */
+/*  mcp_runtime_input.h                                                   */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,33 +30,17 @@
 
 #pragma once
 
-#include "core/error/error_macros.h"
-#include "core/object/object.h"
-#include "core/string/print_string.h"
-#include "core/templates/hash_map.h"
+#include "core/string/ustring.h"
+#include "core/variant/array.h"
+#include "core/variant/dictionary.h"
 
-class MCPDebugEventStore;
-
-class MCPDebugCapture : public Object {
-	MCPDebugEventStore *event_store = nullptr;
-	PrintHandlerList print_handler;
-	ErrorHandlerList error_handler;
-	HashMap<int, uint64_t> runtime_generations;
-	uint64_t next_runtime_generation = 1;
-	bool started = false;
-
-	static void _print_handler(void *p_self, const String &p_string, bool p_error, bool p_rich);
-	static void _error_handler(void *p_self, const char *p_function, const char *p_file, int p_line,
-			const char *p_error, const char *p_explanation, bool p_editor_notify, ErrorHandlerType p_type);
-	void _debug_data_received(const String &p_message, uint64_t p_thread_id, const Array &p_data, int p_debugger);
-	void _debug_session_stopped(int p_debugger);
-
+class MCPRuntimeInput {
 public:
-	explicit MCPDebugCapture(MCPDebugEventStore *p_event_store);
-	~MCPDebugCapture();
+	struct EncodedEvent {
+		String message;
+		Array arguments;
+		String type;
+	};
 
-	Error start();
-	void stop();
-	bool is_started() const { return started; }
-	bool get_runtime_generation(int p_debugger_session, uint64_t &r_generation) const;
+	static Error encode(const Dictionary &p_input, EncodedEvent &r_event, String *r_error = nullptr);
 };

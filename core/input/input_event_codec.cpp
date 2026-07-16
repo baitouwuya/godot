@@ -420,47 +420,76 @@ bool encode_input_event(const Ref<InputEvent> &p_event, PackedByteArray &r_data)
 	return true;
 }
 
-void decode_input_event(const PackedByteArray &p_data, Ref<InputEvent> &r_event) {
+Error decode_input_event(const PackedByteArray &p_data, Ref<InputEvent> &r_event) {
+	r_event.unref();
+	if (p_data.is_empty()) {
+		return ERR_INVALID_DATA;
+	}
 	const uint8_t *data = p_data.ptr();
 
 	switch (static_cast<InputEventType>(*data)) {
 		case InputEventType::KEY: {
+			if (p_data.size() != 19) {
+				return ERR_INVALID_DATA;
+			}
 			Ref<InputEventKey> event;
 			event.instantiate();
-			decode_input_event_key(p_data, event);
+			if (decode_input_event_key(p_data, event) != OK) {
+				return ERR_INVALID_DATA;
+			}
 			r_event = event;
 		} break;
 		case InputEventType::MOUSE_BUTTON: {
+			if (p_data.size() != 12) {
+				return ERR_INVALID_DATA;
+			}
 			Ref<InputEventMouseButton> event;
 			event.instantiate();
-			decode_input_event_mouse_button(p_data, event);
+			if (decode_input_event_mouse_button(p_data, event) != OK) {
+				return ERR_INVALID_DATA;
+			}
 			r_event = event;
 		} break;
 		case InputEventType::MOUSE_MOTION: {
+			if (p_data.size() != 31) {
+				return ERR_INVALID_DATA;
+			}
 			Ref<InputEventMouseMotion> event;
 			event.instantiate();
 			decode_input_event_mouse_motion(p_data, event);
 			r_event = event;
 		} break;
 		case InputEventType::JOY_BUTTON: {
+			if (p_data.size() != 11) {
+				return ERR_INVALID_DATA;
+			}
 			Ref<InputEventJoypadButton> event;
 			event.instantiate();
 			decode_input_event_joypad_button(p_data, event);
 			r_event = event;
 		} break;
 		case InputEventType::JOY_MOTION: {
+			if (p_data.size() != 14) {
+				return ERR_INVALID_DATA;
+			}
 			Ref<InputEventJoypadMotion> event;
 			event.instantiate();
 			decode_input_event_joypad_motion(p_data, event);
 			r_event = event;
 		} break;
 		case InputEventType::PAN_GESTURE: {
+			if (p_data.size() != 18) {
+				return ERR_INVALID_DATA;
+			}
 			Ref<InputEventPanGesture> event;
 			event.instantiate();
 			decode_input_event_gesture_pan(p_data, event);
 			r_event = event;
 		} break;
 		case InputEventType::MAGNIFY_GESTURE: {
+			if (p_data.size() != 14) {
+				return ERR_INVALID_DATA;
+			}
 			Ref<InputEventMagnifyGesture> event;
 			event.instantiate();
 			decode_input_event_gesture_magnify(p_data, event);
@@ -468,6 +497,8 @@ void decode_input_event(const PackedByteArray &p_data, Ref<InputEvent> &r_event)
 		} break;
 		default: {
 			WARN_PRINT(vformat("Unknown event type %d.", static_cast<int>(*data)));
-		} break;
+			return ERR_INVALID_DATA;
+		}
 	}
+	return OK;
 }

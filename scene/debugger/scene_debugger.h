@@ -81,6 +81,8 @@ private:
 	static Error _msg_suspend_changed(const Array &p_args);
 	static Error _msg_next_frame(const Array &p_args);
 	static Error _msg_speed_changed(const Array &p_args);
+	static Error _msg_inject_input_event(const Array &p_args);
+	static Error _msg_inject_input_action(const Array &p_args);
 	static Error _msg_debug_mute_audio(const Array &p_args);
 	static Error _msg_window_request_size(const Array &p_args);
 	static Error _msg_hdr_output_request_state(const Array &p_args);

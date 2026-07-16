@@ -152,6 +152,8 @@ private:
 	OptionButton *threads = nullptr;
 	EditorDebuggerInspector *inspector = nullptr;
 	SceneDebuggerTree *scene_tree = nullptr;
+	uint64_t remote_tree_revision = 0;
+	HashMap<ObjectID, uint64_t> remote_object_revisions;
 
 	Ref<RemoteDebuggerPeer> peer;
 
@@ -322,6 +324,10 @@ public:
 
 	void request_remote_tree();
 	const SceneDebuggerTree *get_remote_tree();
+	uint64_t get_remote_tree_revision() const { return remote_tree_revision; }
+	EditorDebuggerRemoteObjects *get_cached_remote_object(ObjectID p_id) const;
+	uint64_t get_remote_object_revision(ObjectID p_id) const;
+	int poll_peer_messages(uint64_t p_budget_usec = 20000);
 
 	void request_remote_evaluate(const String &p_expression, int p_stack_frame);
 

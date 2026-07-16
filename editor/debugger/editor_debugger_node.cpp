@@ -259,6 +259,14 @@ ScriptEditorDebugger *EditorDebuggerNode::get_default_debugger() const {
 	return Object::cast_to<ScriptEditorDebugger>(tabs->get_tab_control(0));
 }
 
+int EditorDebuggerNode::get_debugger_count() const {
+	return tabs->get_tab_count();
+}
+
+int EditorDebuggerNode::get_current_debugger_id() const {
+	return tabs->get_current_tab();
+}
+
 String EditorDebuggerNode::get_server_uri() const {
 	return server.is_valid() ? server->get_uri() : "";
 }

@@ -113,6 +113,22 @@ The tool synchronizes all open GDScript editor buffers into the calling MCP anal
 
 Captured history uses a bounded in-memory store. Query responses expose the store generation, next sequence, and dropped-event count so clients can page incrementally with `sinceSequence` and detect overwritten history.
 
+## Control A Running Project
+
+Runtime tools reuse the editor's built-in run bar and remote debugger connection. They do not open a second control socket inside the game:
+
+- `godot.runtime.get_state` lists the editor run state and active debugger sessions.
+- `godot.runtime.play` starts the main scene, current edited scene, or an explicit project `PackedScene`; `godot.runtime.stop` stops the editor-launched project.
+- `godot.runtime.pause`, `resume`, and `next_frame` use the existing SceneTree suspension protocol.
+- `godot.runtime.get_tree` returns a fresh remote scene tree. Runtime `objectId` values are decimal strings so JSON clients do not lose 64-bit precision.
+- `godot.runtime.node.get_properties` returns the remote Inspector property list, including script members, constants, and exported properties.
+- `godot.runtime.node.set_property` uses the remote Inspector setter and reads the object back to return the effective value.
+- `godot.runtime.input.send` injects a bounded ordered batch of project actions, key events, mouse buttons or motion, joypad buttons or axes, and pan or magnify gestures.
+
+When more than one project instance is connected to the same editor, runtime tools require the `debuggerSession` returned by `godot.runtime.get_state`. Mutating tools also require `runtimeGeneration`; a generation changes whenever that debugger slot connects to a new process, so delayed calls cannot accidentally modify a restarted game. Scene tree and property requests use a bounded remote-debugger round trip and return `RUNTIME_TIMEOUT` if the game does not answer.
+
+Input objects use a semantic JSON shape and are validated in the editor before Godot's existing `input_event_codec` serializes them. The required `type` is one of `action`, `key`, `mouse_button`, `mouse_motion`, `joypad_button`, `joypad_motion`, `pan`, or `magnify`. An action uses `action`, `pressed`, and optional `strength`; pointer positions and deltas use two-number arrays such as `[320, 180]`. The running project decodes each event and passes it to `Input::parse_input_event()` on its main thread.
+
 ## Smoke Test
 
 The end-to-end PowerShell smoke test requires PowerShell 7.2 or newer and an editor binary built with MCP support:
@@ -122,4 +138,4 @@ pwsh -File tests/editor/mcp/test_mcp_cli_smoke.ps1 `
   -Binary bin/godot.windows.editor.dev.x86_64.console.exe
 ```
 
-Optional parameters are `-TimeoutSeconds <5-300>` and `-KeepTemporaryProjects`. The test creates two temporary projects and verifies explicit-path errors, CLI/editor conflicts, ordinary editor behavior, public discovery fields, independent multi-project routing, same-project Host exclusion, JSON-only stdio stdout, the complete 40-tool MCP surface, native class search/documentation, editor UI discovery, compressed debug output and errors, cross-session dirty ScriptEditor revision/diagnostic/save/usage behavior, structural Node edits with `NodePath` rewrites, and explicit scene save. Temporary editor plugins request clean Host shutdown; forced termination is used only as a timeout fallback.
+Optional parameters are `-TimeoutSeconds <5-300>` and `-KeepTemporaryProjects`. The test creates two temporary projects and verifies explicit-path errors, CLI/editor conflicts, ordinary editor behavior, public discovery fields, independent multi-project routing, same-project Host exclusion, JSON-only stdio stdout, the complete 50-tool MCP surface, native class search/documentation, editor UI discovery, runtime tool discovery, compressed debug output and errors, cross-session dirty ScriptEditor revision/diagnostic/save/usage behavior, structural Node edits with `NodePath` rewrites, and explicit scene save. Temporary editor plugins request clean Host shutdown; forced termination is used only as a timeout fallback.

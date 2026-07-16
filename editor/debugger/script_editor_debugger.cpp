@@ -272,6 +272,15 @@ const SceneDebuggerTree *ScriptEditorDebugger::get_remote_tree() {
 	return scene_tree;
 }
 
+EditorDebuggerRemoteObjects *ScriptEditorDebugger::get_cached_remote_object(ObjectID p_id) const {
+	return inspector->get_cached_object(p_id);
+}
+
+uint64_t ScriptEditorDebugger::get_remote_object_revision(ObjectID p_id) const {
+	const uint64_t *revision = remote_object_revisions.getptr(p_id);
+	return revision ? *revision : 0;
+}
+
 void ScriptEditorDebugger::request_remote_evaluate(const String &p_expression, int p_stack_frame) {
 	Array msg = { p_expression, p_stack_frame };
 	_put_msg("evaluate", msg);
@@ -445,6 +454,7 @@ void ScriptEditorDebugger::_msg_scene_click_ctrl(uint64_t p_thread_id, const Arr
 void ScriptEditorDebugger::_msg_scene_scene_tree(uint64_t p_thread_id, const Array &p_data) {
 	scene_tree->nodes.clear();
 	scene_tree->deserialize(p_data);
+	remote_tree_revision++;
 	emit_signal(SNAME("remote_tree_updated"));
 	_update_buttons_state();
 }
@@ -452,6 +462,11 @@ void ScriptEditorDebugger::_msg_scene_scene_tree(uint64_t p_thread_id, const Arr
 void ScriptEditorDebugger::_msg_scene_inspect_objects(uint64_t p_thread_id, const Array &p_data) {
 	ERR_FAIL_COND(p_data.is_empty());
 	EditorDebuggerRemoteObjects *objs = inspector->set_objects(p_data);
+	if (objs) {
+		for (const uint64_t id : objs->remote_object_ids) {
+			remote_object_revisions[ObjectID(id)]++;
+		}
+	}
 	if (objs && EditorDebuggerNode::get_singleton()->match_remote_selection(objs->remote_object_ids)) {
 		EditorDebuggerNode::get_singleton()->stop_waiting_inspection();
 
@@ -1155,7 +1170,7 @@ void ScriptEditorDebugger::_notification(int p_what) {
 
 		case NOTIFICATION_PROCESS: {
 			if (is_session_active()) {
-				peer->poll();
+				poll_peer_messages();
 
 				if (camera_override == CameraOverride::OVERRIDE_EDITORS) {
 					// CanvasItem Editor
@@ -1197,27 +1212,34 @@ void ScriptEditorDebugger::_notification(int p_what) {
 				}
 			}
 
-			const uint64_t until = OS::get_singleton()->get_ticks_msec() + 20;
-
-			while (peer.is_valid() && peer->has_message()) {
-				Array arr = peer->get_message();
-				if (arr.size() != 3 || arr[0].get_type() != Variant::STRING || arr[1].get_type() != Variant::INT || arr[2].get_type() != Variant::ARRAY) {
-					_stop_and_notify();
-					ERR_FAIL_MSG("Invalid message format received from peer");
-				}
-
-				_parse_message(arr[0], arr[1], arr[2]);
-
-				if (OS::get_singleton()->get_ticks_msec() > until) {
-					break;
-				}
-			}
 			if (!is_session_active()) {
 				_stop_and_notify();
 				break;
 			};
 		} break;
 	}
+}
+
+int ScriptEditorDebugger::poll_peer_messages(uint64_t p_budget_usec) {
+	if (!is_session_active()) {
+		return 0;
+	}
+	peer->poll();
+	const uint64_t until = OS::get_singleton()->get_ticks_usec() + p_budget_usec;
+	int processed = 0;
+	while (peer.is_valid() && peer->has_message()) {
+		const Array message = peer->get_message();
+		if (message.size() != 3 || message[0].get_type() != Variant::STRING || message[1].get_type() != Variant::INT || message[2].get_type() != Variant::ARRAY) {
+			_stop_and_notify();
+			ERR_FAIL_V_MSG(processed, "Invalid message format received from peer");
+		}
+		_parse_message(message[0], message[1], message[2]);
+		processed++;
+		if (OS::get_singleton()->get_ticks_usec() >= until) {
+			break;
+		}
+	}
+	return processed;
 }
 
 void ScriptEditorDebugger::_clear_execution() {
@@ -1341,6 +1363,9 @@ void ScriptEditorDebugger::stop() {
 	_clear_execution();
 
 	inspector->clear_cache();
+	scene_tree->nodes.clear();
+	remote_tree_revision = 0;
+	remote_object_revisions.clear();
 
 	if (peer.is_valid()) {
 		peer->close();

@@ -34,6 +34,8 @@
 #include "core/debugger/debugger_marshalls.h"
 #include "core/debugger/engine_debugger.h"
 #include "core/input/input.h"
+#include "core/input/input_event_codec.h"
+#include "core/input/input_map.h"
 #include "core/input/shortcut.h"
 #include "core/io/dir_access.h"
 #include "core/io/resource_loader.h"
@@ -226,6 +228,32 @@ Error SceneDebugger::_msg_speed_changed(const Array &p_args) {
 	ERR_FAIL_COND_V(p_args.is_empty(), ERR_INVALID_DATA);
 	double time_scale_user = p_args[0];
 	Engine::get_singleton()->set_user_time_scale(time_scale_user);
+	return OK;
+}
+
+Error SceneDebugger::_msg_inject_input_event(const Array &p_args) {
+	ERR_FAIL_COND_V(p_args.size() != 1 || p_args[0].get_type() != Variant::PACKED_BYTE_ARRAY, ERR_INVALID_DATA);
+	const PackedByteArray data = p_args[0];
+	ERR_FAIL_COND_V(data.is_empty() || data.size() > 256, ERR_INVALID_DATA);
+	Ref<InputEvent> event;
+	ERR_FAIL_COND_V(decode_input_event(data, event) != OK || event.is_null(), ERR_INVALID_DATA);
+	Input::get_singleton()->parse_input_event(event);
+	return OK;
+}
+
+Error SceneDebugger::_msg_inject_input_action(const Array &p_args) {
+	ERR_FAIL_COND_V(p_args.size() != 3 || p_args[0].get_type() != Variant::STRING_NAME ||
+			p_args[1].get_type() != Variant::BOOL || (p_args[2].get_type() != Variant::FLOAT && p_args[2].get_type() != Variant::INT), ERR_INVALID_DATA);
+	const StringName action = p_args[0];
+	const bool pressed = p_args[1];
+	const float strength = p_args[2];
+	ERR_FAIL_COND_V(!InputMap::get_singleton()->has_action(action) || !Math::is_finite(strength) || strength < 0.0f || strength > 1.0f, ERR_INVALID_DATA);
+	Ref<InputEventAction> event;
+	event.instantiate();
+	event->set_action(action);
+	event->set_pressed(pressed);
+	event->set_strength(strength);
+	Input::get_singleton()->parse_input_event(event);
 	return OK;
 }
 
@@ -619,6 +647,8 @@ void SceneDebugger::_init_message_handlers() {
 	message_handlers["suspend_changed"] = _msg_suspend_changed;
 	message_handlers["next_frame"] = _msg_next_frame;
 	message_handlers["speed_changed"] = _msg_speed_changed;
+	message_handlers["inject_input_event"] = _msg_inject_input_event;
+	message_handlers["inject_input_action"] = _msg_inject_input_action;
 	message_handlers["debug_mute_audio"] = _msg_debug_mute_audio;
 	message_handlers["window_request_size"] = _msg_window_request_size;
 	message_handlers["hdr_output_request_state"] = _msg_hdr_output_request_state;

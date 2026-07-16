@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  mcp_debug_capture.h                                                   */
+/*  mcp_runtime_debug_service.h                                           */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,33 +30,31 @@
 
 #pragma once
 
-#include "core/error/error_macros.h"
-#include "core/object/object.h"
-#include "core/string/print_string.h"
-#include "core/templates/hash_map.h"
+#include "core/variant/dictionary.h"
 
-class MCPDebugEventStore;
+class MCPDebugCapture;
+class ScriptEditorDebugger;
 
-class MCPDebugCapture : public Object {
-	MCPDebugEventStore *event_store = nullptr;
-	PrintHandlerList print_handler;
-	ErrorHandlerList error_handler;
-	HashMap<int, uint64_t> runtime_generations;
-	uint64_t next_runtime_generation = 1;
-	bool started = false;
+class MCPRuntimeDebugService {
+	MCPDebugCapture *debug_capture = nullptr;
 
-	static void _print_handler(void *p_self, const String &p_string, bool p_error, bool p_rich);
-	static void _error_handler(void *p_self, const char *p_function, const char *p_file, int p_line,
-			const char *p_error, const char *p_explanation, bool p_editor_notify, ErrorHandlerType p_type);
-	void _debug_data_received(const String &p_message, uint64_t p_thread_id, const Array &p_data, int p_debugger);
-	void _debug_session_stopped(int p_debugger);
+	Dictionary _resolve_session(const Dictionary &p_arguments, bool p_require_generation, ScriptEditorDebugger *&r_debugger,
+			int &r_debugger_session, uint64_t &r_runtime_generation) const;
+	Dictionary _refresh_tree(ScriptEditorDebugger *p_debugger, int p_timeout_msec) const;
+	Dictionary _find_node(ScriptEditorDebugger *p_debugger, const String &p_path, ObjectID &r_object_id, Dictionary &r_node) const;
+	Dictionary _refresh_object(ScriptEditorDebugger *p_debugger, ObjectID p_object_id, int p_timeout_msec) const;
+	Dictionary _make_session_identity(int p_debugger_session, uint64_t p_runtime_generation) const;
 
 public:
-	explicit MCPDebugCapture(MCPDebugEventStore *p_event_store);
-	~MCPDebugCapture();
+	explicit MCPRuntimeDebugService(MCPDebugCapture *p_debug_capture);
 
-	Error start();
-	void stop();
-	bool is_started() const { return started; }
-	bool get_runtime_generation(int p_debugger_session, uint64_t &r_generation) const;
+	Dictionary get_state() const;
+	Dictionary play(const Dictionary &p_arguments) const;
+	Dictionary stop() const;
+	Dictionary set_suspended(const Dictionary &p_arguments, bool p_suspended) const;
+	Dictionary next_frame(const Dictionary &p_arguments) const;
+	Dictionary get_tree(const Dictionary &p_arguments) const;
+	Dictionary get_properties(const Dictionary &p_arguments) const;
+	Dictionary set_property(const Dictionary &p_arguments) const;
+	Dictionary send_input(const Dictionary &p_arguments) const;
 };

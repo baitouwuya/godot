@@ -1,16 +1,15 @@
 /**************************************************************************/
-/*  mcp_runtime_input.h                                                   */
+/*  mcp_runtime_input_event.h                                             */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
-/*                        https://godotengine.org                         */
 /**************************************************************************/
 /* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
 /* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
 /*                                                                        */
 /* Permission is hereby granted, free of charge, to any person obtaining  */
 /* a copy of this software and associated documentation files (the        */
-/* "Software"), to deal in the Software without restriction, including    */
+/* "Software"), to deal in the Software without restriction, including   */
 /* without limitation the rights to use, copy, modify, merge, publish,    */
 /* distribute, sublicense, and/or sell copies of the Software, and to     */
 /* permit persons to whom the Software is furnished to do so, subject to  */
@@ -30,23 +29,25 @@
 
 #pragma once
 
-#include "core/string/ustring.h"
-#include "core/variant/array.h"
+#include "core/input/input_event.h"
 #include "core/variant/dictionary.h"
 
-class MCPRuntimeInput {
-public:
-	struct EncodedEvent {
-		String message;
-		Array arguments;
-		String type;
-		String state_key;
-		String release_message;
-		Array release_arguments;
-		bool stateful = false;
-		bool active = false;
-	};
+struct MCPRuntimeInputEvent {
+	static constexpr int MAX_ENCODED_EVENT_BYTES = 256;
 
-	static Error encode(const Dictionary &p_input, EncodedEvent &r_event, String *r_error = nullptr, bool p_require_explicit_state = false);
-	static Error encode_binary_state(const Dictionary &p_input, bool p_pressed, EncodedEvent &r_event, String *r_error = nullptr);
+	Ref<InputEvent> event;
+	Ref<InputEvent> release_event;
+	StringName action;
+	String state_key;
+	float strength = 0.0f;
+	bool action_event = false;
+	bool pressed = false;
+	bool stateful = false;
+	bool active = false;
+	bool analog = false;
+	uint64_t encoded_bytes = 0;
+
+	static Error decode(const Dictionary &p_payload, MCPRuntimeInputEvent &r_event, String &r_error);
+	void dispatch() const;
+	void dispatch_release() const;
 };

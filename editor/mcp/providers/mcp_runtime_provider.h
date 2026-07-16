@@ -50,6 +50,10 @@ class MCPRuntimeProvider : public Object {
 	Dictionary _get_properties(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary _set_property(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary _send_input(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary _start_input_sequence(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary _get_input_sequence(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary _cancel_input_sequence(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary _release_input(const Dictionary &p_arguments, const Dictionary &p_context);
 
 public:
 	explicit MCPRuntimeProvider(MCPRuntimeDebugService *p_runtime_service);

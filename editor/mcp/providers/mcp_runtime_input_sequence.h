@@ -1,16 +1,15 @@
 /**************************************************************************/
-/*  mcp_runtime_input.h                                                   */
+/*  mcp_runtime_input_sequence.h                                          */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
-/*                        https://godotengine.org                         */
 /**************************************************************************/
 /* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
 /* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
 /*                                                                        */
 /* Permission is hereby granted, free of charge, to any person obtaining  */
 /* a copy of this software and associated documentation files (the        */
-/* "Software"), to deal in the Software without restriction, including    */
+/* "Software"), to deal in the Software without restriction, including   */
 /* without limitation the rights to use, copy, modify, merge, publish,    */
 /* distribute, sublicense, and/or sell copies of the Software, and to     */
 /* permit persons to whom the Software is furnished to do so, subject to  */
@@ -30,23 +29,28 @@
 
 #pragma once
 
-#include "core/string/ustring.h"
-#include "core/variant/array.h"
-#include "core/variant/dictionary.h"
+#include "mcp_runtime_input.h"
 
-class MCPRuntimeInput {
+#include "core/templates/vector.h"
+
+class MCPRuntimeInputSequence {
 public:
-	struct EncodedEvent {
-		String message;
-		Array arguments;
-		String type;
-		String state_key;
-		String release_message;
-		Array release_arguments;
-		bool stateful = false;
-		bool active = false;
+	enum StepType {
+		STEP_EVENT,
+		STEP_WAIT_MSEC,
+		STEP_WAIT_FRAMES,
 	};
 
-	static Error encode(const Dictionary &p_input, EncodedEvent &r_event, String *r_error = nullptr, bool p_require_explicit_state = false);
-	static Error encode_binary_state(const Dictionary &p_input, bool p_pressed, EncodedEvent &r_event, String *r_error = nullptr);
+	struct Step {
+		StepType type = STEP_EVENT;
+		MCPRuntimeInput::EncodedEvent event;
+		uint64_t amount = 0;
+	};
+
+	static constexpr int MAX_SOURCE_STEPS = 256;
+	static constexpr int MAX_COMPILED_STEPS = 768;
+	static constexpr uint64_t MAX_TOTAL_WAIT_MSEC = 10 * 60 * 1000;
+	static constexpr uint64_t MAX_TOTAL_WAIT_FRAMES = 60 * 60 * 10;
+
+	static Error compile(const Array &p_steps, Vector<Step> &r_steps, String *r_error = nullptr);
 };

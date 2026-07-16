@@ -33,6 +33,7 @@
 #include "mcp_debug_capture.h"
 #include "mcp_path_utils.h"
 #include "mcp_runtime_input.h"
+#include "mcp_runtime_input_sequence.h"
 #include "mcp_tool_utils.h"
 #include "mcp_variant_codec.h"
 
@@ -184,8 +185,13 @@ const PropertyInfo *_find_property(EditorDebuggerRemoteObjects *p_remote_object,
 
 } // namespace
 
-MCPRuntimeDebugService::MCPRuntimeDebugService(MCPDebugCapture *p_debug_capture) {
+MCPRuntimeDebugService::MCPRuntimeDebugService(MCPDebugCapture *p_debug_capture) :
+		input_scheduler(p_debug_capture) {
 	debug_capture = p_debug_capture;
+}
+
+MCPRuntimeDebugService::~MCPRuntimeDebugService() {
+	shutdown_input();
 }
 
 Dictionary MCPRuntimeDebugService::_make_session_identity(int p_debugger_session, uint64_t p_runtime_generation) const {
@@ -343,13 +349,14 @@ Dictionary MCPRuntimeDebugService::play(const Dictionary &p_arguments) const {
 	return MCPToolUtils::make_success_result(result);
 }
 
-Dictionary MCPRuntimeDebugService::stop() const {
+Dictionary MCPRuntimeDebugService::stop() {
 	EditorRunBar *run_bar = EditorRunBar::get_singleton();
 	if (!run_bar) {
 		return _error("RUNTIME_UNAVAILABLE", "The editor run bar is not available.");
 	}
 	const bool was_playing = run_bar->is_playing();
 	if (was_playing) {
+		input_scheduler.release_all();
 		run_bar->stop_playing();
 	}
 	Dictionary result;
@@ -552,7 +559,7 @@ Dictionary MCPRuntimeDebugService::set_property(const Dictionary &p_arguments) c
 	return MCPToolUtils::make_success_result(result);
 }
 
-Dictionary MCPRuntimeDebugService::send_input(const Dictionary &p_arguments) const {
+Dictionary MCPRuntimeDebugService::send_input(const Dictionary &p_arguments, const String &p_mcp_session_id) {
 	const Variant events_value = p_arguments.get("events", Variant());
 	if (events_value.get_type() != Variant::ARRAY) {
 		return _error("INVALID_ARGUMENTS", "events must be an array.");
@@ -575,16 +582,111 @@ Dictionary MCPRuntimeDebugService::send_input(const Dictionary &p_arguments) con
 		}
 		MCPRuntimeInput::EncodedEvent encoded;
 		String input_error;
-		if (MCPRuntimeInput::encode(events[i], encoded, &input_error) != OK) {
+		if (MCPRuntimeInput::encode(events[i], encoded, &input_error, true) != OK) {
 			return _error("INVALID_INPUT_EVENT", vformat("events[%d]: %s", i, input_error));
 		}
 		encoded_events.push_back(encoded);
 	}
-	for (const MCPRuntimeInput::EncodedEvent &event : encoded_events) {
-		debugger->send_message(event.message, event.arguments);
+	int dispatched = 0;
+	String dispatch_error;
+	if (input_scheduler.dispatch_immediate(p_mcp_session_id, debugger, debugger_session, generation, encoded_events, dispatched, dispatch_error) != OK) {
+		return _error("RUNTIME_INPUT_FAILED", dispatch_error);
 	}
 	Dictionary result = _make_session_identity(debugger_session, generation);
 	result["dispatched"] = true;
-	result["eventCount"] = encoded_events.size();
+	result["eventCount"] = dispatched;
 	return MCPToolUtils::make_success_result(result);
+}
+
+Dictionary MCPRuntimeDebugService::start_input_sequence(const Dictionary &p_arguments, const String &p_mcp_session_id) {
+	const Variant steps_value = p_arguments.get("steps", Variant());
+	if (steps_value.get_type() != Variant::ARRAY) {
+		return _error("INVALID_ARGUMENTS", "steps must be an array.");
+	}
+	Vector<MCPRuntimeInputSequence::Step> steps;
+	String compile_error;
+	if (MCPRuntimeInputSequence::compile(steps_value, steps, &compile_error) != OK) {
+		return _error("INVALID_INPUT_SEQUENCE", compile_error);
+	}
+
+	ScriptEditorDebugger *debugger = nullptr;
+	int debugger_session = -1;
+	uint64_t generation = 0;
+	const Dictionary session_error = _resolve_session(p_arguments, true, debugger, debugger_session, generation);
+	if (!session_error.is_empty()) {
+		return session_error;
+	}
+	Dictionary result;
+	String scheduler_error;
+	const Error error = input_scheduler.start_sequence(p_mcp_session_id, debugger_session, generation, steps, result, scheduler_error);
+	if (error != OK) {
+		return _error(error == ERR_BUSY ? "INPUT_SEQUENCE_BUSY" : "INPUT_SEQUENCE_FAILED", scheduler_error);
+	}
+	return MCPToolUtils::make_success_result(result);
+}
+
+Dictionary MCPRuntimeDebugService::get_input_sequence(const Dictionary &p_arguments, const String &p_mcp_session_id) {
+	const Variant sequence_value = p_arguments.get("sequenceId", Variant());
+	if (sequence_value.get_type() != Variant::STRING || String(sequence_value).is_empty()) {
+		return _error("INVALID_ARGUMENTS", "sequenceId must be a non-empty string.");
+	}
+	Dictionary result;
+	String scheduler_error;
+	const Error error = input_scheduler.get_sequence(p_mcp_session_id, sequence_value, result, scheduler_error);
+	if (error != OK) {
+		return _error(error == ERR_DOES_NOT_EXIST ? "INPUT_SEQUENCE_NOT_FOUND" : "INPUT_SEQUENCE_QUERY_FAILED", scheduler_error);
+	}
+	return MCPToolUtils::make_success_result(result);
+}
+
+Dictionary MCPRuntimeDebugService::cancel_input_sequence(const Dictionary &p_arguments, const String &p_mcp_session_id) {
+	const Variant sequence_value = p_arguments.get("sequenceId", Variant());
+	if (sequence_value.get_type() != Variant::STRING || String(sequence_value).is_empty()) {
+		return _error("INVALID_ARGUMENTS", "sequenceId must be a non-empty string.");
+	}
+	ScriptEditorDebugger *debugger = nullptr;
+	int debugger_session = -1;
+	uint64_t generation = 0;
+	const Dictionary session_error = _resolve_session(p_arguments, true, debugger, debugger_session, generation);
+	if (!session_error.is_empty()) {
+		return session_error;
+	}
+	Dictionary result;
+	String scheduler_error;
+	const Error error = input_scheduler.cancel_sequence(p_mcp_session_id, sequence_value, debugger_session, generation, result, scheduler_error);
+	if (error != OK) {
+		return _error(error == ERR_DOES_NOT_EXIST ? "INPUT_SEQUENCE_NOT_FOUND" : "INPUT_SEQUENCE_MISMATCH", scheduler_error);
+	}
+	return MCPToolUtils::make_success_result(result);
+}
+
+Dictionary MCPRuntimeDebugService::release_input(const Dictionary &p_arguments, const String &p_mcp_session_id) {
+	ScriptEditorDebugger *debugger = nullptr;
+	int debugger_session = -1;
+	uint64_t generation = 0;
+	const Dictionary session_error = _resolve_session(p_arguments, true, debugger, debugger_session, generation);
+	if (!session_error.is_empty()) {
+		return session_error;
+	}
+	int released = 0;
+	String release_error;
+	if (input_scheduler.release_session_inputs(p_mcp_session_id, debugger_session, generation, true, released, release_error) != OK) {
+		return _error("RUNTIME_INPUT_RELEASE_FAILED", release_error);
+	}
+	Dictionary result = _make_session_identity(debugger_session, generation);
+	result["releasedCount"] = released;
+	result["sequencesCancelled"] = true;
+	return MCPToolUtils::make_success_result(result);
+}
+
+void MCPRuntimeDebugService::process_input() {
+	input_scheduler.process();
+}
+
+void MCPRuntimeDebugService::release_mcp_session(const String &p_mcp_session_id) {
+	input_scheduler.release_mcp_session(p_mcp_session_id);
+}
+
+void MCPRuntimeDebugService::shutdown_input() {
+	input_scheduler.release_all();
 }

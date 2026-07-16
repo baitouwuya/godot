@@ -30,6 +30,8 @@
 
 #pragma once
 
+#include "mcp_runtime_input_scheduler.h"
+
 #include "core/variant/dictionary.h"
 
 class MCPDebugCapture;
@@ -37,6 +39,7 @@ class ScriptEditorDebugger;
 
 class MCPRuntimeDebugService {
 	MCPDebugCapture *debug_capture = nullptr;
+	MCPRuntimeInputScheduler input_scheduler;
 
 	Dictionary _resolve_session(const Dictionary &p_arguments, bool p_require_generation, ScriptEditorDebugger *&r_debugger,
 			int &r_debugger_session, uint64_t &r_runtime_generation) const;
@@ -47,14 +50,23 @@ class MCPRuntimeDebugService {
 
 public:
 	explicit MCPRuntimeDebugService(MCPDebugCapture *p_debug_capture);
+	~MCPRuntimeDebugService();
 
 	Dictionary get_state() const;
 	Dictionary play(const Dictionary &p_arguments) const;
-	Dictionary stop() const;
+	Dictionary stop();
 	Dictionary set_suspended(const Dictionary &p_arguments, bool p_suspended) const;
 	Dictionary next_frame(const Dictionary &p_arguments) const;
 	Dictionary get_tree(const Dictionary &p_arguments) const;
 	Dictionary get_properties(const Dictionary &p_arguments) const;
 	Dictionary set_property(const Dictionary &p_arguments) const;
-	Dictionary send_input(const Dictionary &p_arguments) const;
+	Dictionary send_input(const Dictionary &p_arguments, const String &p_mcp_session_id);
+	Dictionary start_input_sequence(const Dictionary &p_arguments, const String &p_mcp_session_id);
+	Dictionary get_input_sequence(const Dictionary &p_arguments, const String &p_mcp_session_id);
+	Dictionary cancel_input_sequence(const Dictionary &p_arguments, const String &p_mcp_session_id);
+	Dictionary release_input(const Dictionary &p_arguments, const String &p_mcp_session_id);
+	void process_input();
+	void release_mcp_session(const String &p_mcp_session_id);
+	void shutdown_input();
+	MCPRuntimeInputScheduler *get_input_scheduler() { return &input_scheduler; }
 };

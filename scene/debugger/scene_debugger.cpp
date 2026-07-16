@@ -30,6 +30,8 @@
 
 #include "scene_debugger.h"
 
+#include "mcp_runtime_input_controller.h"
+
 #include "core/config/engine.h"
 #include "core/debugger/debugger_marshalls.h"
 #include "core/debugger/engine_debugger.h"
@@ -72,6 +74,7 @@ SceneDebugger::SceneDebugger() {
 #ifdef DEBUG_ENABLED
 	LiveEditor::singleton = memnew(LiveEditor);
 	RuntimeNodeSelect::singleton = memnew(RuntimeNodeSelect);
+	MCPRuntimeInputController::initialize();
 
 	EngineDebugger::register_message_capture("scene", EngineDebugger::Capture(nullptr, SceneDebugger::parse_message));
 #endif
@@ -79,6 +82,7 @@ SceneDebugger::SceneDebugger() {
 
 SceneDebugger::~SceneDebugger() {
 #ifdef DEBUG_ENABLED
+	MCPRuntimeInputController::deinitialize();
 	if (LiveEditor::singleton) {
 		EngineDebugger::unregister_message_capture("scene");
 		memdelete(LiveEditor::singleton);

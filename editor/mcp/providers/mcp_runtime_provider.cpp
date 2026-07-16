@@ -148,6 +148,50 @@ Dictionary _input_schema() {
 	return _object_schema(properties, required);
 }
 
+Dictionary _input_sequence_schema() {
+	Dictionary properties;
+	_add_session_properties(properties, true, false);
+	Dictionary step;
+	step["type"] = "object";
+	step["description"] = "Exactly one event, waitMs, waitFrames, tap, or hold operation. tap and hold accept durationMs or durationFrames.";
+	step["additionalProperties"] = true;
+	Dictionary steps = _property_schema("array", "Ordered asynchronous input operations.");
+	steps["items"] = step;
+	steps["minItems"] = 1;
+	steps["maxItems"] = 256;
+	properties["steps"] = steps;
+	return _object_schema(properties, PackedStringArray{ "steps", "runtimeGeneration" });
+}
+
+Dictionary _input_sequence_status_schema() {
+	Dictionary properties;
+	properties["sequenceId"] = _property_schema("string", "Opaque sequence ID returned by godot.runtime.input.sequence.");
+	return _object_schema(properties, PackedStringArray{ "sequenceId" });
+}
+
+Dictionary _input_sequence_cancel_schema() {
+	Dictionary properties;
+	_add_session_properties(properties, true, false);
+	properties["sequenceId"] = _property_schema("string", "Opaque sequence ID returned by godot.runtime.input.sequence.");
+	return _object_schema(properties, PackedStringArray{ "sequenceId", "runtimeGeneration" });
+}
+
+bool _resolve_mcp_session(const Dictionary &p_context, String &r_session_id, Dictionary &r_error) {
+	r_session_id = String();
+	const Variant session_value = p_context.get("session", Variant());
+	if (session_value.get_type() == Variant::DICTIONARY) {
+		const Variant id_value = Dictionary(session_value).get("sessionId", Variant());
+		if (id_value.get_type() == Variant::STRING) {
+			r_session_id = id_value;
+		}
+	}
+	if (!r_session_id.is_empty()) {
+		return true;
+	}
+	r_error = MCPToolUtils::make_error_result("MCP_SESSION_REQUIRED", "A valid MCP session is required for runtime input ownership.");
+	return false;
+}
+
 Dictionary _unknown_argument(const String &p_name) {
 	return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "Unknown argument: " + p_name);
 }
@@ -217,6 +261,14 @@ Error MCPRuntimeProvider::register_tools(MCPToolRegistry *p_registry, String *r_
 				_set_property_schema(), callable_mp(this, &MCPRuntimeProvider::_set_property) },
 		{ "godot.runtime.input.send", "Inject validated action, keyboard, mouse, joypad, pan, and magnify input events into a running project.",
 				_input_schema(), callable_mp(this, &MCPRuntimeProvider::_send_input) },
+		{ "godot.runtime.input.sequence", "Run an asynchronous input sequence with millisecond or frame waits, tap, and hold operations.",
+				_input_sequence_schema(), callable_mp(this, &MCPRuntimeProvider::_start_input_sequence) },
+		{ "godot.runtime.input.sequence_status", "Read the current state of an input sequence owned by this MCP session.",
+				_input_sequence_status_schema(), callable_mp(this, &MCPRuntimeProvider::_get_input_sequence) },
+		{ "godot.runtime.input.sequence_cancel", "Cancel an input sequence and release inputs held by it.",
+				_input_sequence_cancel_schema(), callable_mp(this, &MCPRuntimeProvider::_cancel_input_sequence) },
+		{ "godot.runtime.input.release_all", "Cancel this MCP session's sequences and release all of its held runtime inputs.",
+				_session_schema(true, false), callable_mp(this, &MCPRuntimeProvider::_release_input) },
 	};
 
 	for (const ToolRegistration &tool : tools) {
@@ -286,7 +338,47 @@ Dictionary MCPRuntimeProvider::_set_property(const Dictionary &p_arguments, cons
 	return _has_only(p_arguments, allowed, error) ? runtime_service->set_property(p_arguments) : error;
 }
 
-Dictionary MCPRuntimeProvider::_send_input(const Dictionary &p_arguments, const Dictionary &) {
+Dictionary MCPRuntimeProvider::_send_input(const Dictionary &p_arguments, const Dictionary &p_context) {
 	Dictionary error;
-	return _has_only(p_arguments, PackedStringArray{ "events", "debuggerSession", "runtimeGeneration" }, error) ? runtime_service->send_input(p_arguments) : error;
+	if (!_has_only(p_arguments, PackedStringArray{ "events", "debuggerSession", "runtimeGeneration" }, error)) {
+		return error;
+	}
+	String session_id;
+	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->send_input(p_arguments, session_id) : error;
+}
+
+Dictionary MCPRuntimeProvider::_start_input_sequence(const Dictionary &p_arguments, const Dictionary &p_context) {
+	Dictionary error;
+	if (!_has_only(p_arguments, PackedStringArray{ "steps", "debuggerSession", "runtimeGeneration" }, error)) {
+		return error;
+	}
+	String session_id;
+	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->start_input_sequence(p_arguments, session_id) : error;
+}
+
+Dictionary MCPRuntimeProvider::_get_input_sequence(const Dictionary &p_arguments, const Dictionary &p_context) {
+	Dictionary error;
+	if (!_has_only(p_arguments, PackedStringArray{ "sequenceId" }, error)) {
+		return error;
+	}
+	String session_id;
+	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->get_input_sequence(p_arguments, session_id) : error;
+}
+
+Dictionary MCPRuntimeProvider::_cancel_input_sequence(const Dictionary &p_arguments, const Dictionary &p_context) {
+	Dictionary error;
+	if (!_has_only(p_arguments, PackedStringArray{ "sequenceId", "debuggerSession", "runtimeGeneration" }, error)) {
+		return error;
+	}
+	String session_id;
+	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->cancel_input_sequence(p_arguments, session_id) : error;
+}
+
+Dictionary MCPRuntimeProvider::_release_input(const Dictionary &p_arguments, const Dictionary &p_context) {
+	Dictionary error;
+	if (!_has_only(p_arguments, PackedStringArray{ "debuggerSession", "runtimeGeneration" }, error)) {
+		return error;
+	}
+	String session_id;
+	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->release_input(p_arguments, session_id) : error;
 }

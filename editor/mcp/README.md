@@ -124,10 +124,27 @@ Runtime tools reuse the editor's built-in run bar and remote debugger connection
 - `godot.runtime.node.get_properties` returns the remote Inspector property list, including script members, constants, and exported properties.
 - `godot.runtime.node.set_property` uses the remote Inspector setter and reads the object back to return the effective value.
 - `godot.runtime.input.send` injects a bounded ordered batch of project actions, key events, mouse buttons or motion, joypad buttons or axes, and pan or magnify gestures.
+- `godot.runtime.input.sequence` schedules non-blocking input operations with `waitMs`, `waitFrames`, `tap`, and `hold` steps. It returns a `sequenceId` for `sequence_status` and `sequence_cancel`.
+- `godot.runtime.input.release_all` cancels sequences owned by the calling MCP session and releases all runtime inputs held by that session.
 
 When more than one project instance is connected to the same editor, runtime tools require the `debuggerSession` returned by `godot.runtime.get_state`. Mutating tools also require `runtimeGeneration`; a generation changes whenever that debugger slot connects to a new process, so delayed calls cannot accidentally modify a restarted game. Scene tree and property requests use a bounded remote-debugger round trip and return `RUNTIME_TIMEOUT` if the game does not answer.
 
-Input objects use a semantic JSON shape and are validated in the editor before Godot's existing `input_event_codec` serializes them. The required `type` is one of `action`, `key`, `mouse_button`, `mouse_motion`, `joypad_button`, `joypad_motion`, `pan`, or `magnify`. An action uses `action`, `pressed`, and optional `strength`; pointer positions and deltas use two-number arrays such as `[320, 180]`. The running project decodes each event and passes it to `Input::parse_input_event()` on its main thread.
+Input objects use a semantic JSON shape and are validated in the editor before Godot's existing `input_event_codec` serializes them. The required `type` is one of `action`, `key`, `mouse_button`, `mouse_motion`, `joypad_button`, `joypad_motion`, `pan`, or `magnify`. Stateful action, key, mouse button, and joypad button events require an explicit `pressed`; joypad motion requires an explicit `axisValue`. Pointer positions and deltas use two-number arrays such as `[320, 180]`. The running project decodes each event and passes it to `Input::parse_input_event()` on its main thread.
+
+Each sequence step specifies exactly one operation. An `event` contains a normal input object. `waitMs` and `waitFrames` are positive integers. `tap` and `hold` contain a binary stateful input object without `pressed`; `tap` defaults to 50 milliseconds, while `hold` requires exactly one `durationMs` or `durationFrames`. The editor validates and encodes the complete sequence, then sends it atomically to the running project. Millisecond waits use the runtime monotonic clock and frame waits advance from the runtime `SceneTree.process_frame` signal, so they do not depend on the editor frame rate. A sequence contains at most 256 source steps, 768 compiled steps, ten minutes of millisecond waits, and ten minutes at 60 runtime frames per second. Encoded runtime events are limited to 256 bytes each, and all queued sequences share a one MiB encoded-input budget. Up to 32 sequences may be active at once, with a global runtime budget of 128 injected events per frame.
+
+Held inputs are tracked inside the running project by MCP session and sequence owner. Multiple clients may hold the same input; Godot sends the release only after the final owner releases it. Joypad axes additionally restore the most recent remaining owner's value. Completing or cancelling a sequence releases inputs owned by that sequence. Deleting or expiring an MCP session, stopping the project, restarting the runtime, or shutting down the MCP Host also clears its tracked state. The editor sends a one-second heartbeat while MCP is active; the running project releases all MCP-owned input after five seconds without a heartbeat, covering editor crashes and debugger disconnects. Use `release_all` as an explicit safety operation after interrupted automation.
+
+```json
+{
+  "runtimeGeneration": 4,
+  "steps": [
+    { "hold": { "type": "action", "action": "move_right" }, "durationFrames": 30 },
+    { "waitMs": 100 },
+    { "tap": { "type": "key", "keycode": 32 }, "durationMs": 60 }
+  ]
+}
+```
 
 ## Smoke Test
 
@@ -138,4 +155,4 @@ pwsh -File tests/editor/mcp/test_mcp_cli_smoke.ps1 `
   -Binary bin/godot.windows.editor.dev.x86_64.console.exe
 ```
 
-Optional parameters are `-TimeoutSeconds <5-300>` and `-KeepTemporaryProjects`. The test creates two temporary projects and verifies explicit-path errors, CLI/editor conflicts, ordinary editor behavior, public discovery fields, independent multi-project routing, same-project Host exclusion, JSON-only stdio stdout, the complete 50-tool MCP surface, native class search/documentation, editor UI discovery, runtime tool discovery, compressed debug output and errors, cross-session dirty ScriptEditor revision/diagnostic/save/usage behavior, structural Node edits with `NodePath` rewrites, and explicit scene save. Temporary editor plugins request clean Host shutdown; forced termination is used only as a timeout fallback.
+Optional parameters are `-TimeoutSeconds <5-300>` and `-KeepTemporaryProjects`. The test creates two temporary projects and verifies explicit-path errors, CLI/editor conflicts, ordinary editor behavior, public discovery fields, independent multi-project routing, same-project Host exclusion, JSON-only stdio stdout, the complete 54-tool MCP surface, native class search/documentation, editor UI discovery, runtime tool discovery, compressed debug output and errors, cross-session dirty ScriptEditor revision/diagnostic/save/usage behavior, structural Node edits with `NodePath` rewrites, and explicit scene save. Temporary editor plugins request clean Host shutdown; forced termination is used only as a timeout fallback.

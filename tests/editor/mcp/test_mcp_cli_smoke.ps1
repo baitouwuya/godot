@@ -600,6 +600,10 @@ try {
 		"godot.runtime.node.get_properties",
 		"godot.runtime.node.set_property",
 		"godot.runtime.input.send",
+		"godot.runtime.input.sequence",
+		"godot.runtime.input.sequence_status",
+		"godot.runtime.input.sequence_cancel",
+		"godot.runtime.input.release_all",
 		"godot.editor.get_state",
 		"godot.editor.undo",
 		"godot.editor.redo",
@@ -637,8 +641,8 @@ try {
 		"godot.gdscript.rename"
 	) | Sort-Object
 	$actualTools = @($responsesById["2"].result.tools | ForEach-Object { [string]$_.name } | Sort-Object)
-	Assert-Condition ($actualTools.Count -eq 50) "tools/list returned $($actualTools.Count) tools instead of 50."
-	Assert-Condition (($actualTools -join "`n") -ceq ($expectedTools -join "`n")) "tools/list did not expose the expected 50-tool surface."
+	Assert-Condition ($actualTools.Count -eq 54) "tools/list returned $($actualTools.Count) tools instead of 54."
+	Assert-Condition (($actualTools -join "`n") -ceq ($expectedTools -join "`n")) "tools/list did not expose the expected 54-tool surface."
 	$createResult = $responsesById["3"].result.structuredContent
 	Assert-Condition (-not (Test-ToolResultError -Result $responsesById["3"].result)) "script/create returned a tool error."
 	Assert-Condition ([string]$createResult.sha256 -ceq $initialScriptSha) "script/create returned an unexpected SHA-256."

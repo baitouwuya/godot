@@ -152,9 +152,20 @@ Error _encode_event(const Ref<InputEvent> &p_event, const String &p_type, MCPRun
 	return OK;
 }
 
+Error _encode_release_event(const Ref<InputEvent> &p_event, MCPRuntimeInput::EncodedEvent &r_event, String *r_error) {
+	PackedByteArray data;
+	if (!encode_input_event(p_event, data)) {
+		_set_error(r_error, "The input release event cannot be encoded by Godot's debugger codec.");
+		return ERR_UNAVAILABLE;
+	}
+	r_event.release_message = "scene:inject_input_event";
+	r_event.release_arguments = Array{ data };
+	return OK;
+}
+
 } // namespace
 
-Error MCPRuntimeInput::encode(const Dictionary &p_input, EncodedEvent &r_event, String *r_error) {
+Error MCPRuntimeInput::encode(const Dictionary &p_input, EncodedEvent &r_event, String *r_error, bool p_require_explicit_state) {
 	r_event = EncodedEvent();
 	if (r_error) {
 		*r_error = String();
@@ -170,6 +181,10 @@ Error MCPRuntimeInput::encode(const Dictionary &p_input, EncodedEvent &r_event, 
 		const Variant action_value = p_input.get("action", Variant());
 		bool pressed = true;
 		double strength = 1.0;
+		if (p_require_explicit_state && !p_input.has("pressed")) {
+			_set_error(r_error, "pressed is required for action events.");
+			return ERR_INVALID_DATA;
+		}
 		if (action_value.get_type() != Variant::STRING || String(action_value).is_empty() ||
 				!_read_bool(p_input, "pressed", true, pressed, r_error) ||
 				!_read_number(p_input, "strength", pressed ? 1.0 : 0.0, 0.0, 1.0, strength, r_error)) {
@@ -178,13 +193,18 @@ Error MCPRuntimeInput::encode(const Dictionary &p_input, EncodedEvent &r_event, 
 			}
 			return ERR_INVALID_DATA;
 		}
-		if (!InputMap::get_singleton()->has_action(StringName(action_value))) {
+		if (!InputMap::get_singleton() || !InputMap::get_singleton()->has_action(StringName(action_value))) {
 			_set_error(r_error, "Unknown project input action: " + String(action_value));
 			return ERR_DOES_NOT_EXIST;
 		}
 		r_event.message = "scene:inject_input_action";
 		r_event.arguments = Array{ StringName(action_value), pressed, strength };
 		r_event.type = type;
+		r_event.state_key = "action:" + String(action_value);
+		r_event.release_message = r_event.message;
+		r_event.release_arguments = Array{ StringName(action_value), false, 0.0 };
+		r_event.stateful = true;
+		r_event.active = pressed;
 		return OK;
 	}
 
@@ -192,11 +212,17 @@ Error MCPRuntimeInput::encode(const Dictionary &p_input, EncodedEvent &r_event, 
 		int64_t keycode = 0;
 		int64_t physical_keycode = 0;
 		int64_t unicode = 0;
+		int64_t location = 0;
 		bool pressed = true;
 		bool echo = false;
+		if (p_require_explicit_state && !p_input.has("pressed")) {
+			_set_error(r_error, "pressed is required for key events.");
+			return ERR_INVALID_DATA;
+		}
 		if (!_read_integer(p_input, "keycode", 0, 0, UINT32_MAX, keycode, r_error) ||
 				!_read_integer(p_input, "physicalKeycode", 0, 0, UINT32_MAX, physical_keycode, r_error) ||
 				!_read_integer(p_input, "unicode", 0, 0, UINT32_MAX, unicode, r_error) ||
+				!_read_integer(p_input, "location", 0, 0, int64_t(KeyLocation::RIGHT), location, r_error) ||
 				!_read_bool(p_input, "pressed", true, pressed, r_error) || !_read_bool(p_input, "echo", false, echo, r_error)) {
 			return ERR_INVALID_DATA;
 		}
@@ -205,18 +231,35 @@ Error MCPRuntimeInput::encode(const Dictionary &p_input, EncodedEvent &r_event, 
 		event->set_keycode(Key(keycode));
 		event->set_physical_keycode(Key(physical_keycode));
 		event->set_unicode(char32_t(unicode));
+		event->set_location(KeyLocation(location));
 		event->set_pressed(pressed);
 		event->set_echo(echo);
 		if (!_set_device(p_input, event, r_error) || !_apply_modifiers(p_input, event, r_error)) {
 			return ERR_INVALID_DATA;
 		}
-		return _encode_event(event, type, r_event, r_error);
+		Error error = _encode_event(event, type, r_event, r_error);
+		if (error != OK) {
+			return error;
+		}
+		Ref<InputEventKey> release = event->duplicate();
+		release->set_pressed(false);
+		release->set_echo(false);
+		error = _encode_release_event(release, r_event, r_error);
+		const int64_t identity = physical_keycode != 0 ? physical_keycode : keycode;
+		r_event.state_key = vformat("key:%d:%d:%d", event->get_device(), location, identity);
+		r_event.stateful = true;
+		r_event.active = pressed;
+		return error;
 	}
 
 	if (type == "mouse_button") {
 		int64_t button_index = 0;
 		bool pressed = true;
 		bool double_click = false;
+		if (p_require_explicit_state && !p_input.has("pressed")) {
+			_set_error(r_error, "pressed is required for mouse_button events.");
+			return ERR_INVALID_DATA;
+		}
 		if (!_read_integer(p_input, "buttonIndex", 0, 1, 9, button_index, r_error) ||
 				!_read_bool(p_input, "pressed", true, pressed, r_error) ||
 				!_read_bool(p_input, "doubleClick", false, double_click, r_error)) {
@@ -230,7 +273,18 @@ Error MCPRuntimeInput::encode(const Dictionary &p_input, EncodedEvent &r_event, 
 		if (!_set_device(p_input, event, r_error) || !_apply_mouse(p_input, event, r_error)) {
 			return ERR_INVALID_DATA;
 		}
-		return _encode_event(event, type, r_event, r_error);
+		Error error = _encode_event(event, type, r_event, r_error);
+		if (error != OK) {
+			return error;
+		}
+		Ref<InputEventMouseButton> release = event->duplicate();
+		release->set_pressed(false);
+		release->set_double_click(false);
+		error = _encode_release_event(release, r_event, r_error);
+		r_event.state_key = vformat("mouse_button:%d:%d", event->get_device(), button_index);
+		r_event.stateful = true;
+		r_event.active = pressed;
+		return error;
 	}
 
 	if (type == "mouse_motion") {
@@ -253,6 +307,10 @@ Error MCPRuntimeInput::encode(const Dictionary &p_input, EncodedEvent &r_event, 
 	if (type == "joypad_button") {
 		int64_t button_index = 0;
 		bool pressed = true;
+		if (p_require_explicit_state && !p_input.has("pressed")) {
+			_set_error(r_error, "pressed is required for joypad_button events.");
+			return ERR_INVALID_DATA;
+		}
 		if (!_read_integer(p_input, "buttonIndex", 0, 0, int64_t(JoyButton::MAX) - 1, button_index, r_error) ||
 				!_read_bool(p_input, "pressed", true, pressed, r_error)) {
 			return ERR_INVALID_DATA;
@@ -264,12 +322,26 @@ Error MCPRuntimeInput::encode(const Dictionary &p_input, EncodedEvent &r_event, 
 		if (!_set_device(p_input, event, r_error)) {
 			return ERR_INVALID_DATA;
 		}
-		return _encode_event(event, type, r_event, r_error);
+		Error error = _encode_event(event, type, r_event, r_error);
+		if (error != OK) {
+			return error;
+		}
+		Ref<InputEventJoypadButton> release = event->duplicate();
+		release->set_pressed(false);
+		error = _encode_release_event(release, r_event, r_error);
+		r_event.state_key = vformat("joypad_button:%d:%d", event->get_device(), button_index);
+		r_event.stateful = true;
+		r_event.active = pressed;
+		return error;
 	}
 
 	if (type == "joypad_motion") {
 		int64_t axis = 0;
 		double axis_value = 0.0;
+		if (p_require_explicit_state && !p_input.has("axisValue")) {
+			_set_error(r_error, "axisValue is required for joypad_motion events.");
+			return ERR_INVALID_DATA;
+		}
 		if (!_read_integer(p_input, "axis", 0, 0, int64_t(JoyAxis::MAX) - 1, axis, r_error) ||
 				!_read_number(p_input, "axisValue", 0.0, -1.0, 1.0, axis_value, r_error)) {
 			return ERR_INVALID_DATA;
@@ -281,7 +353,17 @@ Error MCPRuntimeInput::encode(const Dictionary &p_input, EncodedEvent &r_event, 
 		if (!_set_device(p_input, event, r_error)) {
 			return ERR_INVALID_DATA;
 		}
-		return _encode_event(event, type, r_event, r_error);
+		Error error = _encode_event(event, type, r_event, r_error);
+		if (error != OK) {
+			return error;
+		}
+		Ref<InputEventJoypadMotion> release = event->duplicate();
+		release->set_axis_value(0.0f);
+		error = _encode_release_event(release, r_event, r_error);
+		r_event.state_key = vformat("joypad_motion:%d:%d", event->get_device(), axis);
+		r_event.stateful = true;
+		r_event.active = !Math::is_zero_approx(axis_value);
+		return error;
 	}
 
 	if (type == "pan" || type == "magnify") {
@@ -319,4 +401,23 @@ Error MCPRuntimeInput::encode(const Dictionary &p_input, EncodedEvent &r_event, 
 
 	_set_error(r_error, "Unsupported input event type: " + type);
 	return ERR_INVALID_DATA;
+}
+
+Error MCPRuntimeInput::encode_binary_state(const Dictionary &p_input, bool p_pressed, EncodedEvent &r_event, String *r_error) {
+	const Variant type_value = p_input.get("type", Variant());
+	if (type_value.get_type() != Variant::STRING) {
+		_set_error(r_error, "type must be a non-empty string.");
+		return ERR_INVALID_DATA;
+	}
+	const String type = type_value;
+	if (type != "action" && type != "key" && type != "mouse_button" && type != "joypad_button") {
+		_set_error(r_error, "tap and hold support action, key, mouse_button, or joypad_button events.");
+		return ERR_INVALID_DATA;
+	}
+	Dictionary input = p_input.duplicate();
+	input["pressed"] = p_pressed;
+	if (type == "action" && !p_pressed) {
+		input["strength"] = 0.0;
+	}
+	return encode(input, r_event, r_error, true);
 }

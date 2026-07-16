@@ -178,6 +178,9 @@ void MCPEditorPlugin::_unregister_tools() {
 }
 
 void MCPEditorPlugin::on_mcp_session_removed(const String &p_session_id) {
+	if (runtime_debug_service) {
+		runtime_debug_service->release_mcp_session(p_session_id);
+	}
 	if (editor_ui_provider) {
 		editor_ui_provider->release_session(p_session_id);
 	}
@@ -257,6 +260,8 @@ Error MCPEditorPlugin::_start_mcp(String &r_error) {
 		r_error = "Unable to start MCP debug event capture.";
 		return error;
 	}
+	add_debugger_plugin(runtime_input_debugger_plugin);
+	runtime_input_debugger_registered = true;
 
 	main_thread_executor.reset();
 	last_heartbeat_usec = OS::get_singleton()->get_ticks_usec();
@@ -265,6 +270,11 @@ Error MCPEditorPlugin::_start_mcp(String &r_error) {
 }
 
 void MCPEditorPlugin::_stop_mcp() {
+	runtime_debug_service->shutdown_input();
+	if (runtime_input_debugger_registered) {
+		remove_debugger_plugin(runtime_input_debugger_plugin);
+		runtime_input_debugger_registered = false;
+	}
 	debug_capture->stop();
 	main_thread_executor.shutdown();
 	if (host.is_running()) {
@@ -386,6 +396,7 @@ void MCPEditorPlugin::_notification(int p_what) {
 			}
 			host.poll();
 			main_thread_executor.poll();
+			runtime_debug_service->process_input();
 			_refresh_heartbeat();
 		} break;
 
@@ -407,6 +418,8 @@ MCPEditorPlugin::MCPEditorPlugin() {
 	debug_capture = memnew(MCPDebugCapture(debug_event_store));
 	debug_provider = memnew(MCPDebugProvider(debug_event_store));
 	runtime_debug_service = memnew(MCPRuntimeDebugService(debug_capture));
+	runtime_input_debugger_plugin.instantiate();
+	runtime_input_debugger_plugin->set_scheduler(runtime_debug_service->get_input_scheduler());
 	runtime_provider = memnew(MCPRuntimeProvider(runtime_debug_service));
 	editor_provider = memnew(MCPEditorProvider);
 	editor_ui_provider = memnew(MCPEditorUIProvider);

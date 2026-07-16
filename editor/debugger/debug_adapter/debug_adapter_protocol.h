@@ -94,7 +94,7 @@ private:
 	void on_debug_stack_dump(const Array &p_stack_dump);
 	void on_debug_stack_frame_vars(const int &p_size);
 	void on_debug_stack_frame_var(const Array &p_data);
-	void on_debug_data(const String &p_msg, const Array &p_data);
+	void on_debug_data(const String &p_msg, uint64_t, const Array &p_data);
 
 	void reset_current_info();
 	void reset_ids();

@@ -1166,7 +1166,7 @@ void DebugAdapterProtocol::on_debug_stack_frame_var(const Array &p_data) {
 	_remaining_vars--;
 }
 
-void DebugAdapterProtocol::on_debug_data(const String &p_msg, const Array &p_data) {
+void DebugAdapterProtocol::on_debug_data(const String &p_msg, uint64_t, const Array &p_data) {
 	// Ignore data that is already handled by DAP
 	if (p_msg == "debug_enter" || p_msg == "debug_exit" || p_msg == "stack_dump" || p_msg == "stack_frame_vars" || p_msg == "stack_frame_var" || p_msg == "output" || p_msg == "request_quit") {
 		return;

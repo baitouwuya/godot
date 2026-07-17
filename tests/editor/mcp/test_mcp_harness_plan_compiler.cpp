@@ -115,14 +115,20 @@ TEST_CASE("[MCP][Harness] Compiles expectation aliases with polling assertions")
 	const Array steps = plan.get("steps", Array());
 	const Dictionary visible_step = steps[0];
 	CHECK(visible_step.get("kind", String()) == "expect");
-	CHECK(visible_step.get("tool", String()) == "godot.runtime.get_node_snapshot");
+	CHECK(visible_step.get("tool", String()) == "godot.runtime.wait.start");
+	const Dictionary visible_arguments = visible_step.get("arguments", Dictionary());
+	const Dictionary visible_condition = visible_arguments.get("condition", Dictionary());
+	CHECK(visible_condition.get("kind", String()) == "property");
+	CHECK(visible_condition.get("property", String()) == "visible");
+	CHECK(int(visible_arguments.get("timeoutFrames", 0)) == 600);
 	const Dictionary visible_assertion = visible_step.get("assertion", Dictionary());
 	CHECK(visible_assertion.get("kind", String()) == "property_equals");
 	CHECK(visible_assertion.get("property", String()) == "visible");
 	CHECK(bool(visible_assertion.get("value", false)));
 	CHECK(int(Dictionary(visible_step.get("poll", Dictionary())).get("timeoutFrames", 0)) == 600);
 	const Dictionary gone_step = steps[1];
-	CHECK(gone_step.get("tool", String()) == "godot.runtime.query_nodes");
+	CHECK(gone_step.get("tool", String()) == "godot.runtime.wait.start");
+	CHECK(Dictionary(Dictionary(gone_step.get("arguments", Dictionary())).get("condition", Dictionary())).get("kind", String()) == "node_gone");
 	CHECK(Dictionary(gone_step.get("assertion", Dictionary())).get("operator", String()) == "equals");
 }
 
@@ -139,7 +145,8 @@ TEST_CASE("[MCP][Harness] Compiles performance intent and rejects CLI startup st
 	const Array steps = plan.get("steps", Array());
 	REQUIRE(steps.size() == 2);
 	CHECK(Dictionary(steps[0]).get("tool", String()) == "godot.runtime.performance.start");
-	CHECK(bool(Dictionary(steps[0]).get("futureTool", false)));
+	CHECK(PackedStringArray(Dictionary(steps[0]).get("contextRequirements", PackedStringArray())).has("runtimeGeneration"));
+	CHECK(Dictionary(Dictionary(steps[0]).get("arguments", Dictionary())).get("name", String()) == "intent");
 	script["startup"] = Dictionary{ { "aiAgentPort", 7010 } };
 	CHECK(MCPHarnessPlanCompiler::compile(script, plan, &error) == ERR_INVALID_DATA);
 	CHECK(error.contains("aiAgentPort"));

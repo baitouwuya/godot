@@ -37,6 +37,7 @@
 #include "providers/mcp_editor_provider.h"
 #include "providers/mcp_editor_ui_provider.h"
 #include "providers/mcp_file_provider.h"
+#include "providers/mcp_harness_provider.h"
 #include "providers/mcp_node_provider.h"
 #include "providers/mcp_node_structure_provider.h"
 #include "providers/mcp_resource_provider.h"
@@ -102,6 +103,11 @@ Error MCPEditorPlugin::_register_tools(String &r_error) {
 		return error;
 	}
 	error = runtime_provider->register_tools(&tool_registry, &r_error);
+	if (error != OK) {
+		_unregister_tools();
+		return error;
+	}
+	error = harness_provider->register_tools(&tool_registry, &r_error);
 	if (error != OK) {
 		_unregister_tools();
 		return error;
@@ -172,6 +178,7 @@ void MCPEditorPlugin::_unregister_tools() {
 	file_provider->unregister_tools();
 	editor_ui_provider->unregister_tools();
 	editor_provider->unregister_tools();
+	harness_provider->unregister_tools();
 	runtime_provider->unregister_tools();
 	debug_provider->unregister_tools();
 	class_provider->unregister_tools();
@@ -179,6 +186,9 @@ void MCPEditorPlugin::_unregister_tools() {
 }
 
 void MCPEditorPlugin::on_mcp_session_removed(const String &p_session_id) {
+	if (harness_provider) {
+		harness_provider->release_session(p_session_id);
+	}
 	if (runtime_debug_service) {
 		runtime_debug_service->release_mcp_session(p_session_id);
 	}
@@ -279,6 +289,7 @@ Error MCPEditorPlugin::_start_mcp(String &r_error) {
 
 void MCPEditorPlugin::_stop_mcp() {
 	project_heartbeat.stop();
+	harness_provider->shutdown();
 	runtime_debug_service->shutdown_input();
 	if (runtime_observation_debugger_registered) {
 		remove_debugger_plugin(runtime_observation_debugger_plugin);
@@ -399,6 +410,7 @@ void MCPEditorPlugin::_notification(int p_what) {
 			host.poll();
 			main_thread_executor.poll();
 			runtime_debug_service->process_input();
+			harness_provider->poll();
 			String heartbeat_failure;
 			if (project_heartbeat.poll_failure(heartbeat_failure)) {
 				_exit_with_error("Godot MCP Host lost its project lease: " + heartbeat_failure);
@@ -429,6 +441,7 @@ MCPEditorPlugin::MCPEditorPlugin() {
 	runtime_observation_debugger_plugin.instantiate();
 	runtime_debug_service->set_observation_plugin(runtime_observation_debugger_plugin.ptr());
 	runtime_provider = memnew(MCPRuntimeProvider(runtime_debug_service));
+	harness_provider = memnew(MCPHarnessProvider);
 	editor_provider = memnew(MCPEditorProvider);
 	editor_ui_provider = memnew(MCPEditorUIProvider);
 	file_provider = memnew(MCPFileProvider);
@@ -461,6 +474,7 @@ MCPEditorPlugin::~MCPEditorPlugin() {
 	memdelete(editor_ui_provider);
 	memdelete(editor_provider);
 	memdelete(runtime_provider);
+	memdelete(harness_provider);
 	memdelete(runtime_debug_service);
 	memdelete(debug_provider);
 	memdelete(debug_capture);

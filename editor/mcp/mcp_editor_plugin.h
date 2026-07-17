@@ -51,6 +51,7 @@ class MCPEditorUIProvider;
 class MCPFileProvider;
 class MCPGDScriptProvider;
 class MCPGDScriptSessionManager;
+class MCPHarnessProvider;
 class MCPNodeProvider;
 class MCPNodeStructureProvider;
 class MCPResourceProvider;
@@ -109,6 +110,7 @@ class MCPEditorPlugin : public EditorPlugin, public MCPHostSessionObserver {
 	MCPResourceProvider *resource_provider = nullptr;
 	MCPGDScriptProvider *gdscript_provider = nullptr;
 	MCPGDScriptSessionManager *gdscript_session_manager = nullptr;
+	MCPHarnessProvider *harness_provider = nullptr;
 
 	void _notification(int p_what);
 	Error _register_tools(String &r_error);

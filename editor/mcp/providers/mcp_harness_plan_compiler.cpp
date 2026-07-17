@@ -312,9 +312,11 @@ static Error _compile_expectation(const Dictionary &p_step, int p_index, Diction
 		if (!p_step.has("selector") || _validate_selector(p_step["selector"], expect + ".selector", r_error) != OK) {
 			return _fail(expect + " requires a selector object.", r_error);
 		}
-		tool = "godot.runtime.query_nodes";
-		arguments["filter"] = p_step["selector"];
-		arguments["maxResults"] = 1;
+		tool = "godot.runtime.wait.start";
+		Dictionary condition;
+		condition["kind"] = expect;
+		condition["selector"] = p_step["selector"];
+		arguments["condition"] = condition;
 		assertion["kind"] = "match_count";
 		assertion["operator"] = expect == "node_exists" ? "greater_than" : "equals";
 		assertion["value"] = 0;
@@ -323,8 +325,10 @@ static Error _compile_expectation(const Dictionary &p_step, int p_index, Diction
 		if (!p_step.has("selector") || _validate_selector(p_step["selector"], expect + ".selector", r_error) != OK) {
 			return _fail(expect + " requires a selector object.", r_error);
 		}
-		tool = "godot.runtime.get_node_snapshot";
-		arguments["selector"] = p_step["selector"];
+		tool = "godot.runtime.wait.start";
+		Dictionary condition;
+		condition["kind"] = "property";
+		condition["selector"] = p_step["selector"];
 		assertion["kind"] = "property_equals";
 		if (expect == "property_equals") {
 			allowed.append_array(PackedStringArray{ "property", "equals" });
@@ -334,30 +338,29 @@ static Error _compile_expectation(const Dictionary &p_step, int p_index, Diction
 			}
 			assertion["property"] = property;
 			assertion["value"] = p_step["equals"];
+			condition["property"] = property;
+			condition["equals"] = p_step["equals"];
 		} else {
 			assertion["property"] = "visible";
 			assertion["value"] = expect == "node_visible";
+			condition["property"] = "visible";
+			condition["equals"] = expect == "node_visible";
 		}
+		arguments["condition"] = condition;
 	} else if (expect == "scene_changed") {
-		allowed.push_back("fromScenePath");
-		tool = "godot.runtime.get_tree";
+		tool = "godot.runtime.wait.start";
+		arguments["condition"] = Dictionary{ { "kind", "scene_changed" } };
 		assertion["kind"] = "scene_changed";
-		if (p_step.has("fromScenePath")) {
-			String from_scene;
-			if (!_read_string(p_step, "fromScenePath", String(), from_scene, error, false)) {
-				return _fail(error, r_error);
-			}
-			assertion["fromScenePath"] = from_scene;
-		}
 	} else if (expect == "screenshot_diff") {
 		allowed.push_back("threshold");
-		tool = "godot.runtime.get_screenshot";
+		tool = "godot.runtime.wait.start";
 		assertion["kind"] = "screenshot_diff";
 		double threshold = 0.05;
-		if (!_read_number(p_step, "threshold", threshold, 0.0, 1.0, threshold, error)) {
+		if (!_read_number(p_step, "threshold", threshold, 0.001, 1.0, threshold, error)) {
 			return _fail(error, r_error);
 		}
 		assertion["threshold"] = threshold;
+		arguments["condition"] = Dictionary{ { "kind", "screenshot_diff" }, { "threshold", threshold } };
 	} else {
 		return _fail("Unsupported expect alias: " + expect + ".", r_error);
 	}
@@ -378,7 +381,9 @@ static Error _compile_expectation(const Dictionary &p_step, int p_index, Diction
 	polling["timeoutFrames"] = timeout_frames;
 	polling["pollEveryFrames"] = poll_every_frames;
 	polling["captureOnError"] = capture_on_error;
-	r_step = _make_step(p_index, "expect", expect, tool, arguments, false);
+	arguments["timeoutFrames"] = timeout_frames;
+	arguments["pollEveryFrames"] = poll_every_frames;
+	r_step = _make_step(p_index, "expect", expect, tool, arguments, true);
 	r_step["assertion"] = assertion;
 	r_step["poll"] = polling;
 	r_step["expandedOperationCount"] = 1;
@@ -475,9 +480,10 @@ Error MCPHarnessPlanCompiler::compile(const Dictionary &p_script, Dictionary &r_
 	Array compiled_steps;
 	int total_operations = perf ? 1 : 0;
 	if (perf) {
-		Dictionary perf_step = _make_step(0, "command", "startup.perf", "godot.runtime.performance.start", Dictionary(), false);
+		Dictionary perf_arguments;
+		perf_arguments["name"] = name;
+		Dictionary perf_step = _make_step(0, "command", "startup.perf", "godot.runtime.performance.start", perf_arguments, true);
 		perf_step["expandedOperationCount"] = 1;
-		perf_step["futureTool"] = true;
 		compiled_steps.push_back(perf_step);
 	}
 	for (int i = 0; i < source_steps.size(); i++) {

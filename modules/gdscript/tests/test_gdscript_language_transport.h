@@ -36,6 +36,7 @@
 
 #include "../language_server/gdscript_language_transport.h"
 
+#include "core/os/os.h"
 #include "core/os/thread.h"
 #include "tests/test_macros.h"
 
@@ -60,6 +61,10 @@ public:
 		r_message = response.message;
 		p_transport.outgoing_responses.complete(response);
 		return true;
+	}
+
+	static int get_port(const GDScriptLanguageTransport &p_transport) {
+		return p_transport.server->get_local_port();
 	}
 };
 
@@ -116,6 +121,45 @@ TEST_SUITE("[Modules][GDScript][LSP][Transport]") {
 		CHECK_EQ(transport.get_pending_response_count(), 0);
 		CHECK_FALSE(TestGDScriptLanguageTransport::push_event(transport, GDScriptLanguageTransport::Event(GDScriptLanguageTransport::EVENT_MESSAGE, 1, "late")));
 		CHECK_FALSE(transport.queue_response(1, "late"));
+	}
+
+	TEST_CASE("TCP transport reads batched messages and preserves packet boundaries") {
+		GDScriptLanguageTransport transport;
+		REQUIRE(transport.start(0, IPAddress("127.0.0.1")) == OK);
+
+		Ref<StreamPeerTCP> client;
+		client.instantiate();
+		REQUIRE(client->connect_to_host(IPAddress("127.0.0.1"), TestGDScriptLanguageTransport::get_port(transport)) == OK);
+		const uint64_t deadline = OS::get_singleton()->get_ticks_usec() + 2 * 1000 * 1000;
+		while (client->get_status() == StreamPeerTCP::STATUS_CONNECTING && OS::get_singleton()->get_ticks_usec() < deadline) {
+			client->poll();
+			transport.poll_network(1000);
+			OS::get_singleton()->delay_usec(1000);
+		}
+		REQUIRE(client->get_status() == StreamPeerTCP::STATUS_CONNECTED);
+
+		const String wire = "Content-Length: 3\r\n\r\noneContent-Length: 3\r\n\r\ntwo";
+		const CharString encoded = wire.utf8();
+		REQUIRE(client->put_data(reinterpret_cast<const uint8_t *>(encoded.get_data()), encoded.length()) == OK);
+
+		Vector<String> messages;
+		const uint64_t message_deadline = OS::get_singleton()->get_ticks_usec() + 2 * 1000 * 1000;
+		while (messages.size() < 2 && OS::get_singleton()->get_ticks_usec() < message_deadline) {
+			client->poll();
+			transport.poll_network(1000);
+			GDScriptLanguageTransport::Event event;
+			while (transport.pop_event(event)) {
+				if (event.type == GDScriptLanguageTransport::EVENT_MESSAGE) {
+					messages.push_back(event.message);
+				}
+			}
+			OS::get_singleton()->delay_usec(1000);
+		}
+		REQUIRE(messages.size() == 2);
+		CHECK(messages[0] == "one");
+		CHECK(messages[1] == "two");
+		client->disconnect_from_host();
+		transport.stop();
 	}
 
 #ifdef THREADS_ENABLED

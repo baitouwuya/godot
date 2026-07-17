@@ -167,48 +167,74 @@ int GDScriptLanguageTransport::OutgoingResponseQueue::size() const {
 Error GDScriptLanguageTransport::NetworkPeer::read_message(String &r_message, bool &r_complete) {
 	r_message = String();
 	r_complete = false;
-	int read = 0;
 
 	if (!has_header) {
 		while (true) {
+			int header_end = -1;
+			for (int i = header_scan_position; i < request_position; i++) {
+				if (request_buffer[i - 3] == '\r' && request_buffer[i - 2] == '\n' && request_buffer[i - 1] == '\r' && request_buffer[i] == '\n') {
+					header_end = i - 3;
+					break;
+				}
+			}
+			if (header_end >= 0) {
+				const String header = String::utf8(reinterpret_cast<const char *>(request_buffer), header_end);
+				content_length = header.substr(16).to_int();
+				ERR_FAIL_COND_V_MSG(content_length < 0 || content_length > MAX_BUFFER_SIZE, ERR_OUT_OF_MEMORY, "LSP request content is too large.");
+				const int body_start = header_end + 4;
+				const int buffered_body_bytes = request_position - body_start;
+				if (buffered_body_bytes > 0) {
+					memmove(request_buffer, request_buffer + body_start, buffered_body_bytes);
+				}
+				has_header = true;
+				request_position = buffered_body_bytes;
+				break;
+			}
+			header_scan_position = MAX(3, request_position - 3);
+
+			const int available = connection->get_available_bytes();
+			if (available <= 0) {
+				return ERR_BUSY;
+			}
 			ERR_FAIL_COND_V_MSG(request_position >= MAX_BUFFER_SIZE, ERR_OUT_OF_MEMORY, "LSP request header is too large.");
-			const Error error = connection->get_partial_data(&request_buffer[request_position], 1, read);
+			const int requested = MIN(available, MAX_BUFFER_SIZE - request_position);
+			int read = 0;
+			const Error error = connection->get_partial_data(&request_buffer[request_position], requested, read);
 			if (error != OK) {
 				return error;
 			}
-			if (read != 1) {
+			if (read <= 0) {
 				return ERR_BUSY;
 			}
-
-			char *header_data = reinterpret_cast<char *>(request_buffer);
-			const int header_position = request_position;
-			if (header_position > 3 && header_data[header_position] == '\n' && header_data[header_position - 1] == '\r' && header_data[header_position - 2] == '\n' && header_data[header_position - 3] == '\r') {
-				header_data[header_position - 3] = '\0';
-				const String header = String::utf8(header_data);
-				content_length = header.substr(16).to_int();
-				ERR_FAIL_COND_V_MSG(content_length < 0 || content_length > MAX_BUFFER_SIZE, ERR_OUT_OF_MEMORY, "LSP request content is too large.");
-				has_header = true;
-				request_position = 0;
-				break;
-			}
-			request_position++;
+			request_position += read;
 		}
 	}
 
 	while (request_position < content_length) {
-		const Error error = connection->get_partial_data(&request_buffer[request_position], 1, read);
+		const int available = connection->get_available_bytes();
+		if (available <= 0) {
+			return ERR_BUSY;
+		}
+		const int requested = MIN(available, content_length - request_position);
+		int read = 0;
+		const Error error = connection->get_partial_data(&request_buffer[request_position], requested, read);
 		if (error != OK) {
 			return error;
 		}
-		if (read != 1) {
+		if (read <= 0) {
 			return ERR_BUSY;
 		}
-		request_position++;
+		request_position += read;
 	}
 
-	r_message = String::utf8(reinterpret_cast<const char *>(request_buffer), request_position);
+	r_message = String::utf8(reinterpret_cast<const char *>(request_buffer), content_length);
 	r_complete = true;
-	request_position = 0;
+	const int remaining = request_position - content_length;
+	if (remaining > 0) {
+		memmove(request_buffer, request_buffer + content_length, remaining);
+	}
+	request_position = remaining;
+	header_scan_position = 3;
 	has_header = false;
 	content_length = 0;
 	return OK;
@@ -217,7 +243,7 @@ Error GDScriptLanguageTransport::NetworkPeer::read_message(String &r_message, bo
 Error GDScriptLanguageTransport::NetworkPeer::send_data(Vector<Response> &r_completed) {
 	int sent = 0;
 	while (!response_queue.is_empty()) {
-		const QueuedResponse &queued_response = response_queue[0];
+		const QueuedResponse &queued_response = response_queue.front()->get();
 		if (response_sent < queued_response.encoded.size() - 1) {
 			const Error error = connection->put_partial_data(reinterpret_cast<const uint8_t *>(queued_response.encoded.get_data()) + response_sent, queued_response.encoded.size() - response_sent - 1, sent);
 			if (error != OK) {
@@ -232,7 +258,7 @@ Error GDScriptLanguageTransport::NetworkPeer::send_data(Vector<Response> &r_comp
 		if (response_sent >= queued_response.encoded.size() - 1) {
 			response_sent = 0;
 			r_completed.push_back(queued_response.response);
-			response_queue.remove_at(0);
+			response_queue.pop_front();
 		}
 	}
 	return OK;
@@ -304,6 +330,7 @@ Error GDScriptLanguageTransport::_accept_connection() {
 	const int client_id = next_client_id++;
 	Ref<NetworkPeer> peer = memnew(NetworkPeer);
 	peer->connection = connection;
+	peer->connection->set_no_delay(true);
 	if (!incoming_events.try_push(Event(EVENT_CONNECTED, client_id))) {
 		connection->disconnect_from_host();
 		return ERR_BUSY;
@@ -382,7 +409,7 @@ void GDScriptLanguageTransport::poll_network(int p_limit_usec) {
 		}
 
 		Error error = OK;
-		while (peer->connection->get_available_bytes() > 0) {
+		while (peer->request_position > 0 || peer->connection->get_available_bytes() > 0) {
 			String message;
 			bool complete = false;
 			error = peer->read_message(message, complete);

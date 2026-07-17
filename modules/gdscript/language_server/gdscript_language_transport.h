@@ -133,6 +133,7 @@ private:
 
 		uint8_t request_buffer[MAX_BUFFER_SIZE];
 		int request_position = 0;
+		int header_scan_position = 3;
 		bool has_header = false;
 		int content_length = 0;
 
@@ -140,12 +141,13 @@ private:
 			Response response;
 			CharString encoded;
 
+			QueuedResponse() = default;
 			QueuedResponse(const Response &p_response) :
 					response(p_response),
 					encoded(p_response.message.utf8()) {}
 		};
 
-		Vector<QueuedResponse> response_queue;
+		List<QueuedResponse> response_queue;
 		int response_sent = 0;
 
 		Error read_message(String &r_message, bool &r_complete);

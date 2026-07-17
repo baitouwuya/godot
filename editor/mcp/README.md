@@ -138,6 +138,9 @@ Runtime tools reuse the editor's built-in run bar and remote debugger connection
 - `godot.runtime.input.send` injects a bounded ordered batch of project actions, key events, mouse buttons or motion, joypad buttons or axes, and pan or magnify gestures.
 - `godot.runtime.input.sequence` schedules non-blocking input operations with `waitMs`, `waitFrames`, `tap`, and `hold` steps. It returns a `sequenceId` for `sequence_status` and `sequence_cancel`.
 - `godot.runtime.input.release_all` cancels sequences owned by the calling MCP session and releases all runtime inputs held by that session.
+- `godot.runtime.click_target`, `double_click_target`, `hover_target`, and `focus_target` resolve a selector in the running project before injecting bounded pointer or focus operations.
+- `godot.runtime.drag_target_to_target` resolves both endpoints atomically and runs the drag through the existing input sequence scheduler.
+- `godot.runtime.type_text` focuses a runtime Control and injects bounded Unicode key events; `godot.runtime.scroll_view` injects bounded wheel input at a selector-resolved target.
 
 When more than one project instance is connected to the same editor, runtime tools require the `debuggerSession` returned by `godot.runtime.get_state`. Mutating tools also require `runtimeGeneration`; a generation changes whenever that debugger slot connects to a new process, so delayed calls cannot accidentally modify a restarted game. Scene tree and property requests use a bounded remote-debugger round trip and return `RUNTIME_TIMEOUT` if the game does not answer.
 
@@ -167,4 +170,4 @@ pwsh -File tests/editor/mcp/test_mcp_cli_smoke.ps1 `
   -Binary bin/godot.windows.editor.dev.x86_64.console.exe
 ```
 
-Optional parameters are `-TimeoutSeconds <5-300>` and `-KeepTemporaryProjects`. The test creates two temporary projects and verifies explicit-path errors, CLI/editor conflicts, ordinary editor behavior, public discovery fields, independent multi-project routing, same-project Host exclusion, JSON-only stdio stdout, the complete 66-tool MCP surface, native class search/documentation, editor UI discovery, runtime tool discovery, compressed debug output and errors, cross-session dirty ScriptEditor revision/diagnostic/save/usage behavior, structural Node edits with `NodePath` rewrites, and explicit scene save. Temporary editor plugins request clean Host shutdown; forced termination is used only as a timeout fallback.
+Optional parameters are `-TimeoutSeconds <5-300>` and `-KeepTemporaryProjects`. The test creates two temporary projects and verifies explicit-path errors, CLI/editor conflicts, ordinary editor behavior, public discovery fields, independent multi-project routing, same-project Host exclusion, JSON-only stdio stdout, the complete 73-tool MCP surface, native class search/documentation, editor UI discovery, runtime tool discovery, compressed debug output and errors, cross-session dirty ScriptEditor revision/diagnostic/save/usage behavior, structural Node edits with `NodePath` rewrites, and explicit scene save. Temporary editor plugins request clean Host shutdown; forced termination is used only as a timeout fallback.

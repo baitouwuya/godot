@@ -263,6 +263,8 @@ Error MCPEditorPlugin::_start_mcp(String &r_error) {
 	}
 	add_debugger_plugin(runtime_input_debugger_plugin);
 	runtime_input_debugger_registered = true;
+	add_debugger_plugin(runtime_observation_debugger_plugin);
+	runtime_observation_debugger_registered = true;
 
 	main_thread_executor.reset();
 	error = project_heartbeat.start(project_lease, discovery_directory, discovery_record);
@@ -278,6 +280,11 @@ Error MCPEditorPlugin::_start_mcp(String &r_error) {
 void MCPEditorPlugin::_stop_mcp() {
 	project_heartbeat.stop();
 	runtime_debug_service->shutdown_input();
+	if (runtime_observation_debugger_registered) {
+		remove_debugger_plugin(runtime_observation_debugger_plugin);
+		runtime_observation_debugger_registered = false;
+	}
+	runtime_observation_debugger_plugin->clear_requests();
 	if (runtime_input_debugger_registered) {
 		remove_debugger_plugin(runtime_input_debugger_plugin);
 		runtime_input_debugger_registered = false;
@@ -419,6 +426,8 @@ MCPEditorPlugin::MCPEditorPlugin() {
 	runtime_debug_service = memnew(MCPRuntimeDebugService(debug_capture));
 	runtime_input_debugger_plugin.instantiate();
 	runtime_input_debugger_plugin->set_scheduler(runtime_debug_service->get_input_scheduler());
+	runtime_observation_debugger_plugin.instantiate();
+	runtime_debug_service->set_observation_plugin(runtime_observation_debugger_plugin.ptr());
 	runtime_provider = memnew(MCPRuntimeProvider(runtime_debug_service));
 	editor_provider = memnew(MCPEditorProvider);
 	editor_ui_provider = memnew(MCPEditorUIProvider);

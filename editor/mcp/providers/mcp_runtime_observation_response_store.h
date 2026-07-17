@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  mcp_runtime_provider.h                                                */
+/*  mcp_runtime_observation_response_store.h                              */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,40 +30,38 @@
 
 #pragma once
 
-#include "core/object/object.h"
+#include "core/string/ustring.h"
+#include "core/templates/hash_map.h"
+#include "core/variant/array.h"
 #include "core/variant/dictionary.h"
+#include "core/variant/variant.h"
 
-class MCPRuntimeDebugService;
-class MCPToolRegistry;
+class MCPRuntimeObservationResponseStore {
+public:
+	struct Response {
+		String operation;
+		bool ok = false;
+		String code;
+		String message;
+		Dictionary data;
+	};
 
-class MCPRuntimeProvider : public Object {
-	MCPToolRegistry *tool_registry = nullptr;
-	MCPRuntimeDebugService *runtime_service = nullptr;
+private:
+	struct RequestKey {
+		int session = -1;
+		String request_id;
 
-	Dictionary _get_state(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _play(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _stop(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _pause(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _resume(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _next_frame(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _get_tree(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _get_screenshot(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _get_viewport_summary(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _query_nodes(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _get_interactables(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _get_node_snapshot(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _get_properties(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _set_property(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _send_input(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _start_input_sequence(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _get_input_sequence(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _cancel_input_sequence(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _release_input(const Dictionary &p_arguments, const Dictionary &p_context);
+		static uint32_t hash(const RequestKey &p_key);
+		bool operator==(const RequestKey &p_other) const;
+	};
+
+	HashMap<RequestKey, String, RequestKey> pending_requests;
+	HashMap<RequestKey, Response, RequestKey> responses;
 
 public:
-	explicit MCPRuntimeProvider(MCPRuntimeDebugService *p_runtime_service);
-	~MCPRuntimeProvider();
-
-	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr);
-	void unregister_tools();
+	bool register_request(int p_session, const String &p_request_id, const String &p_operation);
+	bool handle_response(int p_session, const Array &p_data);
+	bool take_response(int p_session, const String &p_request_id, Response &r_response);
+	void cancel_request(int p_session, const String &p_request_id);
+	void clear();
 };

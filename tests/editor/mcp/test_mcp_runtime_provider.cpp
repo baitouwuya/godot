@@ -33,8 +33,11 @@
 #include "editor/mcp/providers/mcp_runtime_debug_service.h"
 #include "editor/mcp/providers/mcp_runtime_input.h"
 #include "editor/mcp/providers/mcp_runtime_input_sequence.h"
+#include "editor/mcp/providers/mcp_runtime_observation_debugger_plugin.h"
+#include "editor/mcp/providers/mcp_runtime_observation_response_store.h"
 #include "editor/mcp/providers/mcp_runtime_provider.h"
 #include "scene/debugger/mcp_runtime_input_event.h"
+#include "scene/debugger/mcp_runtime_observation.h"
 #include "tests/test_macros.h"
 
 TEST_FORCE_LINK(test_mcp_runtime_provider);
@@ -66,7 +69,7 @@ TEST_CASE("[MCP][Provider] Runtime tools register in a stable strict surface") {
 	CHECK(provider.register_tools(&registry) == ERR_ALREADY_IN_USE);
 
 	const PackedStringArray names = registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_MCP);
-	REQUIRE(names.size() == 14);
+	REQUIRE(names.size() == 19);
 	CHECK(names[0] == "godot.runtime.get_state");
 	CHECK(names[1] == "godot.runtime.play");
 	CHECK(names[2] == "godot.runtime.stop");
@@ -74,17 +77,22 @@ TEST_CASE("[MCP][Provider] Runtime tools register in a stable strict surface") {
 	CHECK(names[4] == "godot.runtime.resume");
 	CHECK(names[5] == "godot.runtime.next_frame");
 	CHECK(names[6] == "godot.runtime.get_tree");
-	CHECK(names[7] == "godot.runtime.node.get_properties");
-	CHECK(names[8] == "godot.runtime.node.set_property");
-	CHECK(names[9] == "godot.runtime.input.send");
-	CHECK(names[10] == "godot.runtime.input.sequence");
-	CHECK(names[11] == "godot.runtime.input.sequence_status");
-	CHECK(names[12] == "godot.runtime.input.sequence_cancel");
-	CHECK(names[13] == "godot.runtime.input.release_all");
+	CHECK(names[7] == "godot.runtime.get_screenshot");
+	CHECK(names[8] == "godot.runtime.get_viewport_summary");
+	CHECK(names[9] == "godot.runtime.query_nodes");
+	CHECK(names[10] == "godot.runtime.get_interactables");
+	CHECK(names[11] == "godot.runtime.get_node_snapshot");
+	CHECK(names[12] == "godot.runtime.node.get_properties");
+	CHECK(names[13] == "godot.runtime.node.set_property");
+	CHECK(names[14] == "godot.runtime.input.send");
+	CHECK(names[15] == "godot.runtime.input.sequence");
+	CHECK(names[16] == "godot.runtime.input.sequence_status");
+	CHECK(names[17] == "godot.runtime.input.sequence_cancel");
+	CHECK(names[18] == "godot.runtime.input.release_all");
 	CHECK(registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_CLI).is_empty());
 
 	const Array definitions = registry.get_tool_definitions(MCPToolRegistry::TOOL_SURFACE_MCP);
-	REQUIRE(definitions.size() == 14);
+	REQUIRE(definitions.size() == 19);
 	for (const Variant &definition_value : definitions) {
 		const Dictionary schema = Dictionary(definition_value).get("inputSchema", Dictionary());
 		CHECK(schema.get("type", String()) == "object");
@@ -97,6 +105,54 @@ TEST_CASE("[MCP][Provider] Runtime tools register in a stable strict surface") {
 	CHECK(_error_code(_call(registry, "godot.runtime.get_tree", invalid)) == "INVALID_ARGUMENTS");
 	provider.unregister_tools();
 	CHECK(registry.get_tool_names().is_empty());
+}
+
+TEST_CASE("[MCP][Provider] Runtime observation selectors are strict and match compact snapshots") {
+	MCPRuntimeObservation::Selector selector;
+	String error;
+	Dictionary selector_value;
+	selector_value["name"] = "PlayButton";
+	selector_value["group"] = "menu";
+	selector_value["visible"] = true;
+	selector_value["nearestToScreenPoint"] = Array{ 40.0, 30.0 };
+	REQUIRE(MCPRuntimeObservation::parse_selector(selector_value, selector, error) == OK);
+	CHECK_FALSE(selector.is_empty());
+	CHECK(selector.name == "PlayButton");
+
+	Dictionary snapshot;
+	snapshot["nodePath"] = "/root/Main/PlayButton";
+	snapshot["name"] = "PlayButton";
+	snapshot["type"] = "Button";
+	snapshot["groups"] = Array{ "menu", "primary" };
+	snapshot["visible"] = true;
+	snapshot["screenRect"] = Dictionary{ { "x", 10.0 }, { "y", 20.0 }, { "width", 60.0 }, { "height", 20.0 } };
+	CHECK(MCPRuntimeObservation::matches_snapshot(snapshot, selector));
+	snapshot["visible"] = false;
+	CHECK_FALSE(MCPRuntimeObservation::matches_snapshot(snapshot, selector));
+
+	Dictionary invalid;
+	invalid["containsText"] = "Play";
+	CHECK(MCPRuntimeObservation::parse_selector(invalid, selector, error) == ERR_INVALID_PARAMETER);
+	CHECK(error.contains("Unsupported"));
+}
+
+TEST_CASE("[MCP][Provider] Runtime observation responses are correlated by debugger session and operation") {
+	MCPRuntimeObservationResponseStore store;
+	REQUIRE(store.register_request(1, "request-1", "query_nodes"));
+	CHECK_FALSE(store.register_request(1, "request-1", "query_nodes"));
+
+	Dictionary data;
+	data["count"] = 1;
+	CHECK_FALSE(store.handle_response(1, Array{ "request-1", "get_interactables", true, String(), String(), data }));
+	MCPRuntimeObservationResponseStore::Response response;
+	CHECK_FALSE(store.take_response(1, "request-1", response));
+	CHECK_FALSE(store.handle_response(0, Array{ "request-1", "query_nodes", true, String(), String(), data }));
+	CHECK_FALSE(store.take_response(1, "request-1", response));
+	CHECK(store.handle_response(1, Array{ "request-1", "query_nodes", true, String(), String(), data }));
+	REQUIRE(store.take_response(1, "request-1", response));
+	CHECK(response.ok);
+	CHECK(response.operation == "query_nodes");
+	CHECK(int(response.data["count"]) == 1);
 }
 
 TEST_CASE("[MCP][Provider] Runtime input uses Godot's debugger codec for key and mouse events") {

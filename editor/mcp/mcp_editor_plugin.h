@@ -34,6 +34,7 @@
 #include "mcp_main_thread_executor.h"
 #include "mcp_project_heartbeat.h"
 #include "providers/mcp_runtime_input_debugger_plugin.h"
+#include "providers/mcp_runtime_observation_debugger_plugin.h"
 
 #include "core/mcp/mcp_discovery.h"
 #include "core/mcp/mcp_project_lease.h"
@@ -96,6 +97,8 @@ class MCPEditorPlugin : public EditorPlugin, public MCPHostSessionObserver {
 	MCPRuntimeProvider *runtime_provider = nullptr;
 	Ref<MCPRuntimeInputDebuggerPlugin> runtime_input_debugger_plugin;
 	bool runtime_input_debugger_registered = false;
+	Ref<MCPRuntimeObservationDebuggerPlugin> runtime_observation_debugger_plugin;
+	bool runtime_observation_debugger_registered = false;
 	MCPEditorProvider *editor_provider = nullptr;
 	MCPEditorUIProvider *editor_ui_provider = nullptr;
 	MCPFileProvider *file_provider = nullptr;

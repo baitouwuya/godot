@@ -72,6 +72,17 @@ void _add_session_properties(Dictionary &r_properties, bool p_generation, bool p
 	}
 }
 
+void _add_observation_session_properties(Dictionary &r_properties) {
+	Dictionary debugger = _property_schema("integer", "Optional debugger session index. Required when multiple project instances are running.");
+	debugger["minimum"] = 0;
+	r_properties["debuggerSession"] = debugger;
+	Dictionary timeout = _property_schema("integer", "Maximum time for this short remote debugger round trip.");
+	timeout["minimum"] = 50;
+	timeout["maximum"] = 1500;
+	timeout["default"] = 500;
+	r_properties["timeoutMs"] = timeout;
+}
+
 Dictionary _session_schema(bool p_require_generation, bool p_timeout) {
 	Dictionary properties;
 	_add_session_properties(properties, p_require_generation, p_timeout);
@@ -98,6 +109,71 @@ Dictionary _play_schema() {
 Dictionary _tree_schema() {
 	Dictionary properties;
 	_add_session_properties(properties, false, true);
+	return _object_schema(properties);
+}
+
+Dictionary _rect_schema(const String &p_description) {
+	Dictionary properties;
+	properties["x"] = _property_schema("number", "Left coordinate in root viewport pixels.");
+	properties["y"] = _property_schema("number", "Top coordinate in root viewport pixels.");
+	properties["width"] = _property_schema("number", "Rectangle width in pixels.");
+	properties["height"] = _property_schema("number", "Rectangle height in pixels.");
+	Dictionary schema = _object_schema(properties, PackedStringArray{ "x", "y", "width", "height" });
+	schema["description"] = p_description;
+	return schema;
+}
+
+Dictionary _selector_schema() {
+	Dictionary properties;
+	properties["path"] = _property_schema("string", "Exact absolute runtime node path.");
+	properties["name"] = _property_schema("string", "Exact node name.");
+	properties["type"] = _property_schema("string", "Exact runtime class name.");
+	properties["group"] = _property_schema("string", "Exact public group name.");
+	properties["text"] = _property_schema("string", "Exact text property value.");
+	properties["is3D"] = _property_schema("boolean", "Match 3D or non-3D nodes.");
+	properties["visible"] = _property_schema("boolean", "Match effective runtime visibility.");
+	properties["screenRect"] = _rect_schema("Match nodes whose projected screen rectangle intersects this rectangle.");
+	Dictionary nearest = _property_schema("array", "Select the matching node nearest to this root viewport [x, y] point.");
+	nearest["items"] = _property_schema("number", "Root viewport pixel coordinate.");
+	nearest["minItems"] = 2;
+	nearest["maxItems"] = 2;
+	properties["nearestToScreenPoint"] = nearest;
+	return _object_schema(properties);
+}
+
+Dictionary _runtime_query_schema() {
+	Dictionary properties;
+	_add_observation_session_properties(properties);
+	properties["filter"] = _selector_schema();
+	Dictionary max_results = _property_schema("integer", "Maximum number of matching snapshots to return.");
+	max_results["minimum"] = 1;
+	max_results["maximum"] = 256;
+	max_results["default"] = 64;
+	properties["maxResults"] = max_results;
+	return _object_schema(properties);
+}
+
+Dictionary _runtime_snapshot_schema() {
+	Dictionary properties;
+	_add_observation_session_properties(properties);
+	properties["selector"] = _selector_schema();
+	return _object_schema(properties, PackedStringArray{ "selector" });
+}
+
+Dictionary _viewport_summary_schema() {
+	Dictionary properties;
+	_add_observation_session_properties(properties);
+	Dictionary include_counts = _property_schema("boolean", "Include UI, 3D, and interactable target counts.");
+	include_counts["default"] = true;
+	properties["includeCounts"] = include_counts;
+	return _object_schema(properties);
+}
+
+Dictionary _screenshot_schema() {
+	Dictionary properties;
+	_add_observation_session_properties(properties);
+	properties["name"] = _property_schema("string", "Optional label included in the generated temporary PNG filename.");
+	properties["crop"] = _rect_schema("Optional root viewport crop rectangle.");
 	return _object_schema(properties);
 }
 
@@ -255,6 +331,16 @@ Error MCPRuntimeProvider::register_tools(MCPToolRegistry *p_registry, String *r_
 				_session_schema(true, false), callable_mp(this, &MCPRuntimeProvider::_next_frame) },
 		{ "godot.runtime.get_tree", "Get a fresh running-project scene tree using Godot's remote debugger.",
 				_tree_schema(), callable_mp(this, &MCPRuntimeProvider::_get_tree) },
+		{ "godot.runtime.get_screenshot", "Capture the running project's root viewport to a temporary PNG.",
+				_screenshot_schema(), callable_mp(this, &MCPRuntimeProvider::_get_screenshot) },
+		{ "godot.runtime.get_viewport_summary", "Get root viewport, active camera, scene, and target-count information.",
+				_viewport_summary_schema(), callable_mp(this, &MCPRuntimeProvider::_get_viewport_summary) },
+		{ "godot.runtime.query_nodes", "Query compact runtime node snapshots by path, name, type, group, text, visibility, or screen position.",
+				_runtime_query_schema(), callable_mp(this, &MCPRuntimeProvider::_query_nodes) },
+		{ "godot.runtime.get_interactables", "List visible runtime UI and ray-pickable 3D targets matching an optional filter.",
+				_runtime_query_schema(), callable_mp(this, &MCPRuntimeProvider::_get_interactables) },
+		{ "godot.runtime.get_node_snapshot", "Get one compact runtime node snapshot from an unambiguous selector.",
+				_runtime_snapshot_schema(), callable_mp(this, &MCPRuntimeProvider::_get_node_snapshot) },
 		{ "godot.runtime.node.get_properties", "Get all inspectable runtime node properties, including script members and exports.",
 				_properties_schema(), callable_mp(this, &MCPRuntimeProvider::_get_properties) },
 		{ "godot.runtime.node.set_property", "Set and verify one runtime node property through Godot's remote inspector protocol.",
@@ -325,6 +411,31 @@ Dictionary MCPRuntimeProvider::_next_frame(const Dictionary &p_arguments, const 
 Dictionary MCPRuntimeProvider::_get_tree(const Dictionary &p_arguments, const Dictionary &) {
 	Dictionary error;
 	return _has_only(p_arguments, PackedStringArray{ "debuggerSession", "timeoutMs" }, error) ? runtime_service->get_tree(p_arguments) : error;
+}
+
+Dictionary MCPRuntimeProvider::_get_screenshot(const Dictionary &p_arguments, const Dictionary &) {
+	Dictionary error;
+	return _has_only(p_arguments, PackedStringArray{ "name", "crop", "debuggerSession", "timeoutMs" }, error) ? runtime_service->get_screenshot(p_arguments) : error;
+}
+
+Dictionary MCPRuntimeProvider::_get_viewport_summary(const Dictionary &p_arguments, const Dictionary &) {
+	Dictionary error;
+	return _has_only(p_arguments, PackedStringArray{ "includeCounts", "debuggerSession", "timeoutMs" }, error) ? runtime_service->get_viewport_summary(p_arguments) : error;
+}
+
+Dictionary MCPRuntimeProvider::_query_nodes(const Dictionary &p_arguments, const Dictionary &) {
+	Dictionary error;
+	return _has_only(p_arguments, PackedStringArray{ "filter", "maxResults", "debuggerSession", "timeoutMs" }, error) ? runtime_service->query_nodes(p_arguments) : error;
+}
+
+Dictionary MCPRuntimeProvider::_get_interactables(const Dictionary &p_arguments, const Dictionary &) {
+	Dictionary error;
+	return _has_only(p_arguments, PackedStringArray{ "filter", "maxResults", "debuggerSession", "timeoutMs" }, error) ? runtime_service->get_interactables(p_arguments) : error;
+}
+
+Dictionary MCPRuntimeProvider::_get_node_snapshot(const Dictionary &p_arguments, const Dictionary &) {
+	Dictionary error;
+	return _has_only(p_arguments, PackedStringArray{ "selector", "debuggerSession", "timeoutMs" }, error) ? runtime_service->get_node_snapshot(p_arguments) : error;
 }
 
 Dictionary MCPRuntimeProvider::_get_properties(const Dictionary &p_arguments, const Dictionary &) {

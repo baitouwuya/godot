@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  mcp_runtime_provider.h                                                */
+/*  mcp_runtime_observation.h                                             */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,40 +30,41 @@
 
 #pragma once
 
-#include "core/object/object.h"
+#include "core/error/error_list.h"
+#include "core/math/rect2.h"
+#include "core/string/ustring.h"
 #include "core/variant/dictionary.h"
 
-class MCPRuntimeDebugService;
-class MCPToolRegistry;
+class Node;
+class Viewport;
 
-class MCPRuntimeProvider : public Object {
-	MCPToolRegistry *tool_registry = nullptr;
-	MCPRuntimeDebugService *runtime_service = nullptr;
-
-	Dictionary _get_state(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _play(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _stop(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _pause(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _resume(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _next_frame(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _get_tree(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _get_screenshot(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _get_viewport_summary(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _query_nodes(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _get_interactables(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _get_node_snapshot(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _get_properties(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _set_property(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _send_input(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _start_input_sequence(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _get_input_sequence(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _cancel_input_sequence(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary _release_input(const Dictionary &p_arguments, const Dictionary &p_context);
-
+class MCPRuntimeObservation {
 public:
-	explicit MCPRuntimeProvider(MCPRuntimeDebugService *p_runtime_service);
-	~MCPRuntimeProvider();
+	struct Selector {
+		String path;
+		String name;
+		String type;
+		String group;
+		String text;
+		bool has_is_3d = false;
+		bool is_3d = false;
+		bool has_visible = false;
+		bool visible = false;
+		bool has_screen_rect = false;
+		Rect2 screen_rect;
+		bool has_nearest_to_screen_point = false;
+		Vector2 nearest_to_screen_point;
 
-	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr);
-	void unregister_tools();
+		bool is_empty() const;
+	};
+
+	static Error parse_selector(const Dictionary &p_value, Selector &r_selector, String &r_error);
+	static bool matches_snapshot(const Dictionary &p_snapshot, const Selector &p_selector);
+	static Dictionary build_node_snapshot(Node *p_node, Viewport *p_root_viewport);
+	static bool has_screen_position(const Dictionary &p_snapshot);
+	static Vector2 get_screen_position(const Dictionary &p_snapshot);
+	static bool is_interactable(Node *p_node, const Dictionary &p_snapshot);
+	static String get_active_camera_path(Viewport *p_viewport);
+	static Error execute(const String &p_operation, const Dictionary &p_arguments, Dictionary &r_result,
+			String &r_error_code, String &r_error_message);
 };

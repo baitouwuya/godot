@@ -34,6 +34,7 @@
 #include "mcp_path_utils.h"
 #include "mcp_runtime_input.h"
 #include "mcp_runtime_input_sequence.h"
+#include "mcp_runtime_observation_debugger_plugin.h"
 #include "mcp_tool_utils.h"
 #include "mcp_variant_codec.h"
 
@@ -51,6 +52,8 @@
 namespace {
 
 constexpr int DEFAULT_TIMEOUT_MSEC = 750;
+constexpr int DEFAULT_OBSERVATION_TIMEOUT_MSEC = 500;
+constexpr int MAX_OBSERVATION_TIMEOUT_MSEC = 1500;
 
 Dictionary _error(const String &p_code, const String &p_message) {
 	return MCPToolUtils::make_error_result(p_code, p_message);
@@ -60,6 +63,15 @@ int _timeout_from_arguments(const Dictionary &p_arguments) {
 	int64_t timeout = DEFAULT_TIMEOUT_MSEC;
 	MCPToolUtils::try_get_json_integer(p_arguments.get("timeoutMs", DEFAULT_TIMEOUT_MSEC), 50, 5000, timeout);
 	return int(timeout);
+}
+
+bool _observation_timeout_from_arguments(const Dictionary &p_arguments, int &r_timeout) {
+	int64_t timeout = DEFAULT_OBSERVATION_TIMEOUT_MSEC;
+	if (p_arguments.has("timeoutMs") && !MCPToolUtils::try_get_json_integer(p_arguments["timeoutMs"], 50, MAX_OBSERVATION_TIMEOUT_MSEC, timeout)) {
+		return false;
+	}
+	r_timeout = int(timeout);
+	return true;
 }
 
 String _normalize_runtime_path(const String &p_path) {
@@ -432,6 +444,93 @@ Dictionary MCPRuntimeDebugService::get_tree(const Dictionary &p_arguments) const
 	result["nodes"] = _make_tree_nodes(debugger->get_remote_tree());
 	result["nodeCount"] = Array(result["nodes"]).size();
 	return MCPToolUtils::make_success_result(result);
+}
+
+Dictionary MCPRuntimeDebugService::_request_observation(const Dictionary &p_arguments, const String &p_operation, const Dictionary &p_payload) const {
+	int timeout_msec = DEFAULT_OBSERVATION_TIMEOUT_MSEC;
+	if (!_observation_timeout_from_arguments(p_arguments, timeout_msec)) {
+		return _error("INVALID_ARGUMENTS", vformat("timeoutMs must be an integer between 50 and %d for runtime observations.", MAX_OBSERVATION_TIMEOUT_MSEC));
+	}
+	ScriptEditorDebugger *debugger = nullptr;
+	int debugger_session = -1;
+	uint64_t generation = 0;
+	const Dictionary session_error = _resolve_session(p_arguments, false, debugger, debugger_session, generation);
+	if (!session_error.is_empty()) {
+		return session_error;
+	}
+	if (!observation_plugin) {
+		return _error("RUNTIME_OBSERVATION_UNAVAILABLE", "The MCP runtime observation debugger plugin is not active.");
+	}
+	const String request_id = vformat("%d-%d", OS::get_singleton()->get_process_id(), next_observation_request_id++);
+	if (!observation_plugin->register_request(debugger_session, request_id, p_operation)) {
+		return _error("RUNTIME_OBSERVATION_BUSY", "Unable to reserve a runtime observation request.");
+	}
+	debugger->send_message("mcp_observation:" + p_operation, Array{ request_id, p_payload });
+	const uint64_t deadline = OS::get_singleton()->get_ticks_usec() + uint64_t(timeout_msec) * 1000;
+	MCPRuntimeObservationDebuggerPlugin::Response response;
+	// Observation messages are bounded, short round trips. Long runtime jobs must use asynchronous request state.
+	while (debugger->is_session_active() && OS::get_singleton()->get_ticks_usec() < deadline) {
+		debugger->poll_peer_messages(2000);
+		if (observation_plugin->take_response(debugger_session, request_id, response)) {
+			if (!response.ok) {
+				return MCPToolUtils::make_error_result(response.code.is_empty() ? "RUNTIME_OBSERVATION_FAILED" : response.code,
+						response.message.is_empty() ? "Runtime observation failed." : response.message, response.data);
+			}
+			Dictionary result = _make_session_identity(debugger_session, generation);
+			result.merge(response.data, true);
+			return MCPToolUtils::make_success_result(result);
+		}
+		OS::get_singleton()->delay_usec(500);
+	}
+	observation_plugin->cancel_request(debugger_session, request_id);
+	return debugger->is_session_active() ? _error("RUNTIME_TIMEOUT", "Timed out waiting for the running project's observation response.") : _error("RUNTIME_NOT_RUNNING", "The running project stopped before returning the observation response.");
+}
+
+Dictionary MCPRuntimeDebugService::get_screenshot(const Dictionary &p_arguments) const {
+	Dictionary payload;
+	if (p_arguments.has("name")) {
+		payload["name"] = p_arguments["name"];
+	}
+	if (p_arguments.has("crop")) {
+		payload["crop"] = p_arguments["crop"];
+	}
+	return _request_observation(p_arguments, "get_screenshot", payload);
+}
+
+Dictionary MCPRuntimeDebugService::get_viewport_summary(const Dictionary &p_arguments) const {
+	Dictionary payload;
+	if (p_arguments.has("includeCounts")) {
+		payload["includeCounts"] = p_arguments["includeCounts"];
+	}
+	return _request_observation(p_arguments, "get_viewport_summary", payload);
+}
+
+Dictionary MCPRuntimeDebugService::query_nodes(const Dictionary &p_arguments) const {
+	Dictionary payload;
+	if (p_arguments.has("filter")) {
+		payload["filter"] = p_arguments["filter"];
+	}
+	if (p_arguments.has("maxResults")) {
+		payload["maxResults"] = p_arguments["maxResults"];
+	}
+	return _request_observation(p_arguments, "query_nodes", payload);
+}
+
+Dictionary MCPRuntimeDebugService::get_interactables(const Dictionary &p_arguments) const {
+	Dictionary payload;
+	if (p_arguments.has("filter")) {
+		payload["filter"] = p_arguments["filter"];
+	}
+	if (p_arguments.has("maxResults")) {
+		payload["maxResults"] = p_arguments["maxResults"];
+	}
+	return _request_observation(p_arguments, "get_interactables", payload);
+}
+
+Dictionary MCPRuntimeDebugService::get_node_snapshot(const Dictionary &p_arguments) const {
+	Dictionary payload;
+	payload["selector"] = p_arguments.get("selector", Dictionary());
+	return _request_observation(p_arguments, "get_node_snapshot", payload);
 }
 
 Dictionary MCPRuntimeDebugService::_refresh_object(ScriptEditorDebugger *p_debugger, ObjectID p_object_id, int p_timeout_msec) const {

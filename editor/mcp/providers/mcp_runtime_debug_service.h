@@ -35,11 +35,14 @@
 #include "core/variant/dictionary.h"
 
 class MCPDebugCapture;
+class MCPRuntimeObservationDebuggerPlugin;
 class ScriptEditorDebugger;
 
 class MCPRuntimeDebugService {
 	MCPDebugCapture *debug_capture = nullptr;
+	MCPRuntimeObservationDebuggerPlugin *observation_plugin = nullptr;
 	MCPRuntimeInputScheduler input_scheduler;
+	mutable uint64_t next_observation_request_id = 1;
 
 	Dictionary _resolve_session(const Dictionary &p_arguments, bool p_require_generation, ScriptEditorDebugger *&r_debugger,
 			int &r_debugger_session, uint64_t &r_runtime_generation) const;
@@ -47,6 +50,7 @@ class MCPRuntimeDebugService {
 	Dictionary _find_node(ScriptEditorDebugger *p_debugger, const String &p_path, ObjectID &r_object_id, Dictionary &r_node) const;
 	Dictionary _refresh_object(ScriptEditorDebugger *p_debugger, ObjectID p_object_id, int p_timeout_msec) const;
 	Dictionary _make_session_identity(int p_debugger_session, uint64_t p_runtime_generation) const;
+	Dictionary _request_observation(const Dictionary &p_arguments, const String &p_operation, const Dictionary &p_payload) const;
 
 public:
 	explicit MCPRuntimeDebugService(MCPDebugCapture *p_debug_capture);
@@ -58,6 +62,11 @@ public:
 	Dictionary set_suspended(const Dictionary &p_arguments, bool p_suspended) const;
 	Dictionary next_frame(const Dictionary &p_arguments) const;
 	Dictionary get_tree(const Dictionary &p_arguments) const;
+	Dictionary get_screenshot(const Dictionary &p_arguments) const;
+	Dictionary get_viewport_summary(const Dictionary &p_arguments) const;
+	Dictionary query_nodes(const Dictionary &p_arguments) const;
+	Dictionary get_interactables(const Dictionary &p_arguments) const;
+	Dictionary get_node_snapshot(const Dictionary &p_arguments) const;
 	Dictionary get_properties(const Dictionary &p_arguments) const;
 	Dictionary set_property(const Dictionary &p_arguments) const;
 	Dictionary send_input(const Dictionary &p_arguments, const String &p_mcp_session_id);
@@ -68,5 +77,6 @@ public:
 	void process_input();
 	void release_mcp_session(const String &p_mcp_session_id);
 	void shutdown_input();
+	void set_observation_plugin(MCPRuntimeObservationDebuggerPlugin *p_plugin) { observation_plugin = p_plugin; }
 	MCPRuntimeInputScheduler *get_input_scheduler() { return &input_scheduler; }
 };

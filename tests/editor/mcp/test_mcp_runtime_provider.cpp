@@ -70,7 +70,7 @@ TEST_CASE("[MCP][Provider] Runtime tools register in a stable strict surface") {
 	CHECK(provider.register_tools(&registry) == ERR_ALREADY_IN_USE);
 
 	const PackedStringArray names = registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_MCP);
-	REQUIRE(names.size() == 29);
+	REQUIRE(names.size() == 32);
 	CHECK(names[0] == "godot.runtime.get_state");
 	CHECK(names[1] == "godot.runtime.play");
 	CHECK(names[2] == "godot.runtime.stop");
@@ -93,17 +93,20 @@ TEST_CASE("[MCP][Provider] Runtime tools register in a stable strict surface") {
 	CHECK(names[19] == "godot.runtime.wait.start");
 	CHECK(names[20] == "godot.runtime.wait.status");
 	CHECK(names[21] == "godot.runtime.wait.cancel");
-	CHECK(names[22] == "godot.runtime.node.get_properties");
-	CHECK(names[23] == "godot.runtime.node.set_property");
-	CHECK(names[24] == "godot.runtime.input.send");
-	CHECK(names[25] == "godot.runtime.input.sequence");
-	CHECK(names[26] == "godot.runtime.input.sequence_status");
-	CHECK(names[27] == "godot.runtime.input.sequence_cancel");
-	CHECK(names[28] == "godot.runtime.input.release_all");
+	CHECK(names[22] == "godot.runtime.performance.start");
+	CHECK(names[23] == "godot.runtime.performance.status");
+	CHECK(names[24] == "godot.runtime.performance.stop");
+	CHECK(names[25] == "godot.runtime.node.get_properties");
+	CHECK(names[26] == "godot.runtime.node.set_property");
+	CHECK(names[27] == "godot.runtime.input.send");
+	CHECK(names[28] == "godot.runtime.input.sequence");
+	CHECK(names[29] == "godot.runtime.input.sequence_status");
+	CHECK(names[30] == "godot.runtime.input.sequence_cancel");
+	CHECK(names[31] == "godot.runtime.input.release_all");
 	CHECK(registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_CLI).is_empty());
 
 	const Array definitions = registry.get_tool_definitions(MCPToolRegistry::TOOL_SURFACE_MCP);
-	REQUIRE(definitions.size() == 29);
+	REQUIRE(definitions.size() == 32);
 	for (const Variant &definition_value : definitions) {
 		const Dictionary schema = Dictionary(definition_value).get("inputSchema", Dictionary());
 		CHECK(schema.get("type", String()) == "object");
@@ -164,6 +167,7 @@ TEST_CASE("[MCP][Provider] Runtime observation responses are correlated by debug
 	CHECK(response.ok);
 	CHECK(response.operation == "query_nodes");
 	CHECK(int(response.data["count"]) == 1);
+
 }
 
 TEST_CASE("[MCP][Provider] Runtime target actions compose bounded existing input sequences") {
@@ -237,6 +241,26 @@ TEST_CASE("[MCP][Provider] Runtime wait jobs require MCP ownership and generatio
 	status["jobId"] = "wait-missing";
 	status["runtimeGeneration"] = 1;
 	CHECK(_error_code(_call(registry, "godot.runtime.wait.status", status, session)) == "WAIT_JOB_NOT_FOUND");
+}
+
+TEST_CASE("[MCP][Provider] Runtime performance jobs require MCP ownership and expose bounded summaries") {
+	MCPRuntimeDebugService service(nullptr);
+	MCPRuntimeProvider provider(&service);
+	MCPToolRegistry registry;
+	REQUIRE(provider.register_tools(&registry) == OK);
+	Dictionary start;
+	start["runtimeGeneration"] = 1;
+	start["topFrames"] = 100;
+	start["maxFrames"] = 36000;
+	CHECK(_error_code(_call(registry, "godot.runtime.performance.start", start)) == "MCP_SESSION_REQUIRED");
+
+	Dictionary session;
+	session["sessionId"] = "performance-client";
+	Dictionary status;
+	status["jobId"] = "performance-missing";
+	status["runtimeGeneration"] = 1;
+	CHECK(_error_code(_call(registry, "godot.runtime.performance.status", status, session)) == "PERFORMANCE_JOB_NOT_FOUND");
+	CHECK(_error_code(_call(registry, "godot.runtime.performance.stop", status, session)) == "PERFORMANCE_JOB_NOT_FOUND");
 }
 
 TEST_CASE("[MCP][Provider] Runtime input uses Godot's debugger codec for key and mouse events") {

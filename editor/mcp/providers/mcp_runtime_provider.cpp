@@ -306,6 +306,31 @@ Dictionary _wait_job_schema() {
 	return _object_schema(properties, PackedStringArray{ "jobId", "runtimeGeneration" });
 }
 
+Dictionary _performance_start_schema() {
+	Dictionary properties;
+	_add_target_action_session_properties(properties);
+	Dictionary name = _property_schema("string", "Optional label included in the structured performance summary.");
+	name["maxLength"] = 256;
+	properties["name"] = name;
+	Dictionary top_frames = _property_schema("integer", "Number of bounded slow-frame snapshots retained in the summary.");
+	top_frames["minimum"] = 0;
+	top_frames["maximum"] = 100;
+	top_frames["default"] = 10;
+	properties["topFrames"] = top_frames;
+	Dictionary max_frames = _property_schema("integer", "Optional frame count that completes the recording automatically.");
+	max_frames["minimum"] = 1;
+	max_frames["maximum"] = 36000;
+	properties["maxFrames"] = max_frames;
+	return _object_schema(properties, PackedStringArray{ "runtimeGeneration" });
+}
+
+Dictionary _performance_job_schema() {
+	Dictionary properties;
+	_add_target_action_session_properties(properties);
+	properties["jobId"] = _property_schema("string", "Opaque performance job ID returned by godot.runtime.performance.start.");
+	return _object_schema(properties, PackedStringArray{ "jobId", "runtimeGeneration" });
+}
+
 Dictionary _properties_schema() {
 	Dictionary properties;
 	_add_session_properties(properties, false, true);
@@ -490,6 +515,12 @@ Error MCPRuntimeProvider::register_tools(MCPToolRegistry *p_registry, String *r_
 				_wait_job_schema(), callable_mp(this, &MCPRuntimeProvider::_get_wait_status) },
 		{ "godot.runtime.wait.cancel", "Cancel an asynchronous runtime condition job owned by this MCP session.",
 				_wait_job_schema(), callable_mp(this, &MCPRuntimeProvider::_cancel_wait) },
+		{ "godot.runtime.performance.start", "Start bounded in-process runtime performance aggregation and return immediately.",
+				_performance_start_schema(), callable_mp(this, &MCPRuntimeProvider::_start_performance) },
+		{ "godot.runtime.performance.status", "Get the current state and captured-frame count of a runtime performance job.",
+				_performance_job_schema(), callable_mp(this, &MCPRuntimeProvider::_get_performance_status) },
+		{ "godot.runtime.performance.stop", "Stop a runtime performance job and return its final structured summary.",
+				_performance_job_schema(), callable_mp(this, &MCPRuntimeProvider::_stop_performance) },
 		{ "godot.runtime.node.get_properties", "Get all inspectable runtime node properties, including script members and exports.",
 				_properties_schema(), callable_mp(this, &MCPRuntimeProvider::_get_properties) },
 		{ "godot.runtime.node.set_property", "Set and verify one runtime node property through Godot's remote inspector protocol.",
@@ -679,6 +710,33 @@ Dictionary MCPRuntimeProvider::_cancel_wait(const Dictionary &p_arguments, const
 	}
 	String session_id;
 	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->cancel_wait(p_arguments, session_id) : error;
+}
+
+Dictionary MCPRuntimeProvider::_start_performance(const Dictionary &p_arguments, const Dictionary &p_context) {
+	Dictionary error;
+	if (!_has_only(p_arguments, PackedStringArray{ "name", "topFrames", "maxFrames", "debuggerSession", "runtimeGeneration", "timeoutMs" }, error)) {
+		return error;
+	}
+	String session_id;
+	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->start_performance(p_arguments, session_id) : error;
+}
+
+Dictionary MCPRuntimeProvider::_get_performance_status(const Dictionary &p_arguments, const Dictionary &p_context) {
+	Dictionary error;
+	if (!_has_only(p_arguments, PackedStringArray{ "jobId", "debuggerSession", "runtimeGeneration", "timeoutMs" }, error)) {
+		return error;
+	}
+	String session_id;
+	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->get_performance_status(p_arguments, session_id) : error;
+}
+
+Dictionary MCPRuntimeProvider::_stop_performance(const Dictionary &p_arguments, const Dictionary &p_context) {
+	Dictionary error;
+	if (!_has_only(p_arguments, PackedStringArray{ "jobId", "debuggerSession", "runtimeGeneration", "timeoutMs" }, error)) {
+		return error;
+	}
+	String session_id;
+	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->stop_performance(p_arguments, session_id) : error;
 }
 
 Dictionary MCPRuntimeProvider::_get_properties(const Dictionary &p_arguments, const Dictionary &) {

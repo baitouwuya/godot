@@ -177,6 +177,90 @@ Dictionary _screenshot_schema() {
 	return _object_schema(properties);
 }
 
+void _add_target_action_session_properties(Dictionary &r_properties) {
+	_add_session_properties(r_properties, true, false);
+	Dictionary timeout = _property_schema("integer", "Maximum time to resolve selectors in the running project.");
+	timeout["minimum"] = 50;
+	timeout["maximum"] = 1500;
+	timeout["default"] = 500;
+	r_properties["timeoutMs"] = timeout;
+}
+
+Dictionary _target_button_schema() {
+	Dictionary button = _property_schema("string", "Mouse button used by the target action.");
+	button["enum"] = PackedStringArray{ "left", "right", "middle" };
+	button["default"] = "left";
+	return button;
+}
+
+Dictionary _click_target_schema(bool p_double_click) {
+	Dictionary properties;
+	_add_target_action_session_properties(properties);
+	properties["selector"] = _selector_schema();
+	properties["button"] = _target_button_schema();
+	Dictionary press_frames = _property_schema("integer", "Rendered frames between mouse press and release.");
+	press_frames["minimum"] = 1;
+	press_frames["maximum"] = 10;
+	press_frames["default"] = 1;
+	properties["pressFrames"] = press_frames;
+	if (p_double_click) {
+		Dictionary gap_frames = _property_schema("integer", "Rendered frames between the two clicks.");
+		gap_frames["minimum"] = 1;
+		gap_frames["maximum"] = 10;
+		gap_frames["default"] = 2;
+		properties["gapFrames"] = gap_frames;
+	}
+	return _object_schema(properties, PackedStringArray{ "selector", "runtimeGeneration" });
+}
+
+Dictionary _single_target_schema() {
+	Dictionary properties;
+	_add_target_action_session_properties(properties);
+	properties["selector"] = _selector_schema();
+	return _object_schema(properties, PackedStringArray{ "selector", "runtimeGeneration" });
+}
+
+Dictionary _drag_target_schema() {
+	Dictionary properties;
+	_add_target_action_session_properties(properties);
+	properties["fromSelector"] = _selector_schema();
+	properties["toSelector"] = _selector_schema();
+	properties["button"] = _target_button_schema();
+	Dictionary frames = _property_schema("integer", "Rendered frames used to interpolate the pointer path.");
+	frames["minimum"] = 1;
+	frames["maximum"] = 60;
+	frames["default"] = 20;
+	properties["frames"] = frames;
+	return _object_schema(properties, PackedStringArray{ "fromSelector", "toSelector", "runtimeGeneration" });
+}
+
+Dictionary _type_text_schema() {
+	Dictionary properties;
+	_add_target_action_session_properties(properties);
+	properties["selector"] = _selector_schema();
+	Dictionary text = _property_schema("string", "Unicode text injected after the target Control accepts focus.");
+	text["minLength"] = 1;
+	text["maxLength"] = 100;
+	properties["text"] = text;
+	return _object_schema(properties, PackedStringArray{ "selector", "text", "runtimeGeneration" });
+}
+
+Dictionary _scroll_view_schema() {
+	Dictionary properties;
+	_add_target_action_session_properties(properties);
+	properties["selector"] = _selector_schema();
+	Dictionary direction = _property_schema("string", "Vertical wheel direction.");
+	direction["enum"] = PackedStringArray{ "up", "down" };
+	direction["default"] = "down";
+	properties["direction"] = direction;
+	Dictionary steps = _property_schema("integer", "Number of bounded wheel steps.");
+	steps["minimum"] = 1;
+	steps["maximum"] = 20;
+	steps["default"] = 1;
+	properties["steps"] = steps;
+	return _object_schema(properties, PackedStringArray{ "selector", "runtimeGeneration" });
+}
+
 Dictionary _properties_schema() {
 	Dictionary properties;
 	_add_session_properties(properties, false, true);
@@ -341,6 +425,20 @@ Error MCPRuntimeProvider::register_tools(MCPToolRegistry *p_registry, String *r_
 				_runtime_query_schema(), callable_mp(this, &MCPRuntimeProvider::_get_interactables) },
 		{ "godot.runtime.get_node_snapshot", "Get one compact runtime node snapshot from an unambiguous selector.",
 				_runtime_snapshot_schema(), callable_mp(this, &MCPRuntimeProvider::_get_node_snapshot) },
+		{ "godot.runtime.click_target", "Resolve a runtime selector and enqueue one bounded mouse click at the target.",
+				_click_target_schema(false), callable_mp(this, &MCPRuntimeProvider::_click_target) },
+		{ "godot.runtime.double_click_target", "Resolve a runtime selector and enqueue one bounded double-click at the target.",
+				_click_target_schema(true), callable_mp(this, &MCPRuntimeProvider::_double_click_target) },
+		{ "godot.runtime.hover_target", "Resolve a runtime selector and move the pointer to the target.",
+				_single_target_schema(), callable_mp(this, &MCPRuntimeProvider::_hover_target) },
+		{ "godot.runtime.focus_target", "Focus a runtime Control, or move the pointer to a non-Control target.",
+				_single_target_schema(), callable_mp(this, &MCPRuntimeProvider::_focus_target) },
+		{ "godot.runtime.drag_target_to_target", "Atomically resolve two selectors and enqueue a bounded pointer drag between them.",
+				_drag_target_schema(), callable_mp(this, &MCPRuntimeProvider::_drag_target_to_target) },
+		{ "godot.runtime.type_text", "Focus a runtime Control and enqueue bounded Unicode key input.",
+				_type_text_schema(), callable_mp(this, &MCPRuntimeProvider::_type_text) },
+		{ "godot.runtime.scroll_view", "Resolve a runtime selector and inject bounded vertical wheel input at the target.",
+				_scroll_view_schema(), callable_mp(this, &MCPRuntimeProvider::_scroll_view) },
 		{ "godot.runtime.node.get_properties", "Get all inspectable runtime node properties, including script members and exports.",
 				_properties_schema(), callable_mp(this, &MCPRuntimeProvider::_get_properties) },
 		{ "godot.runtime.node.set_property", "Set and verify one runtime node property through Godot's remote inspector protocol.",
@@ -436,6 +534,72 @@ Dictionary MCPRuntimeProvider::_get_interactables(const Dictionary &p_arguments,
 Dictionary MCPRuntimeProvider::_get_node_snapshot(const Dictionary &p_arguments, const Dictionary &) {
 	Dictionary error;
 	return _has_only(p_arguments, PackedStringArray{ "selector", "debuggerSession", "timeoutMs" }, error) ? runtime_service->get_node_snapshot(p_arguments) : error;
+}
+
+Dictionary MCPRuntimeProvider::_click_target(const Dictionary &p_arguments, const Dictionary &p_context) {
+	Dictionary error;
+	if (!_has_only(p_arguments, PackedStringArray{ "selector", "button", "pressFrames", "debuggerSession", "runtimeGeneration", "timeoutMs" }, error)) {
+		return error;
+	}
+	String session_id;
+	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->click_target(p_arguments, session_id, false) : error;
+}
+
+Dictionary MCPRuntimeProvider::_double_click_target(const Dictionary &p_arguments, const Dictionary &p_context) {
+	Dictionary error;
+	const PackedStringArray allowed{ "selector", "button", "pressFrames", "gapFrames", "debuggerSession", "runtimeGeneration", "timeoutMs" };
+	if (!_has_only(p_arguments, allowed, error)) {
+		return error;
+	}
+	String session_id;
+	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->click_target(p_arguments, session_id, true) : error;
+}
+
+Dictionary MCPRuntimeProvider::_hover_target(const Dictionary &p_arguments, const Dictionary &p_context) {
+	Dictionary error;
+	if (!_has_only(p_arguments, PackedStringArray{ "selector", "debuggerSession", "runtimeGeneration", "timeoutMs" }, error)) {
+		return error;
+	}
+	String session_id;
+	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->hover_target(p_arguments, session_id) : error;
+}
+
+Dictionary MCPRuntimeProvider::_focus_target(const Dictionary &p_arguments, const Dictionary &p_context) {
+	Dictionary error;
+	if (!_has_only(p_arguments, PackedStringArray{ "selector", "debuggerSession", "runtimeGeneration", "timeoutMs" }, error)) {
+		return error;
+	}
+	String session_id;
+	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->focus_target(p_arguments, session_id) : error;
+}
+
+Dictionary MCPRuntimeProvider::_drag_target_to_target(const Dictionary &p_arguments, const Dictionary &p_context) {
+	Dictionary error;
+	const PackedStringArray allowed{ "fromSelector", "toSelector", "button", "frames", "debuggerSession", "runtimeGeneration", "timeoutMs" };
+	if (!_has_only(p_arguments, allowed, error)) {
+		return error;
+	}
+	String session_id;
+	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->drag_target_to_target(p_arguments, session_id) : error;
+}
+
+Dictionary MCPRuntimeProvider::_type_text(const Dictionary &p_arguments, const Dictionary &p_context) {
+	Dictionary error;
+	if (!_has_only(p_arguments, PackedStringArray{ "selector", "text", "debuggerSession", "runtimeGeneration", "timeoutMs" }, error)) {
+		return error;
+	}
+	String session_id;
+	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->type_text(p_arguments, session_id) : error;
+}
+
+Dictionary MCPRuntimeProvider::_scroll_view(const Dictionary &p_arguments, const Dictionary &p_context) {
+	Dictionary error;
+	const PackedStringArray allowed{ "selector", "direction", "steps", "debuggerSession", "runtimeGeneration", "timeoutMs" };
+	if (!_has_only(p_arguments, allowed, error)) {
+		return error;
+	}
+	String session_id;
+	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->scroll_view(p_arguments, session_id) : error;
 }
 
 Dictionary MCPRuntimeProvider::_get_properties(const Dictionary &p_arguments, const Dictionary &) {

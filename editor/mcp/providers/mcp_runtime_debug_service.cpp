@@ -35,6 +35,7 @@
 #include "mcp_runtime_input.h"
 #include "mcp_runtime_input_sequence.h"
 #include "mcp_runtime_observation_debugger_plugin.h"
+#include "mcp_runtime_target_action.h"
 #include "mcp_tool_utils.h"
 #include "mcp_variant_codec.h"
 
@@ -193,6 +194,53 @@ const PropertyInfo *_find_property(EditorDebuggerRemoteObjects *p_remote_object,
 		}
 	}
 	return nullptr;
+}
+
+bool _is_error_result(const Dictionary &p_result) {
+	return bool(p_result.get("isError", false));
+}
+
+bool _read_bounded_integer(const Dictionary &p_arguments, const StringName &p_name, int p_default, int p_minimum,
+		int p_maximum, int &r_value, String &r_error) {
+	int64_t value = p_default;
+	if (p_arguments.has(p_name) && !MCPToolUtils::try_get_json_integer(p_arguments[p_name], p_minimum, p_maximum, value)) {
+		r_error = vformat("%s must be an integer between %d and %d.", String(p_name), p_minimum, p_maximum);
+		return false;
+	}
+	r_value = int(value);
+	return true;
+}
+
+bool _read_string_argument(const Dictionary &p_arguments, const StringName &p_name, const String &p_default,
+		String &r_value, String &r_error) {
+	const Variant value = p_arguments.get(p_name, p_default);
+	if (value.get_type() != Variant::STRING) {
+		r_error = String(p_name) + " must be a string.";
+		return false;
+	}
+	r_value = value;
+	return true;
+}
+
+bool _read_resolved_target(const Dictionary &p_resolution, int p_index, Dictionary &r_target, Dictionary &r_node,
+		Vector2 &r_position, bool &r_has_position) {
+	const Dictionary content = p_resolution.get("structuredContent", Dictionary());
+	const Variant targets_value = content.get("targets", Variant());
+	if (targets_value.get_type() != Variant::ARRAY) {
+		return false;
+	}
+	const Array targets = targets_value;
+	if (p_index < 0 || p_index >= targets.size() || targets[p_index].get_type() != Variant::DICTIONARY) {
+		return false;
+	}
+	r_target = targets[p_index];
+	const Variant node_value = r_target.get("node", Variant());
+	if (node_value.get_type() != Variant::DICTIONARY) {
+		return false;
+	}
+	r_node = node_value;
+	r_has_position = MCPRuntimeTargetAction::parse_position(r_target.get("position", Variant()), r_position);
+	return true;
 }
 
 } // namespace
@@ -446,7 +494,8 @@ Dictionary MCPRuntimeDebugService::get_tree(const Dictionary &p_arguments) const
 	return MCPToolUtils::make_success_result(result);
 }
 
-Dictionary MCPRuntimeDebugService::_request_observation(const Dictionary &p_arguments, const String &p_operation, const Dictionary &p_payload) const {
+Dictionary MCPRuntimeDebugService::_request_observation(const Dictionary &p_arguments, const String &p_operation, const Dictionary &p_payload,
+		bool p_require_generation) const {
 	int timeout_msec = DEFAULT_OBSERVATION_TIMEOUT_MSEC;
 	if (!_observation_timeout_from_arguments(p_arguments, timeout_msec)) {
 		return _error("INVALID_ARGUMENTS", vformat("timeoutMs must be an integer between 50 and %d for runtime observations.", MAX_OBSERVATION_TIMEOUT_MSEC));
@@ -454,7 +503,7 @@ Dictionary MCPRuntimeDebugService::_request_observation(const Dictionary &p_argu
 	ScriptEditorDebugger *debugger = nullptr;
 	int debugger_session = -1;
 	uint64_t generation = 0;
-	const Dictionary session_error = _resolve_session(p_arguments, false, debugger, debugger_session, generation);
+	const Dictionary session_error = _resolve_session(p_arguments, p_require_generation, debugger, debugger_session, generation);
 	if (!session_error.is_empty()) {
 		return session_error;
 	}
@@ -472,6 +521,10 @@ Dictionary MCPRuntimeDebugService::_request_observation(const Dictionary &p_argu
 	while (debugger->is_session_active() && OS::get_singleton()->get_ticks_usec() < deadline) {
 		debugger->poll_peer_messages(2000);
 		if (observation_plugin->take_response(debugger_session, request_id, response)) {
+			uint64_t current_generation = 0;
+			if (!debug_capture->get_runtime_generation(debugger_session, current_generation) || current_generation != generation) {
+				return _error("STALE_RUNTIME", "The running project restarted while resolving runtime targets.");
+			}
 			if (!response.ok) {
 				return MCPToolUtils::make_error_result(response.code.is_empty() ? "RUNTIME_OBSERVATION_FAILED" : response.code,
 						response.message.is_empty() ? "Runtime observation failed." : response.message, response.data);
@@ -531,6 +584,276 @@ Dictionary MCPRuntimeDebugService::get_node_snapshot(const Dictionary &p_argumen
 	Dictionary payload;
 	payload["selector"] = p_arguments.get("selector", Dictionary());
 	return _request_observation(p_arguments, "get_node_snapshot", payload);
+}
+
+Dictionary MCPRuntimeDebugService::_resolve_action_targets(const Dictionary &p_arguments, const String &p_kind, const Array &p_selectors) const {
+	Dictionary payload;
+	payload["kind"] = p_kind;
+	payload["selectors"] = p_selectors;
+	return _request_observation(p_arguments, "resolve_action_targets", payload, true);
+}
+
+Dictionary MCPRuntimeDebugService::_dispatch_action_events(const Dictionary &p_arguments, const String &p_mcp_session_id,
+		const Array &p_events, const Dictionary &p_metadata) {
+	if (p_events.is_empty() || p_events.size() > 128) {
+		return _error("INVALID_TARGET_ACTION", "The target action generated an invalid number of input events.");
+	}
+	ScriptEditorDebugger *debugger = nullptr;
+	int debugger_session = -1;
+	uint64_t generation = 0;
+	const Dictionary session_error = _resolve_session(p_arguments, true, debugger, debugger_session, generation);
+	if (!session_error.is_empty()) {
+		return session_error;
+	}
+	int timeout_msec = DEFAULT_OBSERVATION_TIMEOUT_MSEC;
+	if (!_observation_timeout_from_arguments(p_arguments, timeout_msec)) {
+		return _error("INVALID_ARGUMENTS", "timeoutMs is outside the target action range.");
+	}
+	Vector<MCPRuntimeInput::EncodedEvent> encoded_events;
+	for (int i = 0; i < p_events.size(); i++) {
+		if (p_events[i].get_type() != Variant::DICTIONARY) {
+			return _error("INVALID_TARGET_ACTION", vformat("Generated input event %d is invalid.", i));
+		}
+		MCPRuntimeInput::EncodedEvent encoded;
+		String input_error;
+		if (MCPRuntimeInput::encode(p_events[i], encoded, &input_error, true) != OK) {
+			return _error("INVALID_TARGET_ACTION", input_error);
+		}
+		encoded_events.push_back(encoded);
+	}
+	int dispatched = 0;
+	String dispatch_error;
+	if (input_scheduler.dispatch_immediate(p_mcp_session_id, debugger, debugger_session, generation,
+				encoded_events, dispatched, dispatch_error, timeout_msec) != OK) {
+		return _error("RUNTIME_INPUT_FAILED", dispatch_error);
+	}
+	Dictionary result = _make_session_identity(debugger_session, generation);
+	result.merge(p_metadata, true);
+	result["dispatched"] = true;
+	result["eventCount"] = dispatched;
+	return MCPToolUtils::make_success_result(result);
+}
+
+Dictionary MCPRuntimeDebugService::_start_action_sequence(const Dictionary &p_arguments, const String &p_mcp_session_id,
+		const Array &p_steps, const Dictionary &p_metadata) {
+	Vector<MCPRuntimeInputSequence::Step> steps;
+	String compile_error;
+	if (MCPRuntimeInputSequence::compile(p_steps, steps, &compile_error) != OK) {
+		return _error("INVALID_TARGET_ACTION", compile_error);
+	}
+	ScriptEditorDebugger *debugger = nullptr;
+	int debugger_session = -1;
+	uint64_t generation = 0;
+	const Dictionary session_error = _resolve_session(p_arguments, true, debugger, debugger_session, generation);
+	if (!session_error.is_empty()) {
+		return session_error;
+	}
+	int timeout_msec = DEFAULT_OBSERVATION_TIMEOUT_MSEC;
+	if (!_observation_timeout_from_arguments(p_arguments, timeout_msec)) {
+		return _error("INVALID_ARGUMENTS", "timeoutMs is outside the target action range.");
+	}
+	Dictionary result;
+	String scheduler_error;
+	const Error error = input_scheduler.start_sequence(p_mcp_session_id, debugger_session, generation, steps, result,
+			scheduler_error, timeout_msec);
+	if (error != OK) {
+		return _error(error == ERR_BUSY ? "INPUT_SEQUENCE_BUSY" : "INPUT_SEQUENCE_FAILED", scheduler_error);
+	}
+	result.merge(p_metadata, true);
+	result["asynchronous"] = true;
+	return MCPToolUtils::make_success_result(result);
+}
+
+Dictionary MCPRuntimeDebugService::click_target(const Dictionary &p_arguments, const String &p_mcp_session_id, bool p_double_click) {
+	const Dictionary resolution = _resolve_action_targets(p_arguments, "pointer", Array{ p_arguments.get("selector", Dictionary()) });
+	if (_is_error_result(resolution)) {
+		return resolution;
+	}
+	Dictionary target;
+	Dictionary node;
+	Vector2 position;
+	bool has_position = false;
+	if (!_read_resolved_target(resolution, 0, target, node, position, has_position) || !has_position) {
+		return _error("RUNTIME_TARGET_DATA_INVALID", "The running project returned invalid target coordinates.");
+	}
+	String button_name;
+	String argument_error;
+	int press_frames = 1;
+	int gap_frames = 2;
+	MouseButton button = MouseButton::LEFT;
+	if (!_read_string_argument(p_arguments, "button", "left", button_name, argument_error) ||
+			!MCPRuntimeTargetAction::parse_button(button_name, button) ||
+			!_read_bounded_integer(p_arguments, "pressFrames", 1, 1, MCPRuntimeTargetAction::MAX_CLICK_FRAMES, press_frames, argument_error) ||
+			(p_double_click && !_read_bounded_integer(p_arguments, "gapFrames", 2, 1, MCPRuntimeTargetAction::MAX_CLICK_FRAMES, gap_frames, argument_error))) {
+		return _error("INVALID_ARGUMENTS", argument_error.is_empty() ? "button must be left, right, or middle." : argument_error);
+	}
+	Array steps;
+	String action_error;
+	if (MCPRuntimeTargetAction::build_click(position, button, press_frames, p_double_click, gap_frames, steps, &action_error) != OK) {
+		return _error("INVALID_TARGET_ACTION", action_error);
+	}
+	Dictionary metadata;
+	metadata["action"] = p_double_click ? "double_click_target" : "click_target";
+	metadata["resolvedTarget"] = node;
+	metadata["position"] = Array{ position.x, position.y };
+	metadata["button"] = button_name;
+	return _start_action_sequence(p_arguments, p_mcp_session_id, steps, metadata);
+}
+
+Dictionary MCPRuntimeDebugService::hover_target(const Dictionary &p_arguments, const String &p_mcp_session_id) {
+	const Dictionary resolution = _resolve_action_targets(p_arguments, "pointer", Array{ p_arguments.get("selector", Dictionary()) });
+	if (_is_error_result(resolution)) {
+		return resolution;
+	}
+	Dictionary target;
+	Dictionary node;
+	Vector2 position;
+	bool has_position = false;
+	if (!_read_resolved_target(resolution, 0, target, node, position, has_position) || !has_position) {
+		return _error("RUNTIME_TARGET_DATA_INVALID", "The running project returned invalid target coordinates.");
+	}
+	Array events;
+	MCPRuntimeTargetAction::build_hover(position, events);
+	Dictionary metadata;
+	metadata["action"] = "hover_target";
+	metadata["resolvedTarget"] = node;
+	metadata["position"] = Array{ position.x, position.y };
+	return _dispatch_action_events(p_arguments, p_mcp_session_id, events, metadata);
+}
+
+Dictionary MCPRuntimeDebugService::focus_target(const Dictionary &p_arguments, const String &p_mcp_session_id) {
+	const Dictionary resolution = _resolve_action_targets(p_arguments, "focus", Array{ p_arguments.get("selector", Dictionary()) });
+	if (_is_error_result(resolution)) {
+		return resolution;
+	}
+	Dictionary target;
+	Dictionary node;
+	Vector2 position;
+	bool has_position = false;
+	if (!_read_resolved_target(resolution, 0, target, node, position, has_position)) {
+		return _error("RUNTIME_TARGET_DATA_INVALID", "The running project returned invalid focus target data.");
+	}
+	Dictionary metadata;
+	metadata["action"] = "focus_target";
+	metadata["resolvedTarget"] = node;
+	metadata["focused"] = bool(target.get("focused", false));
+	if (bool(metadata["focused"])) {
+		const Dictionary content = resolution.get("structuredContent", Dictionary());
+		metadata["debuggerSession"] = content.get("debuggerSession", Variant());
+		metadata["runtimeGeneration"] = content.get("runtimeGeneration", Variant());
+		return MCPToolUtils::make_success_result(metadata);
+	}
+	if (!has_position) {
+		return _error("RUNTIME_TARGET_DATA_INVALID", "The non-Control focus target has no pointer position.");
+	}
+	Array events;
+	MCPRuntimeTargetAction::build_hover(position, events);
+	metadata["position"] = Array{ position.x, position.y };
+	return _dispatch_action_events(p_arguments, p_mcp_session_id, events, metadata);
+}
+
+Dictionary MCPRuntimeDebugService::drag_target_to_target(const Dictionary &p_arguments, const String &p_mcp_session_id) {
+	const Array selectors{ p_arguments.get("fromSelector", Dictionary()), p_arguments.get("toSelector", Dictionary()) };
+	const Dictionary resolution = _resolve_action_targets(p_arguments, "pointer", selectors);
+	if (_is_error_result(resolution)) {
+		return resolution;
+	}
+	Dictionary from_target;
+	Dictionary from_node;
+	Dictionary to_target;
+	Dictionary to_node;
+	Vector2 from;
+	Vector2 to;
+	bool has_from = false;
+	bool has_to = false;
+	if (!_read_resolved_target(resolution, 0, from_target, from_node, from, has_from) || !has_from ||
+			!_read_resolved_target(resolution, 1, to_target, to_node, to, has_to) || !has_to) {
+		return _error("RUNTIME_TARGET_DATA_INVALID", "The running project returned invalid drag target coordinates.");
+	}
+	String button_name;
+	String argument_error;
+	int frames = 20;
+	MouseButton button = MouseButton::LEFT;
+	if (!_read_string_argument(p_arguments, "button", "left", button_name, argument_error) ||
+			!MCPRuntimeTargetAction::parse_button(button_name, button) ||
+			!_read_bounded_integer(p_arguments, "frames", 20, 1, MCPRuntimeTargetAction::MAX_DRAG_FRAMES, frames, argument_error)) {
+		return _error("INVALID_ARGUMENTS", argument_error.is_empty() ? "button must be left, right, or middle." : argument_error);
+	}
+	Array steps;
+	String action_error;
+	if (MCPRuntimeTargetAction::build_drag(from, to, button, frames, steps, &action_error) != OK) {
+		return _error("INVALID_TARGET_ACTION", action_error);
+	}
+	Dictionary metadata;
+	metadata["action"] = "drag_target_to_target";
+	metadata["resolvedFromTarget"] = from_node;
+	metadata["resolvedToTarget"] = to_node;
+	metadata["from"] = Array{ from.x, from.y };
+	metadata["to"] = Array{ to.x, to.y };
+	metadata["frames"] = frames;
+	metadata["button"] = button_name;
+	return _start_action_sequence(p_arguments, p_mcp_session_id, steps, metadata);
+}
+
+Dictionary MCPRuntimeDebugService::type_text(const Dictionary &p_arguments, const String &p_mcp_session_id) {
+	const Dictionary resolution = _resolve_action_targets(p_arguments, "focus_text", Array{ p_arguments.get("selector", Dictionary()) });
+	if (_is_error_result(resolution)) {
+		return resolution;
+	}
+	Dictionary target;
+	Dictionary node;
+	Vector2 position;
+	bool has_position = false;
+	if (!_read_resolved_target(resolution, 0, target, node, position, has_position) || !bool(target.get("focused", false))) {
+		return _error("RUNTIME_TARGET_DATA_INVALID", "The running project did not focus the text target.");
+	}
+	const Variant text_value = p_arguments.get("text", Variant());
+	if (text_value.get_type() != Variant::STRING) {
+		return _error("INVALID_ARGUMENTS", "text must be a string.");
+	}
+	Array steps;
+	String action_error;
+	if (MCPRuntimeTargetAction::build_text(text_value, steps, &action_error) != OK) {
+		return _error("INVALID_ARGUMENTS", action_error);
+	}
+	Dictionary metadata;
+	metadata["action"] = "type_text";
+	metadata["resolvedTarget"] = node;
+	metadata["textLength"] = String(text_value).length();
+	return _start_action_sequence(p_arguments, p_mcp_session_id, steps, metadata);
+}
+
+Dictionary MCPRuntimeDebugService::scroll_view(const Dictionary &p_arguments, const String &p_mcp_session_id) {
+	const Dictionary resolution = _resolve_action_targets(p_arguments, "pointer", Array{ p_arguments.get("selector", Dictionary()) });
+	if (_is_error_result(resolution)) {
+		return resolution;
+	}
+	Dictionary target;
+	Dictionary node;
+	Vector2 position;
+	bool has_position = false;
+	if (!_read_resolved_target(resolution, 0, target, node, position, has_position) || !has_position) {
+		return _error("RUNTIME_TARGET_DATA_INVALID", "The running project returned invalid scroll target coordinates.");
+	}
+	String direction;
+	String argument_error;
+	int steps = 1;
+	if (!_read_string_argument(p_arguments, "direction", "down", direction, argument_error) ||
+			!_read_bounded_integer(p_arguments, "steps", 1, 1, MCPRuntimeTargetAction::MAX_SCROLL_STEPS, steps, argument_error)) {
+		return _error("INVALID_ARGUMENTS", argument_error);
+	}
+	Array events;
+	String action_error;
+	if (MCPRuntimeTargetAction::build_scroll(position, direction, steps, events, &action_error) != OK) {
+		return _error("INVALID_ARGUMENTS", action_error);
+	}
+	Dictionary metadata;
+	metadata["action"] = "scroll_view";
+	metadata["resolvedTarget"] = node;
+	metadata["position"] = Array{ position.x, position.y };
+	metadata["direction"] = direction;
+	metadata["steps"] = steps;
+	return _dispatch_action_events(p_arguments, p_mcp_session_id, events, metadata);
 }
 
 Dictionary MCPRuntimeDebugService::_refresh_object(ScriptEditorDebugger *p_debugger, ObjectID p_object_id, int p_timeout_msec) const {

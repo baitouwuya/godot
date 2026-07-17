@@ -36,6 +36,7 @@
 #include "editor/mcp/providers/mcp_runtime_observation_debugger_plugin.h"
 #include "editor/mcp/providers/mcp_runtime_observation_response_store.h"
 #include "editor/mcp/providers/mcp_runtime_provider.h"
+#include "editor/mcp/providers/mcp_runtime_target_action.h"
 #include "scene/debugger/mcp_runtime_input_event.h"
 #include "scene/debugger/mcp_runtime_observation.h"
 #include "tests/test_macros.h"
@@ -69,7 +70,7 @@ TEST_CASE("[MCP][Provider] Runtime tools register in a stable strict surface") {
 	CHECK(provider.register_tools(&registry) == ERR_ALREADY_IN_USE);
 
 	const PackedStringArray names = registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_MCP);
-	REQUIRE(names.size() == 19);
+	REQUIRE(names.size() == 26);
 	CHECK(names[0] == "godot.runtime.get_state");
 	CHECK(names[1] == "godot.runtime.play");
 	CHECK(names[2] == "godot.runtime.stop");
@@ -82,17 +83,24 @@ TEST_CASE("[MCP][Provider] Runtime tools register in a stable strict surface") {
 	CHECK(names[9] == "godot.runtime.query_nodes");
 	CHECK(names[10] == "godot.runtime.get_interactables");
 	CHECK(names[11] == "godot.runtime.get_node_snapshot");
-	CHECK(names[12] == "godot.runtime.node.get_properties");
-	CHECK(names[13] == "godot.runtime.node.set_property");
-	CHECK(names[14] == "godot.runtime.input.send");
-	CHECK(names[15] == "godot.runtime.input.sequence");
-	CHECK(names[16] == "godot.runtime.input.sequence_status");
-	CHECK(names[17] == "godot.runtime.input.sequence_cancel");
-	CHECK(names[18] == "godot.runtime.input.release_all");
+	CHECK(names[12] == "godot.runtime.click_target");
+	CHECK(names[13] == "godot.runtime.double_click_target");
+	CHECK(names[14] == "godot.runtime.hover_target");
+	CHECK(names[15] == "godot.runtime.focus_target");
+	CHECK(names[16] == "godot.runtime.drag_target_to_target");
+	CHECK(names[17] == "godot.runtime.type_text");
+	CHECK(names[18] == "godot.runtime.scroll_view");
+	CHECK(names[19] == "godot.runtime.node.get_properties");
+	CHECK(names[20] == "godot.runtime.node.set_property");
+	CHECK(names[21] == "godot.runtime.input.send");
+	CHECK(names[22] == "godot.runtime.input.sequence");
+	CHECK(names[23] == "godot.runtime.input.sequence_status");
+	CHECK(names[24] == "godot.runtime.input.sequence_cancel");
+	CHECK(names[25] == "godot.runtime.input.release_all");
 	CHECK(registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_CLI).is_empty());
 
 	const Array definitions = registry.get_tool_definitions(MCPToolRegistry::TOOL_SURFACE_MCP);
-	REQUIRE(definitions.size() == 19);
+	REQUIRE(definitions.size() == 26);
 	for (const Variant &definition_value : definitions) {
 		const Dictionary schema = Dictionary(definition_value).get("inputSchema", Dictionary());
 		CHECK(schema.get("type", String()) == "object");
@@ -153,6 +161,58 @@ TEST_CASE("[MCP][Provider] Runtime observation responses are correlated by debug
 	CHECK(response.ok);
 	CHECK(response.operation == "query_nodes");
 	CHECK(int(response.data["count"]) == 1);
+}
+
+TEST_CASE("[MCP][Provider] Runtime target actions compose bounded existing input sequences") {
+	Array steps;
+	String error;
+	REQUIRE(MCPRuntimeTargetAction::build_click(Vector2(30, 40), MouseButton::LEFT, 1, true, 2, steps, &error) == OK);
+	CHECK(steps.size() == 8);
+	Vector<MCPRuntimeInputSequence::Step> compiled;
+	REQUIRE(MCPRuntimeInputSequence::compile(steps, compiled, &error) == OK);
+	CHECK(compiled.size() == 8);
+
+	REQUIRE(MCPRuntimeTargetAction::build_drag(Vector2(10, 20), Vector2(70, 80), MouseButton::LEFT,
+					MCPRuntimeTargetAction::MAX_DRAG_FRAMES, steps, &error) == OK);
+	CHECK(steps.size() == 2 * MCPRuntimeTargetAction::MAX_DRAG_FRAMES + 3);
+	REQUIRE(MCPRuntimeInputSequence::compile(steps, compiled, &error) == OK);
+	CHECK(compiled.size() == steps.size());
+
+	const String bounded_text = String("x").repeat(MCPRuntimeTargetAction::MAX_TEXT_LENGTH);
+	REQUIRE(MCPRuntimeTargetAction::build_text(bounded_text, steps, &error) == OK);
+	CHECK(steps.size() == MCPRuntimeTargetAction::MAX_TEXT_LENGTH * 2);
+	REQUIRE(MCPRuntimeInputSequence::compile(steps, compiled, &error) == OK);
+	CHECK(MCPRuntimeTargetAction::build_text(bounded_text + "x", steps, &error) == ERR_INVALID_PARAMETER);
+
+	Array events;
+	REQUIRE(MCPRuntimeTargetAction::build_scroll(Vector2(5, 6), "down",
+					MCPRuntimeTargetAction::MAX_SCROLL_STEPS, events, &error) == OK);
+	CHECK(events.size() == MCPRuntimeTargetAction::MAX_SCROLL_STEPS * 2 + 1);
+	CHECK(MCPRuntimeTargetAction::build_scroll(Vector2(), "sideways", 1, events, &error) == ERR_INVALID_PARAMETER);
+}
+
+TEST_CASE("[MCP][Provider] Runtime target actions require MCP ownership and expose no coordinate bypass") {
+	MCPRuntimeDebugService service(nullptr);
+	MCPRuntimeProvider provider(&service);
+	MCPToolRegistry registry;
+	REQUIRE(provider.register_tools(&registry) == OK);
+	Dictionary arguments;
+	arguments["selector"] = Dictionary{ { "name", "PlayButton" } };
+	arguments["runtimeGeneration"] = 1;
+	CHECK(_error_code(_call(registry, "godot.runtime.click_target", arguments)) == "MCP_SESSION_REQUIRED");
+
+	const Array definitions = registry.get_tool_definitions(MCPToolRegistry::TOOL_SURFACE_MCP);
+	for (const Variant &definition_value : definitions) {
+		const Dictionary definition = definition_value;
+		if (!String(definition.get("name", String())).ends_with("click_target")) {
+			continue;
+		}
+		const Dictionary schema = definition.get("inputSchema", Dictionary());
+		const Dictionary properties = schema.get("properties", Dictionary());
+		CHECK_FALSE(properties.has("x"));
+		CHECK_FALSE(properties.has("y"));
+		CHECK(properties.has("selector"));
+	}
 }
 
 TEST_CASE("[MCP][Provider] Runtime input uses Godot's debugger codec for key and mouse events") {

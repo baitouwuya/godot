@@ -52,6 +52,13 @@ class MCPRuntimeProvider : public Object {
 	Dictionary _query_nodes(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary _get_interactables(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary _get_node_snapshot(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary _click_target(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary _double_click_target(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary _hover_target(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary _focus_target(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary _drag_target_to_target(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary _type_text(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary _scroll_view(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary _get_properties(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary _set_property(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary _send_input(const Dictionary &p_arguments, const Dictionary &p_context);

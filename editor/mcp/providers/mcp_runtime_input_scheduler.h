@@ -76,9 +76,11 @@ public:
 	~MCPRuntimeInputScheduler();
 
 	Error dispatch_immediate(const String &p_mcp_session_id, ScriptEditorDebugger *p_debugger, int p_debugger_session,
-			uint64_t p_runtime_generation, const Vector<MCPRuntimeInput::EncodedEvent> &p_events, int &r_dispatched, String &r_error);
+			uint64_t p_runtime_generation, const Vector<MCPRuntimeInput::EncodedEvent> &p_events, int &r_dispatched,
+			String &r_error, int p_timeout_msec = RESPONSE_TIMEOUT_MSEC);
 	Error start_sequence(const String &p_mcp_session_id, int p_debugger_session, uint64_t p_runtime_generation,
-			const Vector<MCPRuntimeInputSequence::Step> &p_steps, Dictionary &r_result, String &r_error);
+			const Vector<MCPRuntimeInputSequence::Step> &p_steps, Dictionary &r_result, String &r_error,
+			int p_timeout_msec = RESPONSE_TIMEOUT_MSEC);
 	Error get_sequence(const String &p_mcp_session_id, const String &p_sequence_id, Dictionary &r_result, String &r_error);
 	Error cancel_sequence(const String &p_mcp_session_id, const String &p_sequence_id, int p_debugger_session,
 			uint64_t p_runtime_generation, Dictionary &r_result, String &r_error);

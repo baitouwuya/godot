@@ -143,11 +143,12 @@ Array MCPRuntimeInputScheduler::_serialize_steps(const Vector<MCPRuntimeInputSeq
 }
 
 Error MCPRuntimeInputScheduler::dispatch_immediate(const String &p_mcp_session_id, ScriptEditorDebugger *p_debugger, int p_debugger_session,
-		uint64_t p_runtime_generation, const Vector<MCPRuntimeInput::EncodedEvent> &p_events, int &r_dispatched, String &r_error) {
+		uint64_t p_runtime_generation, const Vector<MCPRuntimeInput::EncodedEvent> &p_events, int &r_dispatched,
+		String &r_error, int p_timeout_msec) {
 	r_dispatched = 0;
 	Dictionary data;
 	const Array arguments{ "direct:" + p_mcp_session_id, p_mcp_session_id, _serialize_events(p_events) };
-	const Error error = _request(p_debugger, "send", "send", arguments, data, r_error);
+	const Error error = _request(p_debugger, "send", "send", arguments, data, r_error, p_timeout_msec);
 	if (error == OK) {
 		r_dispatched = int(data.get("eventCount", 0));
 	}
@@ -155,7 +156,7 @@ Error MCPRuntimeInputScheduler::dispatch_immediate(const String &p_mcp_session_i
 }
 
 Error MCPRuntimeInputScheduler::start_sequence(const String &p_mcp_session_id, int p_debugger_session, uint64_t p_runtime_generation,
-		const Vector<MCPRuntimeInputSequence::Step> &p_steps, Dictionary &r_result, String &r_error) {
+		const Vector<MCPRuntimeInputSequence::Step> &p_steps, Dictionary &r_result, String &r_error, int p_timeout_msec) {
 	ScriptEditorDebugger *debugger = nullptr;
 	if (!_resolve_debugger(p_debugger_session, p_runtime_generation, debugger)) {
 		r_error = "The running project disconnected or restarted.";
@@ -164,7 +165,7 @@ Error MCPRuntimeInputScheduler::start_sequence(const String &p_mcp_session_id, i
 	const String sequence_id = "input-" + String::num_uint64(next_sequence_id++);
 	const Array arguments{ sequence_id, "sequence:" + sequence_id, p_mcp_session_id, _serialize_steps(p_steps) };
 	Dictionary data;
-	const Error error = _request(debugger, "sequence_start", "sequence_start", arguments, data, r_error);
+	const Error error = _request(debugger, "sequence_start", "sequence_start", arguments, data, r_error, p_timeout_msec);
 	if (error != OK) {
 		return error;
 	}

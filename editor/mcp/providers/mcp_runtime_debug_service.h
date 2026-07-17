@@ -50,7 +50,13 @@ class MCPRuntimeDebugService {
 	Dictionary _find_node(ScriptEditorDebugger *p_debugger, const String &p_path, ObjectID &r_object_id, Dictionary &r_node) const;
 	Dictionary _refresh_object(ScriptEditorDebugger *p_debugger, ObjectID p_object_id, int p_timeout_msec) const;
 	Dictionary _make_session_identity(int p_debugger_session, uint64_t p_runtime_generation) const;
-	Dictionary _request_observation(const Dictionary &p_arguments, const String &p_operation, const Dictionary &p_payload) const;
+	Dictionary _request_observation(const Dictionary &p_arguments, const String &p_operation, const Dictionary &p_payload,
+			bool p_require_generation = false) const;
+	Dictionary _dispatch_action_events(const Dictionary &p_arguments, const String &p_mcp_session_id, const Array &p_events,
+			const Dictionary &p_metadata);
+	Dictionary _start_action_sequence(const Dictionary &p_arguments, const String &p_mcp_session_id, const Array &p_steps,
+			const Dictionary &p_metadata);
+	Dictionary _resolve_action_targets(const Dictionary &p_arguments, const String &p_kind, const Array &p_selectors) const;
 
 public:
 	explicit MCPRuntimeDebugService(MCPDebugCapture *p_debug_capture);
@@ -67,6 +73,12 @@ public:
 	Dictionary query_nodes(const Dictionary &p_arguments) const;
 	Dictionary get_interactables(const Dictionary &p_arguments) const;
 	Dictionary get_node_snapshot(const Dictionary &p_arguments) const;
+	Dictionary click_target(const Dictionary &p_arguments, const String &p_mcp_session_id, bool p_double_click);
+	Dictionary hover_target(const Dictionary &p_arguments, const String &p_mcp_session_id);
+	Dictionary focus_target(const Dictionary &p_arguments, const String &p_mcp_session_id);
+	Dictionary drag_target_to_target(const Dictionary &p_arguments, const String &p_mcp_session_id);
+	Dictionary type_text(const Dictionary &p_arguments, const String &p_mcp_session_id);
+	Dictionary scroll_view(const Dictionary &p_arguments, const String &p_mcp_session_id);
 	Dictionary get_properties(const Dictionary &p_arguments) const;
 	Dictionary set_property(const Dictionary &p_arguments) const;
 	Dictionary send_input(const Dictionary &p_arguments, const String &p_mcp_session_id);

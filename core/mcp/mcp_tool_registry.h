@@ -69,7 +69,7 @@ public:
 		String message;
 	};
 
-	Error register_tool(const Dictionary &p_definition, const Callable &p_handler, uint32_t p_surfaces = TOOL_SURFACE_ALL, Object *p_owner = nullptr, String *r_error = nullptr);
+	Error register_tool(const Dictionary &p_definition, const Callable &p_handler, uint32_t p_surfaces = TOOL_SURFACE_MCP, Object *p_owner = nullptr, String *r_error = nullptr);
 	bool unregister_tool(const StringName &p_name);
 	int unregister_tools_for_owner(Object *p_owner);
 	int unregister_tools_for_owner(ObjectID p_owner_id);

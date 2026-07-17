@@ -65,15 +65,17 @@ TEST_CASE("[MCP][ToolRegistry] Registers in order, filters surfaces, and rejects
 	CHECK_EQ(registry.register_tool(make_definition("first"), handler, MCPToolRegistry::TOOL_SURFACE_MCP, provider), OK);
 	CHECK_EQ(registry.register_tool(make_definition("cli_only"), handler, MCPToolRegistry::TOOL_SURFACE_CLI, provider), OK);
 	CHECK_EQ(registry.register_tool(make_definition("second"), handler, MCPToolRegistry::TOOL_SURFACE_ALL, provider), OK);
+	CHECK_EQ(registry.register_tool(make_definition("default_mcp"), handler), OK);
 
 	String duplicate_error;
 	CHECK_EQ(registry.register_tool(make_definition("first"), handler, MCPToolRegistry::TOOL_SURFACE_MCP, provider, &duplicate_error), ERR_ALREADY_EXISTS);
 	CHECK(duplicate_error.contains("already registered"));
 
 	const Array mcp_definitions = registry.get_tool_definitions(MCPToolRegistry::TOOL_SURFACE_MCP);
-	REQUIRE_EQ(mcp_definitions.size(), 2);
+	REQUIRE_EQ(mcp_definitions.size(), 3);
 	CHECK_EQ(String(Dictionary(mcp_definitions[0]).get("name", String())), "first");
 	CHECK_EQ(String(Dictionary(mcp_definitions[1]).get("name", String())), "second");
+	CHECK_EQ(String(Dictionary(mcp_definitions[2]).get("name", String())), "default_mcp");
 	CHECK(Dictionary(mcp_definitions[0]).has("inputSchema"));
 	Dictionary exposed_definition = mcp_definitions[0];
 	exposed_definition["description"] = "mutated";
@@ -85,7 +87,7 @@ TEST_CASE("[MCP][ToolRegistry] Registers in order, filters surfaces, and rejects
 	CHECK_EQ(cli_names[0], "cli_only");
 	CHECK_EQ(cli_names[1], "second");
 
-	CHECK_EQ(registry.unregister_tools_for_owner(provider), 3);
+	CHECK_EQ(registry.unregister_tools_for_owner(provider), 4);
 	CHECK(registry.get_tool_names().is_empty());
 	CHECK(registry.get_tool_definitions().is_empty());
 	memdelete(provider);

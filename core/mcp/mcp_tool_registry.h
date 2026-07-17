@@ -47,6 +47,8 @@ struct MCPToolCallContext {
 	Dictionary to_dictionary() const;
 };
 
+class MCPProtocol;
+
 class MCPToolRegistry {
 public:
 	enum ToolSurface : uint32_t {
@@ -80,6 +82,8 @@ public:
 	CallResult call_tool(const StringName &p_name, const Dictionary &p_arguments, const MCPToolCallContext &p_context) const;
 
 private:
+	friend class MCPProtocol;
+
 	struct ToolEntry {
 		Dictionary definition;
 		Callable handler;
@@ -89,8 +93,11 @@ private:
 
 	HashMap<StringName, ToolEntry> tools;
 	Vector<StringName> registration_order;
+	mutable HashMap<uint32_t, Array> definition_cache;
 
 	bool _matches_surface(const ToolEntry &p_entry, uint32_t p_surface) const;
+	void _invalidate_definition_cache();
+	const Array &_get_cached_tool_definitions(uint32_t p_surface) const;
 };
 
 VARIANT_ENUM_CAST(MCPToolRegistry::ToolSurface);

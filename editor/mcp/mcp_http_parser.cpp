@@ -31,8 +31,8 @@
 
 namespace {
 
-int find_header_end(const Vector<uint8_t> &p_buffer) {
-	for (int i = 0; i + 3 < p_buffer.size(); i++) {
+int find_header_end(const Vector<uint8_t> &p_buffer, int p_scan_offset) {
+	for (int i = MAX(0, p_scan_offset); i + 3 < p_buffer.size(); i++) {
 		if (p_buffer[i] == '\r' && p_buffer[i + 1] == '\n' && p_buffer[i + 2] == '\r' && p_buffer[i + 3] == '\n') {
 			return i;
 		}
@@ -90,6 +90,11 @@ MCPHTTPParser::ParseResult parse_content_length(const String &p_value, int64_t p
 } // namespace
 
 MCPHTTPParser::ParseResult MCPHTTPParser::parse(const Vector<uint8_t> &p_buffer, int64_t p_max_header_bytes, int64_t p_max_body_bytes, Request &r_request, String &r_error) {
+	State state;
+	return parse_incremental(p_buffer, p_max_header_bytes, p_max_body_bytes, state, r_request, r_error);
+}
+
+MCPHTTPParser::ParseResult MCPHTTPParser::parse_incremental(const Vector<uint8_t> &p_buffer, int64_t p_max_header_bytes, int64_t p_max_body_bytes, State &r_state, Request &r_request, String &r_error) {
 	r_request = Request();
 	r_error = String();
 
@@ -98,89 +103,96 @@ MCPHTTPParser::ParseResult MCPHTTPParser::parse(const Vector<uint8_t> &p_buffer,
 		return PARSE_BAD_REQUEST;
 	}
 
-	const int header_end = find_header_end(p_buffer);
-	if (header_end < 0) {
-		return p_buffer.size() > p_max_header_bytes ? PARSE_HEADER_TOO_LARGE : PARSE_INCOMPLETE;
-	}
-	const int64_t body_start = (int64_t)header_end + 4;
-	if (body_start > p_max_header_bytes) {
-		return PARSE_HEADER_TOO_LARGE;
-	}
-
-	for (int i = 0; i < header_end; i++) {
-		if (p_buffer[i] > 0x7f) {
-			r_error = "HTTP request headers must be ASCII.";
-			return PARSE_BAD_REQUEST;
-		}
-	}
-
-	const String header_text = String::utf8((const char *)p_buffer.ptr(), header_end);
-	const PackedStringArray lines = header_text.split("\r\n");
-	if (lines.is_empty()) {
-		r_error = "HTTP request line is missing.";
-		return PARSE_BAD_REQUEST;
-	}
-
-	const PackedStringArray request_line = lines[0].split(" ", false);
-	if (request_line.size() != 3 || !is_http_token(request_line[0]) || request_line[1].is_empty() || (request_line[2] != "HTTP/1.1" && request_line[2] != "HTTP/1.0")) {
-		r_error = "Invalid HTTP request line.";
-		return PARSE_BAD_REQUEST;
-	}
-
-	r_request.method = request_line[0].to_upper();
-	r_request.target = request_line[1];
-	r_request.version = request_line[2];
-	if (!r_request.target.begins_with("/")) {
-		r_error = "HTTP request target must use origin-form.";
-		return PARSE_BAD_REQUEST;
-	}
-	const int query_position = r_request.target.find("?");
-	r_request.path = query_position < 0 ? r_request.target : r_request.target.substr(0, query_position);
-
-	for (int i = 1; i < lines.size(); i++) {
-		const int separator = lines[i].find(":");
-		if (separator <= 0) {
-			r_error = "Malformed HTTP header.";
-			return PARSE_BAD_REQUEST;
-		}
-		const String name = lines[i].substr(0, separator).to_lower();
-		const String value = lines[i].substr(separator + 1).strip_edges();
-		if (!is_http_token(name)) {
-			r_error = "Invalid HTTP header name.";
-			return PARSE_BAD_REQUEST;
-		}
-		if (!is_valid_header_value(value)) {
-			r_error = "Invalid HTTP header value.";
-			return PARSE_BAD_REQUEST;
-		}
-		if (r_request.headers.has(name)) {
-			r_error = name == "content-length" ? "Invalid or duplicate Content-Length header." : "Duplicate HTTP header: " + name;
-			return PARSE_BAD_REQUEST;
-		}
-		if (name == "transfer-encoding") {
-			r_error = "Transfer-Encoding is not supported.";
-			return PARSE_BAD_REQUEST;
-		}
-		if (name == "content-length") {
-			r_request.has_content_length = true;
-			const ParseResult length_result = parse_content_length(value, p_max_body_bytes, r_request.content_length, r_error);
-			if (length_result != PARSE_READY) {
-				return length_result;
+	if (!r_state.headers_parsed) {
+		if (r_state.header_end < 0) {
+			r_state.header_end = find_header_end(p_buffer, r_state.header_scan_offset);
+			if (r_state.header_end < 0) {
+				r_state.header_scan_offset = MAX(0, p_buffer.size() - 3);
+				return p_buffer.size() > p_max_header_bytes ? PARSE_HEADER_TOO_LARGE : PARSE_INCOMPLETE;
 			}
 		}
-		r_request.headers[name] = value;
+		r_state.body_start = (int64_t)r_state.header_end + 4;
+		if (r_state.body_start > p_max_header_bytes) {
+			return PARSE_HEADER_TOO_LARGE;
+		}
+
+		for (int i = 0; i < r_state.header_end; i++) {
+			if (p_buffer[i] > 0x7f) {
+				r_error = "HTTP request headers must be ASCII.";
+				return PARSE_BAD_REQUEST;
+			}
+		}
+
+		const String header_text = String::utf8((const char *)p_buffer.ptr(), r_state.header_end);
+		const PackedStringArray lines = header_text.split("\r\n");
+		if (lines.is_empty()) {
+			r_error = "HTTP request line is missing.";
+			return PARSE_BAD_REQUEST;
+		}
+
+		const PackedStringArray request_line = lines[0].split(" ", false);
+		if (request_line.size() != 3 || !is_http_token(request_line[0]) || request_line[1].is_empty() || (request_line[2] != "HTTP/1.1" && request_line[2] != "HTTP/1.0")) {
+			r_error = "Invalid HTTP request line.";
+			return PARSE_BAD_REQUEST;
+		}
+
+		r_state.request.method = request_line[0].to_upper();
+		r_state.request.target = request_line[1];
+		r_state.request.version = request_line[2];
+		if (!r_state.request.target.begins_with("/")) {
+			r_error = "HTTP request target must use origin-form.";
+			return PARSE_BAD_REQUEST;
+		}
+		const int query_position = r_state.request.target.find("?");
+		r_state.request.path = query_position < 0 ? r_state.request.target : r_state.request.target.substr(0, query_position);
+
+		for (int i = 1; i < lines.size(); i++) {
+			const int separator = lines[i].find(":");
+			if (separator <= 0) {
+				r_error = "Malformed HTTP header.";
+				return PARSE_BAD_REQUEST;
+			}
+			const String name = lines[i].substr(0, separator).to_lower();
+			const String value = lines[i].substr(separator + 1).strip_edges();
+			if (!is_http_token(name)) {
+				r_error = "Invalid HTTP header name.";
+				return PARSE_BAD_REQUEST;
+			}
+			if (!is_valid_header_value(value)) {
+				r_error = "Invalid HTTP header value.";
+				return PARSE_BAD_REQUEST;
+			}
+			if (r_state.request.headers.has(name)) {
+				r_error = name == "content-length" ? "Invalid or duplicate Content-Length header." : "Duplicate HTTP header: " + name;
+				return PARSE_BAD_REQUEST;
+			}
+			if (name == "transfer-encoding") {
+				r_error = "Transfer-Encoding is not supported.";
+				return PARSE_BAD_REQUEST;
+			}
+			if (name == "content-length") {
+				r_state.request.has_content_length = true;
+				const ParseResult length_result = parse_content_length(value, p_max_body_bytes, r_state.request.content_length, r_error);
+				if (length_result != PARSE_READY) {
+					return length_result;
+				}
+			}
+			r_state.request.headers[name] = value;
+		}
+		r_state.headers_parsed = true;
 	}
 
-	if ((int64_t)p_buffer.size() - body_start < r_request.content_length) {
+	if ((int64_t)p_buffer.size() - r_state.body_start < r_state.request.content_length) {
 		return PARSE_INCOMPLETE;
 	}
+	r_request = r_state.request;
 	if (r_request.content_length > 0) {
-		const Error utf8_error = r_request.body.append_utf8((const char *)p_buffer.ptr() + body_start, (int)r_request.content_length);
+		const Error utf8_error = r_request.body.append_utf8((const char *)p_buffer.ptr() + r_state.body_start, (int)r_request.content_length);
 		if (utf8_error != OK) {
 			r_error = "HTTP request body is not valid UTF-8.";
 			return PARSE_BAD_REQUEST;
 		}
 	}
-	r_request.consumed_bytes = body_start + r_request.content_length;
+	r_request.consumed_bytes = r_state.body_start + r_request.content_length;
 	return PARSE_READY;
 }

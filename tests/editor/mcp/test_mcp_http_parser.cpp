@@ -65,6 +65,30 @@ TEST_CASE("[MCP] HTTP parser waits for a partial body") {
 	CHECK(MCPHTTPParser::parse(bytes(wire), 8192, 1024, request, error) == MCPHTTPParser::PARSE_INCOMPLETE);
 }
 
+TEST_CASE("[MCP] HTTP parser preserves incremental header state") {
+	const String body = String("x").repeat(256);
+	const Vector<uint8_t> wire = bytes("POST /mcp HTTP/1.1\r\nHost: localhost\r\nContent-Length: 256\r\n\r\n" + body);
+	Vector<uint8_t> partial;
+	MCPHTTPParser::State state;
+	MCPHTTPParser::Request request;
+	String error;
+	int parsed_header_end = -1;
+	for (int i = 0; i < wire.size(); i++) {
+		partial.push_back(wire[i]);
+		const MCPHTTPParser::ParseResult result = MCPHTTPParser::parse_incremental(partial, 8192, 1024, state, request, error);
+		if (state.headers_parsed && parsed_header_end < 0) {
+			parsed_header_end = state.header_end;
+		}
+		if (parsed_header_end >= 0) {
+			CHECK(state.headers_parsed);
+			CHECK(state.header_end == parsed_header_end);
+		}
+		CHECK(result == (i + 1 == wire.size() ? MCPHTTPParser::PARSE_READY : MCPHTTPParser::PARSE_INCOMPLETE));
+	}
+	CHECK(error.is_empty());
+	CHECK(request.body == body);
+}
+
 TEST_CASE("[MCP] HTTP parser reports request limits") {
 	MCPHTTPParser::Request request;
 	String error;

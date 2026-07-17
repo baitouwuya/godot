@@ -55,6 +55,16 @@ public:
 		int64_t consumed_bytes = 0;
 		bool has_content_length = false;
 	};
+	struct State {
+		Request request;
+		int header_scan_offset = 0;
+		int header_end = -1;
+		int64_t body_start = 0;
+		bool headers_parsed = false;
+
+		void reset() { *this = State(); }
+	};
 
 	static ParseResult parse(const Vector<uint8_t> &p_buffer, int64_t p_max_header_bytes, int64_t p_max_body_bytes, Request &r_request, String &r_error);
+	static ParseResult parse_incremental(const Vector<uint8_t> &p_buffer, int64_t p_max_header_bytes, int64_t p_max_body_bytes, State &r_state, Request &r_request, String &r_error);
 };

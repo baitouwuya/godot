@@ -264,7 +264,7 @@ bool MCPHTTPServer::_poll_connection(Connection &r_connection, uint64_t p_now_us
 
 	MCPHTTPParser::Request request;
 	String parse_error;
-	const MCPHTTPParser::ParseResult parse_result = MCPHTTPParser::parse(r_connection.input, config.max_header_bytes, config.max_body_bytes, request, parse_error);
+	const MCPHTTPParser::ParseResult parse_result = MCPHTTPParser::parse_incremental(r_connection.input, config.max_header_bytes, config.max_body_bytes, r_connection.parser_state, request, parse_error);
 	switch (parse_result) {
 		case MCPHTTPParser::PARSE_INCOMPLETE:
 			return true;

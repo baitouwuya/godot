@@ -75,6 +75,10 @@ TEST_CASE("[MCP][ToolRegistry] Registers in order, filters surfaces, and rejects
 	CHECK_EQ(String(Dictionary(mcp_definitions[0]).get("name", String())), "first");
 	CHECK_EQ(String(Dictionary(mcp_definitions[1]).get("name", String())), "second");
 	CHECK(Dictionary(mcp_definitions[0]).has("inputSchema"));
+	Dictionary exposed_definition = mcp_definitions[0];
+	exposed_definition["description"] = "mutated";
+	const Array fresh_definitions = registry.get_tool_definitions(MCPToolRegistry::TOOL_SURFACE_MCP);
+	CHECK(String(Dictionary(fresh_definitions[0])["description"]) == "Test tool.");
 
 	const PackedStringArray cli_names = registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_CLI);
 	REQUIRE_EQ(cli_names.size(), 2);
@@ -83,6 +87,7 @@ TEST_CASE("[MCP][ToolRegistry] Registers in order, filters surfaces, and rejects
 
 	CHECK_EQ(registry.unregister_tools_for_owner(provider), 3);
 	CHECK(registry.get_tool_names().is_empty());
+	CHECK(registry.get_tool_definitions().is_empty());
 	memdelete(provider);
 }
 

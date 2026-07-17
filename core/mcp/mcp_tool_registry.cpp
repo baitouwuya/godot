@@ -44,6 +44,26 @@ bool MCPToolRegistry::_matches_surface(const ToolEntry &p_entry, uint32_t p_surf
 	return p_surface == 0 || (p_entry.surfaces & p_surface) != 0;
 }
 
+void MCPToolRegistry::_invalidate_definition_cache() {
+	definition_cache.clear();
+}
+
+const Array &MCPToolRegistry::_get_cached_tool_definitions(uint32_t p_surface) const {
+	if (const Array *cached = definition_cache.getptr(p_surface)) {
+		return *cached;
+	}
+
+	Array definitions;
+	for (const StringName &name : registration_order) {
+		const ToolEntry *entry = tools.getptr(name);
+		if (entry && entry->handler.is_valid() && _matches_surface(*entry, p_surface)) {
+			definitions.push_back(entry->definition);
+		}
+	}
+	definition_cache.insert(p_surface, definitions);
+	return *definition_cache.getptr(p_surface);
+}
+
 Error MCPToolRegistry::register_tool(const Dictionary &p_definition, const Callable &p_handler, uint32_t p_surfaces, Object *p_owner, String *r_error) {
 	if (r_error) {
 		*r_error = String();
@@ -113,6 +133,7 @@ Error MCPToolRegistry::register_tool(const Dictionary &p_definition, const Calla
 	entry.owner_id = p_owner ? p_owner->get_instance_id() : p_handler.get_object_id();
 	tools.insert(name, entry);
 	registration_order.push_back(name);
+	_invalidate_definition_cache();
 	return OK;
 }
 
@@ -121,6 +142,7 @@ bool MCPToolRegistry::unregister_tool(const StringName &p_name) {
 		return false;
 	}
 	registration_order.erase(p_name);
+	_invalidate_definition_cache();
 	return true;
 }
 
@@ -152,14 +174,7 @@ bool MCPToolRegistry::has_tool(const StringName &p_name, uint32_t p_surface) con
 }
 
 Array MCPToolRegistry::get_tool_definitions(uint32_t p_surface) const {
-	Array definitions;
-	for (const StringName &name : registration_order) {
-		const ToolEntry *entry = tools.getptr(name);
-		if (entry && entry->handler.is_valid() && _matches_surface(*entry, p_surface)) {
-			definitions.push_back(entry->definition.duplicate(true));
-		}
-	}
-	return definitions;
+	return _get_cached_tool_definitions(p_surface).duplicate(true);
 }
 
 PackedStringArray MCPToolRegistry::get_tool_names(uint32_t p_surface) const {

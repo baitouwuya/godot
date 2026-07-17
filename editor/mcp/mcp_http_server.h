@@ -72,6 +72,7 @@ private:
 		Ref<StreamPeerTCP> peer;
 		Vector<uint8_t> input;
 		Vector<uint8_t> output;
+		MCPHTTPParser::State parser_state;
 		int output_offset = 0;
 		uint64_t last_activity_usec = 0;
 		uint64_t id = 0;

@@ -30,11 +30,11 @@
 
 #pragma once
 
-#include "core/error/error_list.h"
 #include "core/string/string_name.h"
-#include "core/templates/hash_map.h"
 #include "core/templates/vector.h"
-#include "core/variant/typed_array.h"
+
+static constexpr const char *MCP_CLI_COMMAND_DISCOVER = "--mcp-discover";
+static constexpr const char *MCP_CLI_COMMAND_STDIO = "--mcp-stdio";
 
 enum MCPCLICommandFlag : uint32_t {
 	MCP_CLI_COMMAND_FLAG_NONE = 0,
@@ -55,48 +55,17 @@ struct MCPCLICommandDefinition {
 	bool has_flag(MCPCLICommandFlag p_flag) const { return (flags & p_flag) != 0; }
 };
 
-class MCPCLICommandHandler {
-public:
-	virtual int execute_cli_command(const StringName &p_command, const PackedStringArray &p_arguments) = 0;
-	virtual ~MCPCLICommandHandler() = default;
-};
-
-class MCPCLICommandRegistry;
-
-class MCPCLICommandProvider : public MCPCLICommandHandler {
-public:
-	virtual Error register_cli_commands(MCPCLICommandRegistry &r_registry, String *r_error = nullptr) = 0;
-	~MCPCLICommandProvider() override = default;
-};
-
 class MCPCLICommandRegistry {
-	struct CommandEntry {
-		MCPCLICommandDefinition definition;
-		MCPCLICommandProvider *provider = nullptr;
-	};
-
-	HashMap<StringName, CommandEntry> commands;
-	Vector<StringName> registration_order;
+	Vector<MCPCLICommandDefinition> commands;
 
 public:
-	MCPCLICommandRegistry() = default;
+	MCPCLICommandRegistry();
 	MCPCLICommandRegistry(const MCPCLICommandRegistry &) = delete;
 	MCPCLICommandRegistry &operator=(const MCPCLICommandRegistry &) = delete;
 	MCPCLICommandRegistry(MCPCLICommandRegistry &&) = delete;
 	MCPCLICommandRegistry &operator=(MCPCLICommandRegistry &&) = delete;
 
-	Error register_command(
-			const MCPCLICommandDefinition &p_definition,
-			MCPCLICommandProvider *p_provider,
-			String *r_error = nullptr);
-	bool unregister_command(const StringName &p_name);
-	int unregister_commands_for_provider(MCPCLICommandProvider *p_provider);
 	bool has_command(const StringName &p_name) const;
 	const MCPCLICommandDefinition *get_command(const StringName &p_name) const;
 	Vector<MCPCLICommandDefinition> get_commands() const;
-	Error invoke(
-			const StringName &p_name,
-			const PackedStringArray &p_arguments,
-			int &r_exit_code,
-			String *r_error = nullptr) const;
 };

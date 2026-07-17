@@ -30,109 +30,39 @@
 
 #include "mcp_cli_command_registry.h"
 
-namespace {
+MCPCLICommandRegistry::MCPCLICommandRegistry() {
+	MCPCLICommandDefinition discover;
+	discover.name = MCP_CLI_COMMAND_DISCOVER;
+	discover.usage = "--mcp-discover --path <directory>";
+	discover.description = "Print the running MCP endpoint for a Godot project.";
+	discover.flags = MCP_CLI_COMMAND_FLAG_REQUIRE_EXPLICIT_PROJECT_PATH |
+			MCP_CLI_COMMAND_FLAG_EXCLUSIVE_WITH_EDITOR |
+			MCP_CLI_COMMAND_FLAG_JSON_STDOUT |
+			MCP_CLI_COMMAND_FLAG_FORCE_HEADLESS |
+			MCP_CLI_COMMAND_FLAG_PATH_ARGUMENT_ONLY;
+	commands.push_back(discover);
 
-void set_error(String *r_error, const String &p_error) {
-	if (r_error) {
-		*r_error = p_error;
-	}
-}
-
-} // namespace
-
-Error MCPCLICommandRegistry::register_command(
-		const MCPCLICommandDefinition &p_definition,
-		MCPCLICommandProvider *p_provider,
-		String *r_error) {
-	set_error(r_error, String());
-	if (p_definition.name == StringName()) {
-		set_error(r_error, "CLI command name cannot be empty.");
-		return ERR_INVALID_PARAMETER;
-	}
-	if (p_definition.usage.is_empty()) {
-		set_error(r_error, vformat("CLI command '%s' requires usage text.", p_definition.name));
-		return ERR_INVALID_PARAMETER;
-	}
-	if (p_definition.description.is_empty()) {
-		set_error(r_error, vformat("CLI command '%s' requires a description.", p_definition.name));
-		return ERR_INVALID_PARAMETER;
-	}
-	if (!p_provider) {
-		set_error(r_error, vformat("CLI command '%s' requires a provider.", p_definition.name));
-		return ERR_INVALID_PARAMETER;
-	}
-	if (commands.has(p_definition.name)) {
-		set_error(r_error, vformat("CLI command '%s' is already registered.", p_definition.name));
-		return ERR_ALREADY_EXISTS;
-	}
-
-	CommandEntry entry;
-	entry.definition = p_definition;
-	entry.provider = p_provider;
-	commands.insert(p_definition.name, entry);
-	registration_order.push_back(p_definition.name);
-	return OK;
-}
-
-bool MCPCLICommandRegistry::unregister_command(const StringName &p_name) {
-	if (!commands.erase(p_name)) {
-		return false;
-	}
-	registration_order.erase(p_name);
-	return true;
-}
-
-int MCPCLICommandRegistry::unregister_commands_for_provider(MCPCLICommandProvider *p_provider) {
-	if (!p_provider) {
-		return 0;
-	}
-
-	Vector<StringName> names_to_remove;
-	for (const StringName &name : registration_order) {
-		const CommandEntry *entry = commands.getptr(name);
-		if (entry && entry->provider == p_provider) {
-			names_to_remove.push_back(name);
-		}
-	}
-	for (const StringName &name : names_to_remove) {
-		unregister_command(name);
-	}
-	return names_to_remove.size();
+	MCPCLICommandDefinition stdio;
+	stdio.name = MCP_CLI_COMMAND_STDIO;
+	stdio.usage = "--mcp-stdio --path <directory>";
+	stdio.description = "Bridge newline-delimited MCP stdio to the project's HTTP endpoint.";
+	stdio.flags = discover.flags;
+	commands.push_back(stdio);
 }
 
 bool MCPCLICommandRegistry::has_command(const StringName &p_name) const {
-	const CommandEntry *entry = commands.getptr(p_name);
-	return entry && entry->provider;
+	return get_command(p_name) != nullptr;
 }
 
 const MCPCLICommandDefinition *MCPCLICommandRegistry::get_command(const StringName &p_name) const {
-	const CommandEntry *entry = commands.getptr(p_name);
-	return entry ? &entry->definition : nullptr;
+	for (const MCPCLICommandDefinition &command : commands) {
+		if (command.name == p_name) {
+			return &command;
+		}
+	}
+	return nullptr;
 }
 
 Vector<MCPCLICommandDefinition> MCPCLICommandRegistry::get_commands() const {
-	Vector<MCPCLICommandDefinition> definitions;
-	for (const StringName &name : registration_order) {
-		const CommandEntry *entry = commands.getptr(name);
-		if (entry) {
-			definitions.push_back(entry->definition);
-		}
-	}
-	return definitions;
-}
-
-Error MCPCLICommandRegistry::invoke(
-		const StringName &p_name,
-		const PackedStringArray &p_arguments,
-		int &r_exit_code,
-		String *r_error) const {
-	r_exit_code = 1;
-	set_error(r_error, String());
-	const CommandEntry *entry = commands.getptr(p_name);
-	if (!entry || !entry->provider) {
-		set_error(r_error, vformat("CLI command '%s' is not registered.", p_name));
-		return ERR_DOES_NOT_EXIST;
-	}
-	r_exit_code = entry->provider->execute_cli_command(p_name, p_arguments);
-	return OK;
+	return commands;
 }

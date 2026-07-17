@@ -31,5 +31,16 @@
 #include "mcp_cli_bootstrap.h"
 
 Error MCPCLIBootstrap::initialize(String *r_error) {
-	return runtime.register_provider(&standard_commands, r_error);
+	if (r_error) {
+		*r_error = String();
+	}
+	const Vector<MCPCLICommandDefinition> commands = runtime.get_command_registry().get_commands();
+	if (commands.size() != 2 || commands[0].name != MCPCLI::COMMAND_DISCOVER || commands[1].name != MCPCLI::COMMAND_STDIO ||
+			!commands[0].terminal || !commands[1].terminal) {
+		if (r_error) {
+			*r_error = "MCP CLI transport adapters are not configured correctly.";
+		}
+		return ERR_INVALID_DATA;
+	}
+	return OK;
 }

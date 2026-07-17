@@ -30,11 +30,14 @@
 
 #pragma once
 
+#include "core/variant/typed_array.h"
 #include "main/mcp_cli_command_registry.h"
+
+class MCPCLI;
 
 class MCPCLIRuntime {
 	MCPCLICommandRegistry command_registry;
-	Vector<MCPCLICommandProvider *> providers;
+	MCPCLI *adapter = nullptr;
 	StringName selected_command;
 	PackedStringArray selected_raw_arguments;
 	uint64_t selected_raw_argument_bytes = 0;
@@ -46,11 +49,11 @@ public:
 	static constexpr uint64_t MAX_RAW_ARGUMENT_BYTES = 1024 * 1024;
 
 	MCPCLIRuntime() = default;
+	explicit MCPCLIRuntime(MCPCLI *p_adapter) :
+			adapter(p_adapter) {}
 	MCPCLIRuntime(const MCPCLIRuntime &) = delete;
 	MCPCLIRuntime &operator=(const MCPCLIRuntime &) = delete;
 
-	Error register_provider(MCPCLICommandProvider *p_provider, String *r_error = nullptr);
-	bool unregister_provider(MCPCLICommandProvider *p_provider);
 	void clear();
 
 	const MCPCLICommandRegistry &get_command_registry() const { return command_registry; }
@@ -61,6 +64,4 @@ public:
 	Error append_raw_argument(const String &p_argument, String *r_error = nullptr);
 	const PackedStringArray &get_raw_arguments() const { return selected_raw_arguments; }
 	Error invoke_selected(const PackedStringArray &p_arguments, int &r_exit_code, String *r_error = nullptr) const;
-
-	~MCPCLIRuntime();
 };

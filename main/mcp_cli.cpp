@@ -479,33 +479,6 @@ Dictionary MCPCLI::make_public_discovery_output(const MCPDiscoveryRecord &p_reco
 	return output;
 }
 
-Error MCPCLI::register_cli_commands(MCPCLICommandRegistry &r_registry, String *r_error) {
-	MCPCLICommandDefinition discover;
-	discover.name = COMMAND_DISCOVER;
-	discover.usage = "--mcp-discover --path <directory>";
-	discover.description = "Print the running MCP endpoint for a Godot project.";
-	discover.flags = MCP_CLI_COMMAND_FLAG_REQUIRE_EXPLICIT_PROJECT_PATH |
-			MCP_CLI_COMMAND_FLAG_EXCLUSIVE_WITH_EDITOR |
-			MCP_CLI_COMMAND_FLAG_JSON_STDOUT |
-			MCP_CLI_COMMAND_FLAG_FORCE_HEADLESS |
-			MCP_CLI_COMMAND_FLAG_PATH_ARGUMENT_ONLY;
-	Error error = r_registry.register_command(discover, this, r_error);
-	if (error != OK) {
-		return error;
-	}
-
-	MCPCLICommandDefinition stdio;
-	stdio.name = COMMAND_STDIO;
-	stdio.usage = "--mcp-stdio --path <directory>";
-	stdio.description = "Bridge newline-delimited MCP stdio to the project's HTTP endpoint.";
-	stdio.flags = discover.flags;
-	error = r_registry.register_command(stdio, this, r_error);
-	if (error != OK) {
-		r_registry.unregister_command(COMMAND_DISCOVER);
-	}
-	return error;
-}
-
 Error MCPCLI::_get_project_path_argument(
 		const PackedStringArray &p_arguments,
 		String &r_project_path,

@@ -172,8 +172,7 @@ TEST_CASE("[MCP][CLI] Discover routes through the command registry without expos
 	MCPCLI::Options options;
 	options.discovery_directory = discovery_directory;
 	MCPCLI cli(options, &transport, &io);
-	MCPCLIRuntime runtime;
-	REQUIRE(runtime.register_provider(&cli) == OK);
+	MCPCLIRuntime runtime(&cli);
 	REQUIRE(runtime.select_command(MCPCLI::COMMAND_DISCOVER) == OK);
 
 	PackedStringArray arguments;
@@ -202,8 +201,7 @@ TEST_CASE("[MCP][CLI] Unknown command arguments are preserved and rejected") {
 	QueueCLITransport transport;
 	MCPCLI::Options options;
 	MCPCLI cli(options, &transport, &io);
-	MCPCLIRuntime runtime;
-	REQUIRE(runtime.register_provider(&cli) == OK);
+	MCPCLIRuntime runtime(&cli);
 	REQUIRE(runtime.select_command(MCPCLI::COMMAND_DISCOVER) == OK);
 	REQUIRE(runtime.append_raw_argument("--unknown-option") == OK);
 

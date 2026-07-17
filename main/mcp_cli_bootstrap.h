@@ -38,6 +38,8 @@ class MCPCLIBootstrap {
 	MCPCLIRuntime runtime;
 
 public:
+	MCPCLIBootstrap() :
+			runtime(&standard_commands) {}
 	Error initialize(String *r_error = nullptr);
 	MCPCLIRuntime &get_runtime() { return runtime; }
 	const MCPCLIRuntime &get_runtime() const { return runtime; }

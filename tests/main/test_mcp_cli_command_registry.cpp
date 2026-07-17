@@ -36,82 +36,59 @@ TEST_FORCE_LINK(test_mcp_cli_command_registry);
 
 namespace TestMCPCLICommandRegistry {
 
-class RecordingCommandProvider final : public MCPCLICommandProvider {
-public:
-	StringName command;
-	PackedStringArray arguments;
-	int exit_code = 17;
-
-	Error register_cli_commands(MCPCLICommandRegistry &, String *r_error = nullptr) override {
-		if (r_error) {
-			*r_error = String();
-		}
-		return OK;
-	}
-
-	int execute_cli_command(const StringName &p_command, const PackedStringArray &p_arguments) override {
-		command = p_command;
-		arguments = p_arguments;
-		return exit_code;
-	}
-};
-
-TEST_CASE("[MCP][CLICommandRegistry] Rejects duplicate names and invokes the registered handler") {
+TEST_CASE("[MCP][CLICommandRegistry] Exposes only the fixed MCP transport adapters") {
 	MCPCLICommandRegistry registry;
-	RecordingCommandProvider provider;
-	MCPCLICommandDefinition definition;
-	definition.name = "--mcp-test";
-	definition.usage = "--mcp-test <value>";
-	definition.description = "Test command.";
-	definition.flags = MCP_CLI_COMMAND_FLAG_REQUIRE_EXPLICIT_PROJECT_PATH | MCP_CLI_COMMAND_FLAG_FORCE_HEADLESS;
+	const Vector<MCPCLICommandDefinition> commands = registry.get_commands();
+	REQUIRE(commands.size() == 2);
+	CHECK(commands[0].name == MCP_CLI_COMMAND_DISCOVER);
+	CHECK(commands[1].name == MCP_CLI_COMMAND_STDIO);
 
-	String error;
-	REQUIRE(registry.register_command(definition, &provider, &error) == OK);
-	CHECK(registry.register_command(definition, &provider, &error) == ERR_ALREADY_EXISTS);
-	CHECK_FALSE(error.is_empty());
-	CHECK(registry.has_command(definition.name));
-	REQUIRE(registry.get_command(definition.name) != nullptr);
-	CHECK(registry.get_command(definition.name)->usage == definition.usage);
-	CHECK(registry.get_command(definition.name)->description == definition.description);
-	CHECK(registry.get_command(definition.name)->terminal);
-	CHECK(registry.get_command(definition.name)->has_flag(MCP_CLI_COMMAND_FLAG_REQUIRE_EXPLICIT_PROJECT_PATH));
-	CHECK(registry.get_command(definition.name)->has_flag(MCP_CLI_COMMAND_FLAG_FORCE_HEADLESS));
-	CHECK(registry.get_commands().size() == 1);
+	for (const MCPCLICommandDefinition &command : commands) {
+		CHECK(command.terminal);
+		CHECK_FALSE(command.usage.is_empty());
+		CHECK_FALSE(command.description.is_empty());
+		CHECK(command.has_flag(MCP_CLI_COMMAND_FLAG_REQUIRE_EXPLICIT_PROJECT_PATH));
+		CHECK(command.has_flag(MCP_CLI_COMMAND_FLAG_EXCLUSIVE_WITH_EDITOR));
+		CHECK(command.has_flag(MCP_CLI_COMMAND_FLAG_JSON_STDOUT));
+		CHECK(command.has_flag(MCP_CLI_COMMAND_FLAG_FORCE_HEADLESS));
+		CHECK(command.has_flag(MCP_CLI_COMMAND_FLAG_PATH_ARGUMENT_ONLY));
+	}
 
-	PackedStringArray arguments;
-	arguments.push_back("value");
-	int exit_code = 0;
-	REQUIRE(registry.invoke(definition.name, arguments, exit_code, &error) == OK);
-	CHECK(exit_code == provider.exit_code);
-	CHECK(provider.command == definition.name);
-	CHECK(provider.arguments == arguments);
+	CHECK(registry.has_command(MCP_CLI_COMMAND_DISCOVER));
+	CHECK(registry.has_command(MCP_CLI_COMMAND_STDIO));
+	CHECK_FALSE(registry.has_command("--mcp-test"));
+	CHECK(registry.get_command("--mcp-test") == nullptr);
 
-	CHECK(registry.unregister_commands_for_provider(&provider) == 1);
-	CHECK_FALSE(registry.has_command(definition.name));
-	CHECK(registry.invoke(definition.name, arguments, exit_code, &error) == ERR_DOES_NOT_EXIST);
+	Vector<MCPCLICommandDefinition> mutated = registry.get_commands();
+	mutated.write[0].name = "--latest-log";
+	CHECK(registry.has_command(MCP_CLI_COMMAND_DISCOVER));
+	CHECK_FALSE(registry.has_command("--latest-log"));
 }
 
-TEST_CASE("[MCP][CLICommandRegistry] Rejects incomplete definitions and unregisters a provider batch") {
+TEST_CASE("[MCP][CLICommandRegistry] Legacy business CLI commands cannot enter the adapter command set") {
 	MCPCLICommandRegistry registry;
-	RecordingCommandProvider provider;
-	MCPCLICommandDefinition definition;
-	definition.name = "--mcp-first";
+	const char *legacy_commands[] = {
+		"--latest-log",
+		"--perf-start",
+		"--perf-status",
+		"--perf-stop",
+		"--harness-run",
+		"--harness-report",
+		"--editor-ai-complete",
+		"--editor-ai-lsp",
+	};
+	for (const char *legacy_command : legacy_commands) {
+		CHECK_FALSE(registry.has_command(legacy_command));
+		CHECK(registry.get_command(legacy_command) == nullptr);
+	}
 
-	String error;
-	CHECK(registry.register_command(definition, &provider, &error) == ERR_INVALID_PARAMETER);
-	CHECK_FALSE(error.is_empty());
-
-	definition.usage = "--mcp-first";
-	CHECK(registry.register_command(definition, &provider, &error) == ERR_INVALID_PARAMETER);
-	definition.description = "First command.";
-	REQUIRE(registry.register_command(definition, &provider, &error) == OK);
-
-	definition.name = "--mcp-second";
-	definition.usage = "--mcp-second";
-	definition.description = "Second command.";
-	REQUIRE(registry.register_command(definition, &provider, &error) == OK);
-	CHECK(registry.unregister_commands_for_provider(&provider) == 2);
-	CHECK(registry.get_commands().is_empty());
+	for (const MCPCLICommandDefinition &command : registry.get_commands()) {
+		const String name = command.name;
+		CHECK(name != "--latest-log");
+		CHECK_FALSE(name.begins_with("--perf-"));
+		CHECK_FALSE(name.begins_with("--harness-"));
+		CHECK_FALSE(name.begins_with("--editor-ai-"));
+	}
 }
 
 } // namespace TestMCPCLICommandRegistry

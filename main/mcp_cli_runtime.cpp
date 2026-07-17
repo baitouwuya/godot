@@ -30,6 +30,8 @@
 
 #include "mcp_cli_runtime.h"
 
+#include "main/mcp_cli.h"
+
 namespace {
 
 void set_error(String *r_error, const String &p_error) {
@@ -46,57 +48,20 @@ void MCPCLIRuntime::_clear_selection() {
 	selected_raw_argument_bytes = 0;
 }
 
-Error MCPCLIRuntime::register_provider(MCPCLICommandProvider *p_provider, String *r_error) {
-	set_error(r_error, String());
-	if (!p_provider) {
-		set_error(r_error, "A CLI command provider is required.");
-		return ERR_INVALID_PARAMETER;
-	}
-	for (MCPCLICommandProvider *provider : providers) {
-		if (provider == p_provider) {
-			set_error(r_error, "The CLI command provider is already registered.");
-			return ERR_ALREADY_IN_USE;
-		}
-	}
-
-	const Error error = p_provider->register_cli_commands(command_registry, r_error);
-	if (error != OK) {
-		command_registry.unregister_commands_for_provider(p_provider);
-		return error;
-	}
-	providers.push_back(p_provider);
-	return OK;
-}
-
-bool MCPCLIRuntime::unregister_provider(MCPCLICommandProvider *p_provider) {
-	for (int i = 0; i < providers.size(); i++) {
-		if (providers[i] != p_provider) {
-			continue;
-		}
-		command_registry.unregister_commands_for_provider(p_provider);
-		providers.remove_at(i);
-		if (!selected_command.is_empty() && !command_registry.has_command(selected_command)) {
-			_clear_selection();
-		}
-		return true;
-	}
-	return false;
-}
-
 void MCPCLIRuntime::clear() {
-	while (!providers.is_empty()) {
-		MCPCLICommandProvider *provider = providers[providers.size() - 1];
-		command_registry.unregister_commands_for_provider(provider);
-		providers.resize(providers.size() - 1);
-	}
 	_clear_selection();
 }
 
 Error MCPCLIRuntime::select_command(const StringName &p_name, String *r_error) {
 	set_error(r_error, String());
-	if (!command_registry.has_command(p_name)) {
+	const MCPCLICommandDefinition *definition = command_registry.get_command(p_name);
+	if (!definition) {
 		set_error(r_error, vformat("CLI command '%s' is not registered.", p_name));
 		return ERR_DOES_NOT_EXIST;
+	}
+	if (!definition->terminal) {
+		set_error(r_error, vformat("CLI adapter command '%s' must be terminal.", p_name));
+		return ERR_INVALID_DATA;
 	}
 	if (!selected_command.is_empty()) {
 		set_error(r_error, "Only one registered CLI command can be used at a time.");
@@ -135,16 +100,23 @@ Error MCPCLIRuntime::append_raw_argument(const String &p_argument, String *r_err
 }
 
 Error MCPCLIRuntime::invoke_selected(const PackedStringArray &p_arguments, int &r_exit_code, String *r_error) const {
+	r_exit_code = 1;
 	if (selected_command.is_empty()) {
-		r_exit_code = 1;
 		set_error(r_error, "No CLI command is selected.");
 		return ERR_UNCONFIGURED;
 	}
+	if (!adapter) {
+		set_error(r_error, "The MCP CLI transport adapter is not configured.");
+		return ERR_UNCONFIGURED;
+	}
+	const MCPCLICommandDefinition *definition = command_registry.get_command(selected_command);
+	if (!definition || !definition->terminal) {
+		set_error(r_error, "The selected MCP CLI adapter command is invalid.");
+		return ERR_INVALID_DATA;
+	}
 	PackedStringArray arguments = p_arguments;
 	arguments.append_array(selected_raw_arguments);
-	return command_registry.invoke(selected_command, arguments, r_exit_code, r_error);
-}
-
-MCPCLIRuntime::~MCPCLIRuntime() {
-	clear();
+	r_exit_code = adapter->execute_cli_command(selected_command, arguments);
+	set_error(r_error, String());
+	return OK;
 }

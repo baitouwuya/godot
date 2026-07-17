@@ -33,6 +33,7 @@
 #include "core/mcp/mcp_discovery.h"
 #include "core/templates/vector.h"
 #include "core/variant/dictionary.h"
+#include "core/variant/typed_array.h"
 #include "main/mcp_cli_command_registry.h"
 
 struct MCPCLIHTTPResponse {
@@ -98,7 +99,7 @@ public:
 	void write_stderr_line(const String &p_line) override;
 };
 
-class MCPCLI final : public MCPCLICommandProvider {
+class MCPCLI final {
 public:
 	enum ExitCode {
 		EXIT_OK = 0,
@@ -115,8 +116,8 @@ public:
 		uint64_t request_timeout_ms = 10000;
 	};
 
-	static constexpr const char *COMMAND_DISCOVER = "--mcp-discover";
-	static constexpr const char *COMMAND_STDIO = "--mcp-stdio";
+	static constexpr const char *COMMAND_DISCOVER = MCP_CLI_COMMAND_DISCOVER;
+	static constexpr const char *COMMAND_STDIO = MCP_CLI_COMMAND_STDIO;
 
 private:
 	Options options;
@@ -144,8 +145,6 @@ public:
 	static String get_default_discovery_directory();
 	static Dictionary make_public_discovery_output(const MCPDiscoveryRecord &p_record);
 
-	Error register_cli_commands(MCPCLICommandRegistry &r_registry, String *r_error = nullptr) override;
-	Error register_commands(MCPCLICommandRegistry &r_registry, String *r_error = nullptr) { return register_cli_commands(r_registry, r_error); }
 	Error resolve_discovery_record(
 			const String &p_project_path,
 			MCPProjectIdentity &r_identity,
@@ -153,5 +152,5 @@ public:
 			String *r_error = nullptr) const;
 	int run_discover(const String &p_project_path);
 	int run_stdio_bridge(const String &p_project_path);
-	int execute_cli_command(const StringName &p_command, const PackedStringArray &p_arguments) override;
+	int execute_cli_command(const StringName &p_command, const PackedStringArray &p_arguments);
 };

@@ -162,6 +162,7 @@ void MCPHTTPServer::_apply_pending_responses() {
 				continue;
 			}
 			connection.awaiting_response = false;
+			connection.last_activity_usec = OS::get_singleton()->get_ticks_usec();
 			_queue_response(connection, queued.response);
 			break;
 		}
@@ -211,8 +212,12 @@ bool MCPHTTPServer::_poll_connection(Connection &r_connection, uint64_t p_now_us
 		return false;
 	}
 
-	if (!r_connection.awaiting_response && r_connection.output.is_empty() && p_now_usec - r_connection.last_activity_usec > config.idle_timeout_usec) {
-		_queue_error(r_connection, 408, "HTTP connection timed out.");
+	if (!r_connection.awaiting_response && p_now_usec - r_connection.last_activity_usec > config.idle_timeout_usec) {
+		if (r_connection.output.is_empty()) {
+			_queue_error(r_connection, 408, "HTTP connection timed out.");
+		} else {
+			return false;
+		}
 	}
 
 	if (!r_connection.output.is_empty()) {

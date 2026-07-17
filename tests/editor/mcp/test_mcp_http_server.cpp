@@ -43,6 +43,7 @@ public:
 	int request_count = 0;
 	bool requests_on_main_thread = true;
 	uint64_t response_delay_usec = 0;
+	int response_body_bytes = 0;
 
 	MCPHTTPResponse handle_request(const MCPHTTPParser::Request &p_request) override {
 		request_count++;
@@ -51,7 +52,7 @@ public:
 			OS::get_singleton()->delay_usec(response_delay_usec);
 		}
 		MCPHTTPResponse response;
-		response.body = "{\"path\":\"" + p_request.path + "\"}";
+		response.body = response_body_bytes > 0 ? String("x").repeat(response_body_bytes) : "{\"path\":\"" + p_request.path + "\"}";
 		return response;
 	}
 };
@@ -156,6 +157,37 @@ TEST_CASE("[MCP] HTTP server does not expire a request while its handler is runn
 	CHECK(response.contains(" 200 OK\r\n"));
 	CHECK_FALSE(response.contains(" 408 Request Timeout\r\n"));
 	CHECK(handler.request_count == 1);
+	server.stop();
+}
+
+TEST_CASE("[MCP] HTTP server expires a stalled response writer") {
+	MCPHTTPServer server;
+	TestHandler handler;
+	handler.response_body_bytes = 4 * 1024 * 1024;
+	MCPHTTPServer::Config config;
+	config.idle_timeout_usec = 20 * 1000;
+	REQUIRE(server.start(config, &handler) == OK);
+
+	Ref<StreamPeerTCP> client;
+	client.instantiate();
+	REQUIRE(client->connect_to_host(IPAddress("127.0.0.1"), server.get_port()) == OK);
+	const uint64_t deadline = OS::get_singleton()->get_ticks_usec() + MAX_WAIT_USEC;
+	while (client->get_status() == StreamPeerTCP::STATUS_CONNECTING && OS::get_singleton()->get_ticks_usec() < deadline) {
+		client->poll();
+		server.poll();
+		OS::get_singleton()->delay_usec(1000);
+	}
+	REQUIRE(client->get_status() == StreamPeerTCP::STATUS_CONNECTED);
+	const String request = "GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n";
+	const Vector<uint8_t> request_bytes = request.to_utf8_buffer();
+	REQUIRE(client->put_data(request_bytes.ptr(), request_bytes.size()) == OK);
+
+	while (server.get_connection_count() > 0 && OS::get_singleton()->get_ticks_usec() < deadline) {
+		server.poll();
+		OS::get_singleton()->delay_usec(1000);
+	}
+	CHECK(server.get_connection_count() == 0);
+	client->disconnect_from_host();
 	server.stop();
 }
 

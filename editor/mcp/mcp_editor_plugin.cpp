@@ -63,12 +63,6 @@
 #include "modules/gdscript/language_server/gdscript_language_protocol.h"
 #endif
 
-namespace {
-
-constexpr uint64_t HEARTBEAT_INTERVAL_USEC = 2 * 1000 * 1000;
-
-} // namespace
-
 void MCPEditorPlugin::configure(bool p_requested, int p_port) {
 	requested = p_requested;
 	requested_port = p_port;
@@ -264,12 +258,18 @@ Error MCPEditorPlugin::_start_mcp(String &r_error) {
 	runtime_input_debugger_registered = true;
 
 	main_thread_executor.reset();
-	last_heartbeat_usec = OS::get_singleton()->get_ticks_usec();
+	error = project_heartbeat.start(project_lease, discovery_directory, discovery_record);
+	if (error != OK) {
+		r_error = "Unable to start the MCP project heartbeat worker.";
+		_stop_mcp();
+		return error;
+	}
 	print_line(vformat("Godot MCP Host started for project %s at %s", project_identity.project_id, host.get_endpoint()));
 	return OK;
 }
 
 void MCPEditorPlugin::_stop_mcp() {
+	project_heartbeat.stop();
 	runtime_debug_service->shutdown_input();
 	if (runtime_input_debugger_registered) {
 		remove_debugger_plugin(runtime_input_debugger_plugin);
@@ -298,18 +298,6 @@ void MCPEditorPlugin::_stop_mcp() {
 	project_identity = MCPProjectIdentity();
 	discovery_directory = String();
 	auth_secret = String();
-}
-
-void MCPEditorPlugin::_refresh_heartbeat() {
-	const uint64_t now_usec = OS::get_singleton()->get_ticks_usec();
-	if (now_usec - last_heartbeat_usec < HEARTBEAT_INTERVAL_USEC) {
-		return;
-	}
-	last_heartbeat_usec = now_usec;
-	String error;
-	if (_publish_discovery(error) != OK) {
-		_exit_with_error("Godot MCP Host lost its project lease: " + error);
-	}
 }
 
 void MCPEditorPlugin::_handle_start_error(Error p_error, const String &p_message) {
@@ -397,7 +385,10 @@ void MCPEditorPlugin::_notification(int p_what) {
 			host.poll();
 			main_thread_executor.poll();
 			runtime_debug_service->process_input();
-			_refresh_heartbeat();
+			String heartbeat_failure;
+			if (project_heartbeat.poll_failure(heartbeat_failure)) {
+				_exit_with_error("Godot MCP Host lost its project lease: " + heartbeat_failure);
+			}
 		} break;
 
 		case NOTIFICATION_EXIT_TREE: {

@@ -131,7 +131,7 @@ Error MCPProjectLease::_try_reclaim(const MCPDiscoveryRecord *p_initial_owner, c
 		}
 
 		const bool process_running = p_process_probe.is_process_running(current_owner.pid);
-		const bool endpoint_healthy = p_health_probe.is_healthy(current_owner);
+		const bool endpoint_healthy = !process_running && p_health_probe.is_healthy(current_owner);
 		if (process_running || endpoint_healthy || _is_in_startup_grace(current_owner, p_now_unix_ms)) {
 			_remove_reclaim_marker();
 			if (r_conflicting_owner) {
@@ -251,7 +251,7 @@ Error MCPProjectLease::acquire(const MCPDiscoveryRecord &p_owner, const MCPProje
 				return ERR_INVALID_DATA;
 			}
 			const bool process_running = process_probe.is_process_running(existing_owner.pid);
-			const bool endpoint_healthy = p_health_probe.is_healthy(existing_owner);
+			const bool endpoint_healthy = !process_running && p_health_probe.is_healthy(existing_owner);
 			if (process_running || endpoint_healthy || _is_in_startup_grace(existing_owner, now_unix_ms)) {
 				if (r_conflicting_owner) {
 					*r_conflicting_owner = existing_owner;

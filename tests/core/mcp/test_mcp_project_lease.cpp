@@ -127,7 +127,7 @@ TEST_CASE("[MCP][ProjectLease] Requires both process and health probes to fail")
 		CHECK(lease.acquire(contender, health_probe, &conflict, nullptr, 20000, &process_probe) == ERR_ALREADY_IN_USE);
 		CHECK(conflict.instance_id == owner_identity.instance_id);
 		CHECK(process_probe.calls == 1);
-		CHECK(health_probe.calls == 1);
+		CHECK(health_probe.calls == 0);
 	}
 
 	SUBCASE("A healthy endpoint keeps the lease") {

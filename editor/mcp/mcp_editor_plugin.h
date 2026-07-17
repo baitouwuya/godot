@@ -32,6 +32,7 @@
 #include "mcp_host.h"
 #include "mcp_http_health_probe.h"
 #include "mcp_main_thread_executor.h"
+#include "mcp_project_heartbeat.h"
 #include "providers/mcp_runtime_input_debugger_plugin.h"
 
 #include "core/mcp/mcp_discovery.h"
@@ -75,6 +76,7 @@ class MCPEditorPlugin : public EditorPlugin, public MCPHostSessionObserver {
 	MCPToolRegistry tool_registry;
 	MCPHost host;
 	MCPMainThreadExecutor main_thread_executor;
+	MCPProjectHeartbeat project_heartbeat;
 	MCPHTTPProjectLeaseHealthProbe health_probe;
 	MCPProjectIdentity project_identity;
 	MCPProjectLease *project_lease = nullptr;
@@ -82,7 +84,6 @@ class MCPEditorPlugin : public EditorPlugin, public MCPHostSessionObserver {
 	String discovery_directory;
 	String auth_secret;
 	String last_start_error;
-	uint64_t last_heartbeat_usec = 0;
 	ConfirmationDialog *conflict_dialog = nullptr;
 	MCPDiscoveryRecord conflicting_owner;
 	MCPClassProvider *class_provider = nullptr;
@@ -110,7 +111,6 @@ class MCPEditorPlugin : public EditorPlugin, public MCPHostSessionObserver {
 	Error _start_mcp(String &r_error);
 	void _stop_mcp();
 	Error _publish_discovery(String &r_error);
-	void _refresh_heartbeat();
 	void _handle_start_error(Error p_error, const String &p_message);
 	void _show_conflict_dialog();
 	void _retry_after_conflict();

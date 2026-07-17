@@ -249,7 +249,7 @@ Variant MCPProtocol::_dispatch_request(const Dictionary &p_request, bool &r_resp
 			return _make_error(id, INTERNAL_ERROR, "MCP tool registry is not configured.");
 		}
 		Dictionary result;
-		result["tools"] = tool_registry->_get_cached_tool_definitions(MCPToolRegistry::TOOL_SURFACE_MCP);
+		result["tools"] = tool_registry->get_tool_definitions(MCPToolRegistry::TOOL_SURFACE_MCP);
 		return _make_response(id, result);
 	}
 	if (method == "tools/call") {

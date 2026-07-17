@@ -211,12 +211,8 @@ bool MCPHTTPServer::_poll_connection(Connection &r_connection, uint64_t p_now_us
 		return false;
 	}
 
-	if (p_now_usec - r_connection.last_activity_usec > config.idle_timeout_usec) {
-		if (r_connection.output.is_empty()) {
-			_queue_error(r_connection, 408, "HTTP connection timed out.");
-		} else {
-			return false;
-		}
+	if (!r_connection.awaiting_response && r_connection.output.is_empty() && p_now_usec - r_connection.last_activity_usec > config.idle_timeout_usec) {
+		_queue_error(r_connection, 408, "HTTP connection timed out.");
 	}
 
 	if (!r_connection.output.is_empty()) {
@@ -315,6 +311,7 @@ void MCPHTTPServer::_thread_main(void *p_userdata) {
 
 void MCPHTTPServer::_run_transport() {
 	Thread::set_name("MCP HTTP Transport");
+	int idle_iterations = 0;
 	while (running.is_set()) {
 		_apply_pending_responses();
 		_accept_connections();
@@ -329,7 +326,12 @@ void MCPHTTPServer::_run_transport() {
 			MutexLock lock(state_mutex);
 			connection_count = connections.size();
 		}
-		OS::get_singleton()->delay_usec(config.transport_poll_interval_usec);
+		if (connections.is_empty()) {
+			idle_iterations = MIN(idle_iterations + 1, 3);
+		} else {
+			idle_iterations = 0;
+		}
+		OS::get_singleton()->delay_usec(config.transport_poll_interval_usec << idle_iterations);
 	}
 
 	for (Connection &connection : connections) {

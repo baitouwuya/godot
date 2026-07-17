@@ -47,8 +47,6 @@ struct MCPToolCallContext {
 	Dictionary to_dictionary() const;
 };
 
-class MCPProtocol;
-
 class MCPToolRegistry {
 public:
 	enum ToolSurface : uint32_t {
@@ -82,8 +80,6 @@ public:
 	CallResult call_tool(const StringName &p_name, const Dictionary &p_arguments, const MCPToolCallContext &p_context) const;
 
 private:
-	friend class MCPProtocol;
-
 	struct ToolEntry {
 		Dictionary definition;
 		Callable handler;

@@ -1627,29 +1627,35 @@ int OS_Windows::get_process_id() const {
 }
 
 bool OS_Windows::is_process_running(const ProcessID &p_pid) const {
-	MutexLock lock(process_map_mutex);
-	if (!process_map->has(p_pid)) {
-		return false;
+	{
+		MutexLock lock(process_map_mutex);
+		if (process_map->has(p_pid)) {
+			const ProcessInfo &info = (*process_map)[p_pid];
+			if (!info.is_running) {
+				return false;
+			}
+
+			DWORD exit_code = 0;
+			if (!GetExitCodeProcess(info.pi.hProcess, &exit_code)) {
+				return false;
+			}
+			if (exit_code != STILL_ACTIVE) {
+				info.is_running = false;
+				info.exit_code = exit_code;
+				return false;
+			}
+			return true;
+		}
 	}
 
-	const ProcessInfo &info = (*process_map)[p_pid];
-	if (!info.is_running) {
+	HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, (DWORD)p_pid);
+	if (process == nullptr) {
 		return false;
 	}
-
-	const PROCESS_INFORMATION &pi = info.pi;
-	DWORD dw_exit_code = 0;
-	if (!GetExitCodeProcess(pi.hProcess, &dw_exit_code)) {
-		return false;
-	}
-
-	if (dw_exit_code != STILL_ACTIVE) {
-		info.is_running = false;
-		info.exit_code = dw_exit_code;
-		return false;
-	}
-
-	return true;
+	DWORD exit_code = 0;
+	const bool running = GetExitCodeProcess(process, &exit_code) && exit_code == STILL_ACTIVE;
+	CloseHandle(process);
+	return running;
 }
 
 int OS_Windows::get_process_exit_code(const ProcessID &p_pid) const {

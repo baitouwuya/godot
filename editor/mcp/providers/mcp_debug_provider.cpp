@@ -31,6 +31,8 @@
 #include "mcp_debug_provider.h"
 
 #include "mcp_debug_event_store.h"
+#include "mcp_log_analyzer.h"
+#include "mcp_project_log_reader.h"
 #include "mcp_tool_utils.h"
 
 #include "core/config/project_settings.h"
@@ -142,6 +144,24 @@ static Dictionary _stack_schema() {
 	max_frames["maximum"] = 256;
 	max_frames["default"] = 64;
 	properties["maxFrames"] = max_frames;
+	Dictionary schema;
+	schema["type"] = "object";
+	schema["properties"] = properties;
+	schema["additionalProperties"] = false;
+	return schema;
+}
+
+static Dictionary _latest_log_schema() {
+	Dictionary properties;
+	Dictionary max_lines = _property_schema("integer", "Maximum number of lines read from the latest configured project log.");
+	max_lines["minimum"] = 1;
+	max_lines["maximum"] = 10000;
+	max_lines["default"] = 200;
+	properties["maxLines"] = max_lines;
+	PackedStringArray views;
+	views.push_back("summary");
+	views.push_back("raw");
+	properties["view"] = _enum_schema(views, "Return a compressed analysis or the bounded raw log tail.", "summary");
 	Dictionary schema;
 	schema["type"] = "object";
 	schema["properties"] = properties;
@@ -514,6 +534,11 @@ Error MCPDebugProvider::register_tools(MCPToolRegistry *p_registry, String *r_er
 	}
 	if (error == OK) {
 		error = p_registry->register_tool(
+				MCPToolUtils::make_tool_definition("godot.debug.get_latest_log", "Read the latest configured project log as a bounded raw tail or compressed summary.", _latest_log_schema()),
+				callable_mp(this, &MCPDebugProvider::get_latest_log), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
+	}
+	if (error == OK) {
+		error = p_registry->register_tool(
 				MCPToolUtils::make_tool_definition("godot.debug.get_stack", "Read a full error stack or the latest paused running-project stack.", _stack_schema()),
 				callable_mp(this, &MCPDebugProvider::get_stack), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
 	}
@@ -539,6 +564,56 @@ Dictionary MCPDebugProvider::get_logs(const Dictionary &p_arguments, const Dicti
 
 Dictionary MCPDebugProvider::get_errors(const Dictionary &p_arguments, const Dictionary &) {
 	return _query_result(event_store, p_arguments, true);
+}
+
+Dictionary MCPDebugProvider::get_latest_log(const Dictionary &p_arguments, const Dictionary &) {
+	PackedStringArray allowed;
+	allowed.push_back("maxLines");
+	allowed.push_back("view");
+	String unknown;
+	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed, unknown)) {
+		return _invalid_arguments("Unknown argument: " + unknown);
+	}
+	int64_t max_lines = 200;
+	if (!MCPToolUtils::try_get_json_integer(p_arguments.get("maxLines", 200), 1, 10000, max_lines)) {
+		return _invalid_arguments("maxLines must be from 1 to 10000.");
+	}
+	const Variant view_value = p_arguments.get("view", "summary");
+	if (view_value.get_type() != Variant::STRING) {
+		return _invalid_arguments("view must be summary or raw.");
+	}
+	const String view = view_value;
+	if (view != "summary" && view != "raw") {
+		return _invalid_arguments("view must be summary or raw.");
+	}
+
+	MCPProjectLogReader::Result log;
+	String read_error;
+	const Error error = MCPProjectLogReader::read_latest(int(max_lines), log, &read_error);
+	if (error == ERR_FILE_NOT_FOUND || error == ERR_DOES_NOT_EXIST) {
+		return MCPToolUtils::make_error_result("LOG_NOT_FOUND", read_error);
+	}
+	if (error != OK) {
+		return MCPToolUtils::make_error_result("LOG_READ_FAILED", read_error);
+	}
+
+	Dictionary content;
+	content["path"] = log.path.get_file();
+	content["view"] = view;
+	content["shownLines"] = log.shown_lines;
+	content["totalLines"] = log.total_lines;
+	content["truncated"] = log.truncated;
+	if (view == "raw") {
+		content["text"] = log.text;
+	} else {
+		MCPLogAnalyzer::Options options;
+		options.first_line = MAX(1, log.total_lines - log.shown_lines + 1);
+		options.total_lines = log.total_lines;
+		options.requested_lines = int(max_lines);
+		options.truncated = log.truncated;
+		content.merge(MCPLogAnalyzer::analyze(log.text, options), true);
+	}
+	return MCPToolUtils::make_success_result(content);
 }
 
 Dictionary MCPDebugProvider::get_stack(const Dictionary &p_arguments, const Dictionary &) {

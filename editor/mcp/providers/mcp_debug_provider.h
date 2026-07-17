@@ -46,6 +46,7 @@ public:
 
 	Dictionary get_logs(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary get_errors(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary get_latest_log(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary get_stack(const Dictionary &p_arguments, const Dictionary &p_context);
 
 private:

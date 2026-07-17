@@ -87,14 +87,15 @@ TEST_CASE("[MCP][Provider] Debug tools register in order with strict MCP-only sc
 	CHECK(provider.register_tools(&registry) == ERR_ALREADY_IN_USE);
 
 	const PackedStringArray names = registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_MCP);
-	REQUIRE(names.size() == 3);
+	REQUIRE(names.size() == 4);
 	CHECK(names[0] == "godot.debug.get_logs");
 	CHECK(names[1] == "godot.debug.get_errors");
-	CHECK(names[2] == "godot.debug.get_stack");
+	CHECK(names[2] == "godot.debug.get_latest_log");
+	CHECK(names[3] == "godot.debug.get_stack");
 	CHECK(registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_CLI).is_empty());
 
 	const Array definitions = registry.get_tool_definitions(MCPToolRegistry::TOOL_SURFACE_MCP);
-	REQUIRE(definitions.size() == 3);
+	REQUIRE(definitions.size() == 4);
 	for (const Variant &definition_value : definitions) {
 		const Dictionary schema = Dictionary(definition_value).get("inputSchema", Dictionary());
 		CHECK(schema.get("type", String()) == "object");
@@ -104,6 +105,13 @@ TEST_CASE("[MCP][Provider] Debug tools register in order with strict MCP-only sc
 	Dictionary invalid;
 	invalid["unknown"] = true;
 	CHECK(_error_code(_call(registry, "godot.debug.get_logs", invalid)) == "INVALID_ARGUMENTS");
+	CHECK(_error_code(_call(registry, "godot.debug.get_latest_log", invalid)) == "INVALID_ARGUMENTS");
+	Dictionary invalid_lines;
+	invalid_lines["maxLines"] = 0;
+	CHECK(_error_code(_call(registry, "godot.debug.get_latest_log", invalid_lines)) == "INVALID_ARGUMENTS");
+	Dictionary invalid_view;
+	invalid_view["view"] = "text";
+	CHECK(_error_code(_call(registry, "godot.debug.get_latest_log", invalid_view)) == "INVALID_ARGUMENTS");
 	provider.unregister_tools();
 	CHECK(registry.get_tool_names().is_empty());
 }

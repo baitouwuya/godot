@@ -618,6 +618,9 @@ try {
 		"godot.runtime.drag_target_to_target",
 		"godot.runtime.type_text",
 		"godot.runtime.scroll_view",
+		"godot.runtime.wait.start",
+		"godot.runtime.wait.status",
+		"godot.runtime.wait.cancel",
 		"godot.editor.get_state",
 		"godot.editor.undo",
 		"godot.editor.redo",
@@ -660,8 +663,8 @@ try {
 		"godot.gdscript.rename"
 	) | Sort-Object
 	$actualTools = @($responsesById["2"].result.tools | ForEach-Object { [string]$_.name } | Sort-Object)
-	Assert-Condition ($actualTools.Count -eq 73) "tools/list returned $($actualTools.Count) tools instead of 73."
-	Assert-Condition (($actualTools -join "`n") -ceq ($expectedTools -join "`n")) "tools/list did not expose the expected 73-tool surface."
+	Assert-Condition ($actualTools.Count -eq 76) "tools/list returned $($actualTools.Count) tools instead of 76."
+	Assert-Condition (($actualTools -join "`n") -ceq ($expectedTools -join "`n")) "tools/list did not expose the expected 76-tool surface."
 	$createResult = $responsesById["3"].result.structuredContent
 	Assert-Condition (-not (Test-ToolResultError -Result $responsesById["3"].result)) "script/create returned a tool error."
 	Assert-Condition ([string]$createResult.sha256 -ceq $initialScriptSha) "script/create returned an unexpected SHA-256."

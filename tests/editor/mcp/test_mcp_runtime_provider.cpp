@@ -70,7 +70,7 @@ TEST_CASE("[MCP][Provider] Runtime tools register in a stable strict surface") {
 	CHECK(provider.register_tools(&registry) == ERR_ALREADY_IN_USE);
 
 	const PackedStringArray names = registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_MCP);
-	REQUIRE(names.size() == 26);
+	REQUIRE(names.size() == 29);
 	CHECK(names[0] == "godot.runtime.get_state");
 	CHECK(names[1] == "godot.runtime.play");
 	CHECK(names[2] == "godot.runtime.stop");
@@ -90,17 +90,20 @@ TEST_CASE("[MCP][Provider] Runtime tools register in a stable strict surface") {
 	CHECK(names[16] == "godot.runtime.drag_target_to_target");
 	CHECK(names[17] == "godot.runtime.type_text");
 	CHECK(names[18] == "godot.runtime.scroll_view");
-	CHECK(names[19] == "godot.runtime.node.get_properties");
-	CHECK(names[20] == "godot.runtime.node.set_property");
-	CHECK(names[21] == "godot.runtime.input.send");
-	CHECK(names[22] == "godot.runtime.input.sequence");
-	CHECK(names[23] == "godot.runtime.input.sequence_status");
-	CHECK(names[24] == "godot.runtime.input.sequence_cancel");
-	CHECK(names[25] == "godot.runtime.input.release_all");
+	CHECK(names[19] == "godot.runtime.wait.start");
+	CHECK(names[20] == "godot.runtime.wait.status");
+	CHECK(names[21] == "godot.runtime.wait.cancel");
+	CHECK(names[22] == "godot.runtime.node.get_properties");
+	CHECK(names[23] == "godot.runtime.node.set_property");
+	CHECK(names[24] == "godot.runtime.input.send");
+	CHECK(names[25] == "godot.runtime.input.sequence");
+	CHECK(names[26] == "godot.runtime.input.sequence_status");
+	CHECK(names[27] == "godot.runtime.input.sequence_cancel");
+	CHECK(names[28] == "godot.runtime.input.release_all");
 	CHECK(registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_CLI).is_empty());
 
 	const Array definitions = registry.get_tool_definitions(MCPToolRegistry::TOOL_SURFACE_MCP);
-	REQUIRE(definitions.size() == 26);
+	REQUIRE(definitions.size() == 29);
 	for (const Variant &definition_value : definitions) {
 		const Dictionary schema = Dictionary(definition_value).get("inputSchema", Dictionary());
 		CHECK(schema.get("type", String()) == "object");
@@ -213,6 +216,27 @@ TEST_CASE("[MCP][Provider] Runtime target actions require MCP ownership and expo
 		CHECK_FALSE(properties.has("y"));
 		CHECK(properties.has("selector"));
 	}
+}
+
+TEST_CASE("[MCP][Provider] Runtime wait jobs require MCP ownership and generation identity") {
+	MCPRuntimeDebugService service(nullptr);
+	MCPRuntimeProvider provider(&service);
+	MCPToolRegistry registry;
+	REQUIRE(provider.register_tools(&registry) == OK);
+	Dictionary condition;
+	condition["kind"] = "node_exists";
+	condition["selector"] = Dictionary{ { "name", "Target" } };
+	Dictionary start;
+	start["condition"] = condition;
+	start["runtimeGeneration"] = 1;
+	CHECK(_error_code(_call(registry, "godot.runtime.wait.start", start)) == "MCP_SESSION_REQUIRED");
+
+	Dictionary session;
+	session["sessionId"] = "wait-client";
+	Dictionary status;
+	status["jobId"] = "wait-missing";
+	status["runtimeGeneration"] = 1;
+	CHECK(_error_code(_call(registry, "godot.runtime.wait.status", status, session)) == "WAIT_JOB_NOT_FOUND");
 }
 
 TEST_CASE("[MCP][Provider] Runtime input uses Godot's debugger codec for key and mouse events") {

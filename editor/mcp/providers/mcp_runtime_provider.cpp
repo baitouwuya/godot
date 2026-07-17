@@ -261,6 +261,51 @@ Dictionary _scroll_view_schema() {
 	return _object_schema(properties, PackedStringArray{ "selector", "runtimeGeneration" });
 }
 
+Dictionary _wait_condition_schema() {
+	Dictionary properties;
+	Dictionary kind = _property_schema("string", "Asynchronous runtime condition kind.");
+	kind["enum"] = PackedStringArray{ "node_exists", "node_gone", "property", "scene_changed", "screenshot_diff" };
+	properties["kind"] = kind;
+	properties["selector"] = _selector_schema();
+	Dictionary property = _property_schema("string", "Exact property name used by property conditions.");
+	property["minLength"] = 1;
+	property["maxLength"] = 128;
+	properties["property"] = property;
+	Dictionary equals;
+	equals["description"] = "JSON-native expected value used by property conditions.";
+	properties["equals"] = equals;
+	Dictionary threshold = _property_schema("number", "Normalized screenshot difference threshold.");
+	threshold["minimum"] = 0.001;
+	threshold["maximum"] = 1.0;
+	threshold["default"] = 0.02;
+	properties["threshold"] = threshold;
+	return _object_schema(properties, PackedStringArray{ "kind" });
+}
+
+Dictionary _wait_start_schema() {
+	Dictionary properties;
+	_add_target_action_session_properties(properties);
+	properties["condition"] = _wait_condition_schema();
+	Dictionary timeout_frames = _property_schema("integer", "Maximum rendered frames before the job times out.");
+	timeout_frames["minimum"] = 1;
+	timeout_frames["maximum"] = 36000;
+	timeout_frames["default"] = 300;
+	properties["timeoutFrames"] = timeout_frames;
+	Dictionary poll_frames = _property_schema("integer", "Rendered frames between condition evaluations.");
+	poll_frames["minimum"] = 1;
+	poll_frames["maximum"] = 600;
+	poll_frames["default"] = 1;
+	properties["pollEveryFrames"] = poll_frames;
+	return _object_schema(properties, PackedStringArray{ "condition", "runtimeGeneration" });
+}
+
+Dictionary _wait_job_schema() {
+	Dictionary properties;
+	_add_target_action_session_properties(properties);
+	properties["jobId"] = _property_schema("string", "Opaque wait job ID returned by godot.runtime.wait.start.");
+	return _object_schema(properties, PackedStringArray{ "jobId", "runtimeGeneration" });
+}
+
 Dictionary _properties_schema() {
 	Dictionary properties;
 	_add_session_properties(properties, false, true);
@@ -439,6 +484,12 @@ Error MCPRuntimeProvider::register_tools(MCPToolRegistry *p_registry, String *r_
 				_type_text_schema(), callable_mp(this, &MCPRuntimeProvider::_type_text) },
 		{ "godot.runtime.scroll_view", "Resolve a runtime selector and inject bounded vertical wheel input at the target.",
 				_scroll_view_schema(), callable_mp(this, &MCPRuntimeProvider::_scroll_view) },
+		{ "godot.runtime.wait.start", "Register a bounded runtime condition job and return immediately.",
+				_wait_start_schema(), callable_mp(this, &MCPRuntimeProvider::_start_wait) },
+		{ "godot.runtime.wait.status", "Get the current state of an asynchronous runtime condition job.",
+				_wait_job_schema(), callable_mp(this, &MCPRuntimeProvider::_get_wait_status) },
+		{ "godot.runtime.wait.cancel", "Cancel an asynchronous runtime condition job owned by this MCP session.",
+				_wait_job_schema(), callable_mp(this, &MCPRuntimeProvider::_cancel_wait) },
 		{ "godot.runtime.node.get_properties", "Get all inspectable runtime node properties, including script members and exports.",
 				_properties_schema(), callable_mp(this, &MCPRuntimeProvider::_get_properties) },
 		{ "godot.runtime.node.set_property", "Set and verify one runtime node property through Godot's remote inspector protocol.",
@@ -600,6 +651,34 @@ Dictionary MCPRuntimeProvider::_scroll_view(const Dictionary &p_arguments, const
 	}
 	String session_id;
 	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->scroll_view(p_arguments, session_id) : error;
+}
+
+Dictionary MCPRuntimeProvider::_start_wait(const Dictionary &p_arguments, const Dictionary &p_context) {
+	Dictionary error;
+	const PackedStringArray allowed{ "condition", "timeoutFrames", "pollEveryFrames", "debuggerSession", "runtimeGeneration", "timeoutMs" };
+	if (!_has_only(p_arguments, allowed, error)) {
+		return error;
+	}
+	String session_id;
+	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->start_wait(p_arguments, session_id) : error;
+}
+
+Dictionary MCPRuntimeProvider::_get_wait_status(const Dictionary &p_arguments, const Dictionary &p_context) {
+	Dictionary error;
+	if (!_has_only(p_arguments, PackedStringArray{ "jobId", "debuggerSession", "runtimeGeneration", "timeoutMs" }, error)) {
+		return error;
+	}
+	String session_id;
+	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->get_wait_status(p_arguments, session_id) : error;
+}
+
+Dictionary MCPRuntimeProvider::_cancel_wait(const Dictionary &p_arguments, const Dictionary &p_context) {
+	Dictionary error;
+	if (!_has_only(p_arguments, PackedStringArray{ "jobId", "debuggerSession", "runtimeGeneration", "timeoutMs" }, error)) {
+		return error;
+	}
+	String session_id;
+	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->cancel_wait(p_arguments, session_id) : error;
 }
 
 Dictionary MCPRuntimeProvider::_get_properties(const Dictionary &p_arguments, const Dictionary &) {

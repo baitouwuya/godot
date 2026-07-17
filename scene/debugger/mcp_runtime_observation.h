@@ -33,6 +33,7 @@
 #include "core/error/error_list.h"
 #include "core/math/rect2.h"
 #include "core/string/ustring.h"
+#include "core/variant/array.h"
 #include "core/variant/dictionary.h"
 
 class Node;
@@ -59,6 +60,8 @@ public:
 	};
 
 	static Error parse_selector(const Dictionary &p_value, Selector &r_selector, String &r_error);
+	static Error resolve_selector(const Dictionary &p_value, int p_max_results, int p_max_visited,
+			Array &r_nodes, int &r_visited, String &r_error);
 	static bool matches_snapshot(const Dictionary &p_snapshot, const Selector &p_selector);
 	static Dictionary build_node_snapshot(Node *p_node, Viewport *p_root_viewport);
 	static bool has_screen_position(const Dictionary &p_snapshot);

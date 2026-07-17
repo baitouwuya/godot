@@ -69,21 +69,39 @@ bool _parse_crop(const Dictionary &p_value, Rect2i &r_crop) {
 
 } // namespace
 
-Error MCPRuntimeScreenshotCapture::capture(const Dictionary &p_arguments, Dictionary &r_result, String &r_error_code, String &r_error_message) {
+Error MCPRuntimeScreenshotCapture::capture_image(Ref<Image> &r_image, String &r_error_message) {
+	r_image.unref();
+	r_error_message = String();
 	SceneTree *scene_tree = SceneTree::get_singleton();
 	Viewport *root = scene_tree ? scene_tree->get_root() : nullptr;
 	RenderingServer *rendering_server = RenderingServer::get_singleton();
 	if (!root || !rendering_server) {
-		_set_error(r_error_code, r_error_message, "RUNTIME_SCREENSHOT_UNAVAILABLE", "Root viewport image is unavailable.");
+		r_error_message = "Root viewport image is unavailable.";
 		return ERR_UNAVAILABLE;
 	}
 	const RID texture_rid = rendering_server->viewport_get_texture(root->get_viewport_rid());
-	Ref<Image> image = texture_rid.is_valid() ? rendering_server->texture_2d_get(texture_rid) : Ref<Image>();
-	if (image.is_null() || image->is_empty()) {
-		_set_error(r_error_code, r_error_message, "RUNTIME_SCREENSHOT_UNAVAILABLE", "Root viewport image is unavailable.");
+	r_image = texture_rid.is_valid() ? rendering_server->texture_2d_get(texture_rid) : Ref<Image>();
+	if (r_image.is_null() || r_image->is_empty()) {
+		r_error_message = "Root viewport image is unavailable.";
+		r_image.unref();
 		return ERR_UNAVAILABLE;
 	}
-	image->clear_mipmaps();
+	r_image = r_image->duplicate();
+	if (r_image.is_null()) {
+		r_error_message = "Unable to duplicate the root viewport image.";
+		return ERR_CANT_CREATE;
+	}
+	r_image->clear_mipmaps();
+	r_image->convert(Image::FORMAT_RGBA8);
+	return OK;
+}
+
+Error MCPRuntimeScreenshotCapture::capture(const Dictionary &p_arguments, Dictionary &r_result, String &r_error_code, String &r_error_message) {
+	Ref<Image> image;
+	if (capture_image(image, r_error_message) != OK) {
+		r_error_code = "RUNTIME_SCREENSHOT_UNAVAILABLE";
+		return ERR_UNAVAILABLE;
+	}
 	const Variant crop_value = p_arguments.get("crop", Variant());
 	if (crop_value.get_type() != Variant::NIL) {
 		Rect2i requested;

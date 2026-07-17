@@ -31,9 +31,11 @@
 #pragma once
 
 #include "core/error/error_list.h"
+#include "core/io/image.h"
 #include "core/variant/dictionary.h"
 
 class MCPRuntimeScreenshotCapture {
 public:
+	static Error capture_image(Ref<Image> &r_image, String &r_error_message);
 	static Error capture(const Dictionary &p_arguments, Dictionary &r_result, String &r_error_code, String &r_error_message);
 };

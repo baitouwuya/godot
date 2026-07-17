@@ -363,6 +363,22 @@ Error _resolve_action_targets(const Dictionary &p_arguments, Dictionary &r_resul
 
 } // namespace
 
+Error MCPRuntimeObservation::resolve_selector(const Dictionary &p_value, int p_max_results, int p_max_visited,
+		Array &r_nodes, int &r_visited, String &r_error) {
+	r_nodes.clear();
+	r_visited = 0;
+	if (p_max_results < 1 || p_max_results > MAX_RESULTS || p_max_visited < 1 || p_max_visited > MAX_VISITED_NODES) {
+		r_error = "Runtime selector limits are invalid.";
+		return ERR_INVALID_PARAMETER;
+	}
+	Selector selector;
+	const Error parse_error = parse_selector(p_value, selector, r_error);
+	if (parse_error != OK) {
+		return parse_error;
+	}
+	return _collect_snapshots(selector, p_max_results, false, r_nodes, r_visited, r_error, p_max_visited);
+}
+
 Error MCPRuntimeObservation::execute(const String &p_operation, const Dictionary &p_arguments, Dictionary &r_result,
 		String &r_error_code, String &r_error_message) {
 	r_result.clear();

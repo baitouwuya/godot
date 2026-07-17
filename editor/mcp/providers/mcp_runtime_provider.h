@@ -59,6 +59,9 @@ class MCPRuntimeProvider : public Object {
 	Dictionary _drag_target_to_target(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary _type_text(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary _scroll_view(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary _start_wait(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary _get_wait_status(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary _cancel_wait(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary _get_properties(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary _set_property(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary _send_input(const Dictionary &p_arguments, const Dictionary &p_context);

@@ -34,14 +34,14 @@ void MCPRuntimeObservationDebuggerPlugin::_bind_methods() {
 }
 
 bool MCPRuntimeObservationDebuggerPlugin::capture(const String &p_message, const Array &p_data, int p_session) {
-	if (p_message == "mcp_observation:response") {
+	if (p_message == "mcp_observation:response" || p_message == "mcp_condition:response") {
 		response_store.handle_response(p_session, p_data);
 	}
 	return true;
 }
 
 bool MCPRuntimeObservationDebuggerPlugin::has_capture(const String &p_capture) const {
-	return p_capture == "mcp_observation";
+	return p_capture == "mcp_observation" || p_capture == "mcp_condition";
 }
 
 bool MCPRuntimeObservationDebuggerPlugin::register_request(int p_session, const String &p_request_id, const String &p_operation) {

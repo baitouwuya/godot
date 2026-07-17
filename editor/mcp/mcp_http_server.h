@@ -32,6 +32,10 @@
 #include "mcp_http_parser.h"
 
 #include "core/io/tcp_server.h"
+#include "core/os/mutex.h"
+#include "core/os/thread.h"
+#include "core/templates/list.h"
+#include "core/templates/safe_refcount.h"
 #include "core/templates/vector.h"
 #include "core/variant/dictionary.h"
 
@@ -58,6 +62,9 @@ public:
 		int64_t max_header_bytes = 16 * 1024;
 		int64_t max_body_bytes = 4 * 1024 * 1024;
 		uint64_t idle_timeout_usec = 30 * 1000 * 1000;
+		uint64_t transport_poll_interval_usec = 1000;
+		int max_pending_requests = 64;
+		int max_requests_per_poll = 8;
 	};
 
 private:
@@ -67,20 +74,42 @@ private:
 		Vector<uint8_t> output;
 		int output_offset = 0;
 		uint64_t last_activity_usec = 0;
+		uint64_t id = 0;
 		bool close_after_write = false;
+		bool awaiting_response = false;
+	};
+	struct QueuedRequest {
+		uint64_t connection_id = 0;
+		MCPHTTPParser::Request request;
+	};
+	struct QueuedResponse {
+		uint64_t connection_id = 0;
+		MCPHTTPResponse response;
 	};
 
 	Ref<TCPServer> server;
 	Vector<Connection> connections;
 	Config config;
 	MCPHTTPRequestHandler *handler = nullptr;
-	bool running = false;
+	Thread transport_thread;
+	SafeFlag running;
+	mutable Mutex queue_mutex;
+	List<QueuedRequest> pending_requests;
+	List<QueuedResponse> pending_responses;
+	mutable Mutex state_mutex;
+	int connection_count = 0;
+	int bound_port = 0;
+	uint64_t next_connection_id = 1;
 
 	static bool _constant_time_equals(const String &p_trusted, const String &p_received);
 	static String _reason_phrase(int p_status);
+	static void _thread_main(void *p_userdata);
+	void _run_transport();
 	bool _is_origin_allowed(const String &p_origin) const;
 	bool _is_authorized(const MCPHTTPParser::Request &p_request) const;
 	void _accept_connections();
+	void _apply_pending_responses();
+	bool _queue_request(uint64_t p_connection_id, const MCPHTTPParser::Request &p_request);
 	void _queue_response(Connection &r_connection, const MCPHTTPResponse &p_response);
 	void _queue_error(Connection &r_connection, int p_status, const String &p_message);
 	bool _poll_connection(Connection &r_connection, uint64_t p_now_usec);
@@ -90,9 +119,10 @@ public:
 	void poll();
 	void stop();
 
-	bool is_running() const { return running; }
+	bool is_running() const { return running.is_set(); }
 	int get_port() const;
-	int get_connection_count() const { return connections.size(); }
+	int get_connection_count() const;
+	int get_pending_request_count() const;
 
 	MCPHTTPServer();
 	~MCPHTTPServer();

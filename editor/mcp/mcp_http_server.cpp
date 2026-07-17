@@ -31,6 +31,7 @@
 
 #include "core/io/json.h"
 #include "core/os/os.h"
+#include "core/os/thread.h"
 
 bool MCPHTTPServer::_constant_time_equals(const String &p_trusted, const String &p_received) {
 	const CharString trusted = p_trusted.utf8();
@@ -124,7 +125,46 @@ void MCPHTTPServer::_accept_connections() {
 		Connection connection;
 		connection.peer = peer;
 		connection.last_activity_usec = OS::get_singleton()->get_ticks_usec();
+		connection.id = next_connection_id++;
 		connections.push_back(connection);
+		{
+			MutexLock lock(state_mutex);
+			connection_count = connections.size();
+		}
+	}
+}
+
+bool MCPHTTPServer::_queue_request(uint64_t p_connection_id, const MCPHTTPParser::Request &p_request) {
+	MutexLock lock(queue_mutex);
+	if (pending_requests.size() >= config.max_pending_requests) {
+		return false;
+	}
+	QueuedRequest queued;
+	queued.connection_id = p_connection_id;
+	queued.request = p_request;
+	pending_requests.push_back(queued);
+	return true;
+}
+
+void MCPHTTPServer::_apply_pending_responses() {
+	List<QueuedResponse> responses;
+	{
+		MutexLock lock(queue_mutex);
+		while (!pending_responses.is_empty()) {
+			responses.push_back(pending_responses.front()->get());
+			pending_responses.pop_front();
+		}
+	}
+
+	for (const QueuedResponse &queued : responses) {
+		for (Connection &connection : connections) {
+			if (connection.id != queued.connection_id || !connection.awaiting_response) {
+				continue;
+			}
+			connection.awaiting_response = false;
+			_queue_response(connection, queued.response);
+			break;
+		}
 	}
 }
 
@@ -190,6 +230,9 @@ bool MCPHTTPServer::_poll_connection(Connection &r_connection, uint64_t p_now_us
 			r_connection.last_activity_usec = p_now_usec;
 		}
 		return !(r_connection.close_after_write && r_connection.output_offset >= r_connection.output.size());
+	}
+	if (r_connection.awaiting_response) {
+		return true;
 	}
 
 	const int available = r_connection.peer->get_available_bytes();
@@ -257,16 +300,55 @@ bool MCPHTTPServer::_poll_connection(Connection &r_connection, uint64_t p_now_us
 		return true;
 	}
 
-	_queue_response(r_connection, handler->handle_request(request));
+	if (!_queue_request(r_connection.id, request)) {
+		_queue_error(r_connection, 503, "MCP request queue is full.");
+		return true;
+	}
+	r_connection.awaiting_response = true;
+	r_connection.input.clear();
 	return true;
 }
 
+void MCPHTTPServer::_thread_main(void *p_userdata) {
+	static_cast<MCPHTTPServer *>(p_userdata)->_run_transport();
+}
+
+void MCPHTTPServer::_run_transport() {
+	Thread::set_name("MCP HTTP Transport");
+	while (running.is_set()) {
+		_apply_pending_responses();
+		_accept_connections();
+		const uint64_t now_usec = OS::get_singleton()->get_ticks_usec();
+		for (int i = connections.size() - 1; i >= 0; i--) {
+			if (!_poll_connection(connections.write[i], now_usec)) {
+				connections.write[i].peer->disconnect_from_host();
+				connections.remove_at(i);
+			}
+		}
+		{
+			MutexLock lock(state_mutex);
+			connection_count = connections.size();
+		}
+		OS::get_singleton()->delay_usec(config.transport_poll_interval_usec);
+	}
+
+	for (Connection &connection : connections) {
+		connection.peer->disconnect_from_host();
+	}
+	connections.clear();
+	{
+		MutexLock lock(state_mutex);
+		connection_count = 0;
+	}
+}
+
 Error MCPHTTPServer::start(const Config &p_config, MCPHTTPRequestHandler *p_handler) {
-	ERR_FAIL_COND_V(running, ERR_ALREADY_IN_USE);
+	ERR_FAIL_COND_V(running.is_set() || transport_thread.is_started(), ERR_ALREADY_IN_USE);
 	ERR_FAIL_NULL_V(p_handler, ERR_INVALID_PARAMETER);
 	ERR_FAIL_COND_V(p_config.max_connections <= 0, ERR_INVALID_PARAMETER);
 	ERR_FAIL_COND_V(p_config.max_header_bytes <= 0 || p_config.max_body_bytes < 0, ERR_INVALID_PARAMETER);
 	ERR_FAIL_COND_V(p_config.idle_timeout_usec == 0, ERR_INVALID_PARAMETER);
+	ERR_FAIL_COND_V(p_config.transport_poll_interval_usec == 0 || p_config.max_pending_requests <= 0 || p_config.max_requests_per_poll <= 0, ERR_INVALID_PARAMETER);
 	ERR_FAIL_COND_V(p_config.bind_address != IPAddress("127.0.0.1") && p_config.bind_address != IPAddress("::1"), ERR_INVALID_PARAMETER);
 
 	config = p_config;
@@ -276,39 +358,82 @@ Error MCPHTTPServer::start(const Config &p_config, MCPHTTPRequestHandler *p_hand
 		handler = nullptr;
 		return error;
 	}
-	running = true;
+	{
+		MutexLock lock(state_mutex);
+		bound_port = server->get_local_port();
+		connection_count = 0;
+	}
+	next_connection_id = 1;
+	running.set();
+	if (transport_thread.start(_thread_main, this) == Thread::UNASSIGNED_ID) {
+		running.clear();
+		server->stop();
+		handler = nullptr;
+		MutexLock lock(state_mutex);
+		bound_port = 0;
+		return ERR_CANT_CREATE;
+	}
 	return OK;
 }
 
 void MCPHTTPServer::poll() {
-	if (!running) {
+	if (!running.is_set() || !handler) {
 		return;
 	}
 
-	_accept_connections();
-	const uint64_t now_usec = OS::get_singleton()->get_ticks_usec();
-	for (int i = connections.size() - 1; i >= 0; i--) {
-		if (!_poll_connection(connections.write[i], now_usec)) {
-			connections.write[i].peer->disconnect_from_host();
-			connections.remove_at(i);
+	for (int processed = 0; processed < config.max_requests_per_poll; processed++) {
+		QueuedRequest request;
+		{
+			MutexLock lock(queue_mutex);
+			if (pending_requests.is_empty()) {
+				break;
+			}
+			request = pending_requests.front()->get();
+			pending_requests.pop_front();
+		}
+
+		QueuedResponse response;
+		response.connection_id = request.connection_id;
+		response.response = handler->handle_request(request.request);
+		{
+			MutexLock lock(queue_mutex);
+			pending_responses.push_back(response);
 		}
 	}
 }
 
 void MCPHTTPServer::stop() {
-	for (Connection &connection : connections) {
-		connection.peer->disconnect_from_host();
+	running.clear();
+	if (transport_thread.is_started()) {
+		transport_thread.wait_to_finish();
 	}
-	connections.clear();
 	if (server.is_valid()) {
 		server->stop();
 	}
+	{
+		MutexLock lock(queue_mutex);
+		pending_requests.clear();
+		pending_responses.clear();
+	}
 	handler = nullptr;
-	running = false;
+	MutexLock lock(state_mutex);
+	bound_port = 0;
+	connection_count = 0;
 }
 
 int MCPHTTPServer::get_port() const {
-	return running ? server->get_local_port() : 0;
+	MutexLock lock(state_mutex);
+	return running.is_set() ? bound_port : 0;
+}
+
+int MCPHTTPServer::get_connection_count() const {
+	MutexLock lock(state_mutex);
+	return connection_count;
+}
+
+int MCPHTTPServer::get_pending_request_count() const {
+	MutexLock lock(queue_mutex);
+	return pending_requests.size();
 }
 
 MCPHTTPServer::MCPHTTPServer() {

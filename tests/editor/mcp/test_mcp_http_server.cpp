@@ -41,9 +41,11 @@ constexpr uint64_t MAX_WAIT_USEC = 2 * 1000 * 1000;
 class TestHandler : public MCPHTTPRequestHandler {
 public:
 	int request_count = 0;
+	bool requests_on_main_thread = true;
 
 	MCPHTTPResponse handle_request(const MCPHTTPParser::Request &p_request) override {
 		request_count++;
+		requests_on_main_thread = requests_on_main_thread && Thread::is_main_thread();
 		MCPHTTPResponse response;
 		response.body = "{\"path\":\"" + p_request.path + "\"}";
 		return response;
@@ -118,6 +120,7 @@ TEST_CASE("[MCP] HTTP server validates bearer authentication and Origin") {
 	CHECK(response.contains(" 200 OK\r\n"));
 	CHECK(response.contains("{\"path\":\"/mcp\"}"));
 	CHECK(handler.request_count == 1);
+	CHECK(handler.requests_on_main_thread);
 
 	server.stop();
 }
@@ -132,6 +135,7 @@ TEST_CASE("[MCP] HTTP health endpoint is available without the bearer token") {
 	const String response = exchange(server, "GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n");
 	CHECK(response.contains(" 200 OK\r\n"));
 	CHECK(handler.request_count == 1);
+	CHECK(handler.requests_on_main_thread);
 
 	server.stop();
 }

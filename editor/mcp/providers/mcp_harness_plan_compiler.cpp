@@ -411,7 +411,12 @@ static Error _validate_startup(const Variant &p_value, bool &r_perf, String *r_e
 }
 
 static Error _validate_evidence(const Variant &p_value, Dictionary &r_evidence, String *r_error) {
-	r_evidence = Dictionary();
+	r_evidence = Dictionary{
+		{ "screenshots", "on_failure" },
+		{ "latestLog", false },
+		{ "trace", true },
+		{ "perfSummary", false },
+	};
 	if (p_value.get_type() == Variant::NIL) {
 		return OK;
 	}
@@ -478,13 +483,12 @@ Error MCPHarnessPlanCompiler::compile(const Dictionary &p_script, Dictionary &r_
 	}
 
 	Array compiled_steps;
-	int total_operations = perf ? 1 : 0;
 	if (perf) {
-		Dictionary perf_arguments;
-		perf_arguments["name"] = name;
-		Dictionary perf_step = _make_step(0, "command", "startup.perf", "godot.runtime.performance.start", perf_arguments, true);
-		perf_step["expandedOperationCount"] = 1;
-		compiled_steps.push_back(perf_step);
+		evidence["perfSummary"] = true;
+	}
+	int total_operations = 0;
+	if (perf) {
+		total_operations++;
 	}
 	for (int i = 0; i < source_steps.size(); i++) {
 		if (source_steps[i].get_type() != Variant::DICTIONARY) {

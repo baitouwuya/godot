@@ -31,6 +31,7 @@
 #include "core/mcp/mcp_tool_registry.h"
 #include "core/object/callable_mp.h"
 #include "editor/mcp/providers/mcp_harness_provider.h"
+#include "editor/mcp/providers/mcp_trace_service.h"
 #include "editor/mcp/providers/mcp_tool_utils.h"
 #include "tests/test_macros.h"
 
@@ -44,6 +45,9 @@ public:
 	int sequence_status_count = 0;
 	int wait_status_count = 0;
 	int cancel_count = 0;
+	int performance_start_count = 0;
+	int performance_stop_count = 0;
+	int latest_log_count = 0;
 	bool fail_status = false;
 
 	Dictionary get_state(const Dictionary &, const Dictionary &) {
@@ -92,6 +96,23 @@ public:
 		CHECK(int(p_arguments.get("limit", 0)) == 20);
 		return MCPToolUtils::make_success_result(Dictionary{ { "count", 1 }, { "groups", Array{ Dictionary{ { "message", "failure" } } } } });
 	}
+
+	Dictionary performance_start(const Dictionary &, const Dictionary &) {
+		performance_start_count++;
+		return MCPToolUtils::make_success_result(Dictionary{ { "jobId", "performance-test" }, { "state", "running" } });
+	}
+
+	Dictionary performance_stop(const Dictionary &, const Dictionary &) {
+		performance_stop_count++;
+		return MCPToolUtils::make_success_result(Dictionary{ { "jobId", "performance-test" }, { "state", "stopped" }, { "summary", Dictionary{ { "capturedFrames", 3 } } } });
+	}
+
+	Dictionary latest_log(const Dictionary &p_arguments, const Dictionary &) {
+		latest_log_count++;
+		CHECK(int(p_arguments.get("maxLines", 0)) == 200);
+		CHECK(String(p_arguments.get("view", String())) == "summary");
+		return MCPToolUtils::make_success_result(Dictionary{ { "view", "summary" }, { "shownLines", 3 } });
+	}
 };
 
 static Dictionary _definition(const String &p_name) {
@@ -116,6 +137,9 @@ struct Fixture {
 		REQUIRE(registry.register_tool(_definition("godot.runtime.wait.cancel"), callable_mp(tools, &HarnessTools::cancel_child), tools) == OK);
 		REQUIRE(registry.register_tool(_definition("godot.runtime.get_screenshot"), callable_mp(tools, &HarnessTools::screenshot), tools) == OK);
 		REQUIRE(registry.register_tool(_definition("godot.debug.get_errors"), callable_mp(tools, &HarnessTools::errors), tools) == OK);
+		REQUIRE(registry.register_tool(_definition("godot.runtime.performance.start"), callable_mp(tools, &HarnessTools::performance_start), tools) == OK);
+		REQUIRE(registry.register_tool(_definition("godot.runtime.performance.stop"), callable_mp(tools, &HarnessTools::performance_stop), tools) == OK);
+		REQUIRE(registry.register_tool(_definition("godot.debug.get_latest_log"), callable_mp(tools, &HarnessTools::latest_log), tools) == OK);
 	}
 
 	~Fixture() {
@@ -185,6 +209,7 @@ TEST_CASE("[MCP][Harness] Service advances input and wait children without busy 
 		CHECK(fixture.provider->poll() == 1);
 		CHECK(fixture.tools->call_count - before == 1);
 	}
+	CHECK(fixture.provider->poll() == 0);
 	result = fixture.call("godot.runtime.harness.status", _job_arguments(job_id));
 	CHECK(Dictionary(result.result.get("structuredContent", Dictionary())).get("state", String()) == "completed");
 	result = fixture.call("godot.runtime.harness.get_report", _job_arguments(job_id));
@@ -222,6 +247,7 @@ TEST_CASE("[MCP][Harness] Cancel asynchronously releases an active child") {
 	CHECK(fixture.tools->cancel_count == 0);
 	CHECK(fixture.provider->poll() == 1);
 	CHECK(fixture.tools->cancel_count == 1);
+	CHECK(fixture.provider->poll() == 0);
 	result = fixture.call("godot.runtime.harness.status", _job_arguments(job_id));
 	CHECK(Dictionary(result.result.get("structuredContent", Dictionary())).get("state", String()) == "cancelled");
 }
@@ -247,6 +273,30 @@ TEST_CASE("[MCP][Harness] Failure report collects bounded screenshot and error r
 	CHECK(bool(Dictionary(evidence.get("screenshot", Dictionary())).get("ok", false)));
 	CHECK(bool(Dictionary(evidence.get("errors", Dictionary())).get("ok", false)));
 	CHECK(Dictionary(report.get("failure", Dictionary())).get("code", String()) == "RUNTIME_GONE");
+}
+
+TEST_CASE("[MCP][Harness] Evidence policy drives performance and latest log through MCP tools") {
+	Fixture fixture;
+	Dictionary arguments = _start_arguments(Array{ Dictionary{ { "cmd", "get_status" } } });
+	Dictionary script = arguments["script"];
+	script["evidence"] = Dictionary{ { "screenshots", "off" }, { "latestLog", true }, { "perfSummary", true }, { "trace", false } };
+	arguments["script"] = script;
+	MCPToolRegistry::CallResult result = fixture.call("godot.runtime.harness.start", arguments);
+	const String job_id = Dictionary(result.result.get("structuredContent", Dictionary())).get("jobId", String());
+	REQUIRE_FALSE(job_id.is_empty());
+	CHECK(fixture.provider->poll() == 1);
+	CHECK(fixture.tools->performance_start_count == 1);
+	CHECK(fixture.provider->poll() == 1);
+	CHECK(fixture.provider->poll() == 1);
+	CHECK(fixture.tools->performance_stop_count == 1);
+	CHECK(fixture.provider->poll() == 1);
+	CHECK(fixture.tools->latest_log_count == 1);
+	CHECK(fixture.provider->poll() == 0);
+	const Dictionary report = fixture.call("godot.runtime.harness.get_report", _job_arguments(job_id)).result.get("structuredContent", Dictionary());
+	CHECK(report.get("state", String()) == "completed");
+	const Dictionary evidence = report.get("evidence", Dictionary());
+	CHECK(bool(Dictionary(evidence.get("performance", Dictionary())).get("ok", false)));
+	CHECK(bool(Dictionary(evidence.get("latestLog", Dictionary())).get("ok", false)));
 }
 
 } // namespace TestMCPHarnessProvider

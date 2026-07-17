@@ -143,10 +143,9 @@ TEST_CASE("[MCP][Harness] Compiles performance intent and rejects CLI startup st
 	REQUIRE(MCPHarnessPlanCompiler::compile(script, plan, &error) == OK);
 	CHECK(Dictionary(plan.get("evidencePolicy", Dictionary())).get("screenshots", String()) == "always");
 	const Array steps = plan.get("steps", Array());
-	REQUIRE(steps.size() == 2);
-	CHECK(Dictionary(steps[0]).get("tool", String()) == "godot.runtime.performance.start");
-	CHECK(PackedStringArray(Dictionary(steps[0]).get("contextRequirements", PackedStringArray())).has("runtimeGeneration"));
-	CHECK(Dictionary(Dictionary(steps[0]).get("arguments", Dictionary())).get("name", String()) == "intent");
+	REQUIRE(steps.size() == 1);
+	CHECK(Dictionary(steps[0]).get("tool", String()) == "godot.runtime.get_state");
+	CHECK(bool(Dictionary(plan.get("evidencePolicy", Dictionary())).get("perfSummary", false)));
 	script["startup"] = Dictionary{ { "aiAgentPort", 7010 } };
 	CHECK(MCPHarnessPlanCompiler::compile(script, plan, &error) == ERR_INVALID_DATA);
 	CHECK(error.contains("aiAgentPort"));

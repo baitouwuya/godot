@@ -32,6 +32,7 @@
 
 #include "mcp_harness_plan_compiler.h"
 #include "mcp_tool_utils.h"
+#include "mcp_trace_service.h"
 
 namespace {
 
@@ -52,6 +53,12 @@ static Dictionary _failure(const String &p_code, const String &p_message, const 
 }
 
 } // namespace
+
+void MCPHarnessService::set_trace_service(MCPTraceService *p_service, const Dictionary &p_project_metadata, const String &p_root_directory_override) {
+	trace_service = p_service;
+	trace_project_metadata = p_project_metadata.duplicate(true);
+	trace_root_directory_override = p_root_directory_override;
+}
 
 String MCPHarnessService::_session_id(const MCPToolCallContext &p_context) {
 	const Variant id = p_context.session.get("sessionId", Variant());
@@ -229,10 +236,13 @@ Dictionary MCPHarnessService::start(const Dictionary &p_arguments, const MCPTool
 	job.plan = plan;
 	job.steps = steps;
 	const Dictionary evidence_policy = plan.get("evidencePolicy", Dictionary());
-	const String screenshot_policy = evidence_policy.get("screenshots", "on_failure");
-	job.evidence_screenshot = screenshot_policy == "on_failure" || screenshot_policy == "always";
+	job.screenshot_policy = evidence_policy.get("screenshots", "on_failure");
+	job.evidence_latest_log = evidence_policy.get("latestLog", false);
+	job.evidence_trace = evidence_policy.get("trace", true);
+	job.evidence_perf_summary = evidence_policy.get("perfSummary", false);
 	jobs.insert(job.id, job);
 	job_order.push_back(job.id);
+	_ensure_trace_started(jobs[job.id]);
 	return MCPToolUtils::make_success_result(_summary(jobs[job.id]));
 }
 
@@ -250,7 +260,7 @@ Dictionary MCPHarnessService::cancel(const Dictionary &p_arguments, const MCPToo
 	}
 	if (!_is_terminal(*job)) {
 		job->cancel_requested = true;
-		job->state = job->child_kind == CHILD_NONE ? "cancelled" : "cancelling";
+		job->state = "cancelling";
 	}
 	return MCPToolUtils::make_success_result(_summary(*job));
 }
@@ -293,6 +303,7 @@ void MCPHarnessService::_record_step_start(Job &r_job, const Dictionary &p_step,
 	report_step["arguments"] = p_arguments;
 	report_step["state"] = "running";
 	r_job.report_steps.push_back(report_step);
+	_record_trace_event(r_job, "step_started", "info", report_step);
 }
 
 void MCPHarnessService::_record_step_end(Job &r_job, const MCPToolRegistry::CallResult &p_result, bool p_passed) {
@@ -306,6 +317,7 @@ void MCPHarnessService::_record_step_end(Job &r_job, const MCPToolRegistry::Call
 		report_step["result"] = _result_content(p_result);
 	}
 	r_job.report_steps[r_job.report_steps.size() - 1] = report_step;
+	_record_trace_event(r_job, "step_completed", p_passed ? "info" : "error", report_step, p_passed ? Dictionary() : Dictionary(report_step.get("error", Dictionary())));
 	const Dictionary plan_step = r_job.steps[r_job.current_step];
 	if (String(plan_step.get("kind", String())) == "expect") {
 		Dictionary assertion;
@@ -317,21 +329,92 @@ void MCPHarnessService::_record_step_end(Job &r_job, const MCPToolRegistry::Call
 	}
 }
 
-void MCPHarnessService::_begin_failure(Job &r_job, const Dictionary &p_failure) {
-	r_job.failure = p_failure;
-	if (r_job.current_step >= 0 && r_job.current_step < r_job.steps.size()) {
-		const Dictionary step = r_job.steps[r_job.current_step];
-		const Dictionary polling = step.get("poll", Dictionary());
-		r_job.evidence_screenshot = r_job.evidence_screenshot || bool(polling.get("captureOnError", false));
+void MCPHarnessService::_record_trace_event(Job &r_job, const String &p_event, const String &p_severity, const Dictionary &p_data, const Dictionary &p_error) {
+	if (!r_job.evidence_trace || !trace_service || !trace_service->is_started()) {
+		return;
+	}
+	String trace_error;
+	if (trace_service->record_job_event(r_job.id, p_event, p_severity, p_data, Dictionary(), p_error, &trace_error) != OK && !trace_error.is_empty()) {
+		r_job.evidence["traceError"] = trace_error;
+	}
+}
+
+void MCPHarnessService::_ensure_trace_started(Job &r_job) {
+	if (!r_job.evidence_trace || !trace_service) {
+		return;
+	}
+	if (!trace_service->is_started()) {
+		String error;
+		if (trace_service->start(trace_project_metadata, "editor-mcp-harness", trace_root_directory_override, &error) != OK) {
+			r_job.evidence["trace"] = Dictionary{ { "available", false }, { "error", error } };
+			return;
+		}
+	}
+	r_job.evidence["trace"] = trace_service->get_safe_reference(r_job.id);
+	if (!r_job.trace_started_event) {
+		Dictionary data;
+		data["name"] = r_job.plan.get("name", "harness");
+		data["debuggerSession"] = r_job.debugger_session;
+		data["runtimeGeneration"] = int64_t(r_job.runtime_generation);
+		data["stepCount"] = r_job.steps.size();
+		_record_trace_event(r_job, "started", "info", data);
+		r_job.trace_started_event = true;
+	}
+}
+
+void MCPHarnessService::_begin_finalization(Job &r_job, const String &p_final_state, const Dictionary &p_failure) {
+	r_job.final_state = p_final_state;
+	r_job.cancel_requested = false;
+	if (p_final_state == "cancelled") {
+		r_job.screenshot_policy = "off";
+		r_job.evidence_latest_log = false;
+		r_job.evidence_perf_summary = false;
+	}
+	if (!p_failure.is_empty()) {
+		r_job.failure = p_failure;
 	}
 	r_job.state = "collecting_evidence";
 	r_job.evidence_phase = 0;
 }
 
+void MCPHarnessService::_begin_failure(Job &r_job, const Dictionary &p_failure) {
+	if (r_job.current_step >= 0 && r_job.current_step < r_job.steps.size()) {
+		const Dictionary step = r_job.steps[r_job.current_step];
+		const Dictionary polling = step.get("poll", Dictionary());
+		if (bool(polling.get("captureOnError", false))) {
+			r_job.screenshot_policy = "always";
+		}
+	}
+	_begin_finalization(r_job, "failed", p_failure);
+}
+
 void MCPHarnessService::_complete_job(Job &r_job) {
-	r_job.state = "completed";
 	r_job.child_kind = CHILD_NONE;
 	r_job.child_id = String();
+	_begin_finalization(r_job, "completed");
+}
+
+int MCPHarnessService::_start_performance(Job &r_job) {
+	r_job.performance_start_attempted = true;
+	Dictionary arguments;
+	arguments["name"] = r_job.plan.get("name", "harness");
+	arguments["topFrames"] = 10;
+	arguments["runtimeGeneration"] = int64_t(r_job.runtime_generation);
+	arguments["timeoutMs"] = 500;
+	if (r_job.debugger_session >= 0) {
+		arguments["debuggerSession"] = r_job.debugger_session;
+	}
+	const MCPToolRegistry::CallResult result = _call_tool(r_job, "godot.runtime.performance.start", arguments);
+	if (_is_error_result(result)) {
+		r_job.evidence["performance"] = _evidence_reference("godot.runtime.performance.start", result);
+		return 1;
+	}
+	const Dictionary content = _result_content(result);
+	r_job.performance_job_id = content.get("jobId", String());
+	if (r_job.performance_job_id.is_empty()) {
+		r_job.evidence["performance"] = Dictionary{ { "tool", "godot.runtime.performance.start" }, { "ok", false }, { "error", _failure("INVALID_PERFORMANCE_RESULT", "performance.start did not return jobId.") } };
+	}
+	return 1;
 }
 
 int MCPHarnessService::_advance_child(Job &r_job) {
@@ -377,7 +460,7 @@ int MCPHarnessService::_advance_child(Job &r_job) {
 
 int MCPHarnessService::_advance_cancellation(Job &r_job) {
 	if (r_job.child_kind == CHILD_NONE) {
-		r_job.state = "cancelled";
+		_begin_finalization(r_job, "cancelled", _failure("CANCELLED", "The Harness job was cancelled."));
 		return 0;
 	}
 	const String tool = r_job.child_kind == CHILD_INPUT_SEQUENCE ? "godot.runtime.input.sequence_cancel" : "godot.runtime.wait.cancel";
@@ -393,7 +476,7 @@ int MCPHarnessService::_advance_cancellation(Job &r_job) {
 	}
 	r_job.child_kind = CHILD_NONE;
 	r_job.child_id = String();
-	r_job.state = "cancelled";
+	_begin_finalization(r_job, "cancelled", _failure("CANCELLED", "The Harness job was cancelled."));
 	return 1;
 }
 
@@ -416,35 +499,77 @@ int MCPHarnessService::_advance_evidence(Job &r_job) {
 			return 1;
 		}
 		r_job.evidence_phase++;
-		if (!r_job.evidence_screenshot) {
-			return 0;
-		}
-		Dictionary arguments;
-		arguments["name"] = "harness_failure";
-		arguments["timeoutMs"] = 500;
-		if (r_job.debugger_session >= 0) {
-			arguments["debuggerSession"] = r_job.debugger_session;
-		}
-		const MCPToolRegistry::CallResult result = _call_tool(r_job, "godot.runtime.get_screenshot", arguments);
-		r_job.evidence["screenshot"] = _evidence_reference("godot.runtime.get_screenshot", result);
-		return 1;
 	}
 	if (r_job.evidence_phase == 1) {
 		r_job.evidence_phase++;
-		Dictionary arguments;
-		arguments["source"] = "runtime";
-		arguments["limit"] = 20;
-		arguments["includeWarnings"] = true;
-		arguments["deduplicate"] = true;
-		arguments["runtimeGeneration"] = int64_t(r_job.runtime_generation);
-		if (r_job.debugger_session >= 0) {
-			arguments["debuggerSession"] = r_job.debugger_session;
+		if (!r_job.performance_job_id.is_empty()) {
+			Dictionary arguments;
+			arguments["jobId"] = r_job.performance_job_id;
+			arguments["runtimeGeneration"] = int64_t(r_job.runtime_generation);
+			arguments["timeoutMs"] = 500;
+			if (r_job.debugger_session >= 0) {
+				arguments["debuggerSession"] = r_job.debugger_session;
+			}
+			const MCPToolRegistry::CallResult result = _call_tool(r_job, "godot.runtime.performance.stop", arguments);
+			r_job.evidence["performance"] = _evidence_reference("godot.runtime.performance.stop", result);
+			r_job.performance_job_id = String();
+			return 1;
 		}
-		const MCPToolRegistry::CallResult result = _call_tool(r_job, "godot.debug.get_errors", arguments);
-		r_job.evidence["errors"] = _evidence_reference("godot.debug.get_errors", result);
-		return 1;
 	}
-	r_job.state = "failed";
+	if (r_job.evidence_phase == 2) {
+		r_job.evidence_phase++;
+		const bool capture_screenshot = r_job.screenshot_policy == "always" || (r_job.screenshot_policy == "on_failure" && r_job.final_state != "completed");
+		if (capture_screenshot) {
+			Dictionary arguments;
+			arguments["name"] = r_job.final_state == "completed" ? "harness_completed" : "harness_failure";
+			arguments["timeoutMs"] = 500;
+			if (r_job.debugger_session >= 0) {
+				arguments["debuggerSession"] = r_job.debugger_session;
+			}
+			const MCPToolRegistry::CallResult result = _call_tool(r_job, "godot.runtime.get_screenshot", arguments);
+			r_job.evidence["screenshot"] = _evidence_reference("godot.runtime.get_screenshot", result);
+			return 1;
+		}
+	}
+	if (r_job.evidence_phase == 3) {
+		r_job.evidence_phase++;
+		if (r_job.final_state == "failed") {
+			Dictionary arguments;
+			arguments["source"] = "runtime";
+			arguments["limit"] = 20;
+			arguments["includeWarnings"] = true;
+			arguments["deduplicate"] = true;
+			arguments["runtimeGeneration"] = int64_t(r_job.runtime_generation);
+			if (r_job.debugger_session >= 0) {
+				arguments["debuggerSession"] = r_job.debugger_session;
+			}
+			const MCPToolRegistry::CallResult result = _call_tool(r_job, "godot.debug.get_errors", arguments);
+			r_job.evidence["errors"] = _evidence_reference("godot.debug.get_errors", result);
+			return 1;
+		}
+	}
+	if (r_job.evidence_phase == 4) {
+		r_job.evidence_phase++;
+		if (r_job.evidence_latest_log) {
+			Dictionary arguments;
+			arguments["maxLines"] = 200;
+			arguments["view"] = "summary";
+			const MCPToolRegistry::CallResult result = _call_tool(r_job, "godot.debug.get_latest_log", arguments);
+			r_job.evidence["latestLog"] = _evidence_reference("godot.debug.get_latest_log", result);
+			return 1;
+		}
+	}
+	if (!r_job.trace_final_event) {
+		Dictionary data = _summary(r_job);
+		data["finalState"] = r_job.final_state;
+		_record_trace_event(r_job, "finished", r_job.final_state == "completed" ? "info" : "error", data, r_job.failure);
+		r_job.trace_final_event = true;
+		if (r_job.evidence_trace && trace_service && trace_service->is_started()) {
+			r_job.evidence["trace"] = trace_service->get_safe_reference(r_job.id);
+		}
+	}
+	r_job.state = r_job.final_state.is_empty() ? "failed" : r_job.final_state;
+	r_job.cancel_requested = false;
 	return 0;
 }
 
@@ -457,6 +582,9 @@ int MCPHarnessService::_advance_job(Job &r_job) {
 	}
 	if (r_job.state == "collecting_evidence") {
 		return _advance_evidence(r_job);
+	}
+	if (r_job.evidence_perf_summary && !r_job.performance_start_attempted) {
+		return _start_performance(r_job);
 	}
 	if (r_job.child_kind != CHILD_NONE) {
 		return _advance_child(r_job);
@@ -537,11 +665,15 @@ int MCPHarnessService::poll(int p_max_tool_calls) {
 void MCPHarnessService::release_session(const String &p_session_id) {
 	for (KeyValue<String, Job> &entry : jobs) {
 		if (entry.value.session_id == p_session_id && !_is_terminal(entry.value)) {
+			entry.value.final_state = "cancelled";
 			entry.value.state = "cancelled";
-			entry.value.cancel_requested = true;
+			entry.value.cancel_requested = false;
 			entry.value.child_kind = CHILD_NONE;
 			entry.value.child_id = String();
+			entry.value.performance_job_id = String();
 			entry.value.failure = _failure("SESSION_CLOSED", "The owning MCP session closed.");
+			_record_trace_event(entry.value, "finished", "error", _summary(entry.value), entry.value.failure);
+			entry.value.trace_final_event = true;
 		}
 	}
 }
@@ -549,8 +681,10 @@ void MCPHarnessService::release_session(const String &p_session_id) {
 void MCPHarnessService::shutdown() {
 	for (KeyValue<String, Job> &entry : jobs) {
 		if (!_is_terminal(entry.value)) {
+			entry.value.final_state = "cancelled";
 			entry.value.state = "cancelled";
 			entry.value.failure = _failure("HOST_STOPPED", "The MCP Host stopped.");
+			_record_trace_event(entry.value, "finished", "error", _summary(entry.value), entry.value.failure);
 		}
 	}
 	jobs.clear();

@@ -34,6 +34,8 @@
 #include "core/templates/hash_map.h"
 #include "core/templates/vector.h"
 
+class MCPTraceService;
+
 class MCPHarnessService {
 public:
 	static constexpr int MAX_ACTIVE_JOBS = 8;
@@ -41,6 +43,7 @@ public:
 	static constexpr int MAX_TOOL_CALLS_PER_POLL = 4;
 
 	void set_tool_registry(MCPToolRegistry *p_registry) { tool_registry = p_registry; }
+	void set_trace_service(MCPTraceService *p_service, const Dictionary &p_project_metadata = Dictionary(), const String &p_root_directory_override = String());
 
 	Dictionary start(const Dictionary &p_arguments, const MCPToolCallContext &p_context);
 	Dictionary get_status(const Dictionary &p_arguments, const MCPToolCallContext &p_context) const;
@@ -71,15 +74,26 @@ private:
 		Dictionary failure;
 		Dictionary evidence;
 		String state = "running";
+		String final_state;
 		int current_step = 0;
 		ChildKind child_kind = CHILD_NONE;
 		String child_id;
 		bool cancel_requested = false;
-		bool evidence_screenshot = false;
+		String screenshot_policy = "on_failure";
+		bool evidence_latest_log = false;
+		bool evidence_trace = true;
+		bool evidence_perf_summary = false;
+		bool performance_start_attempted = false;
+		String performance_job_id;
+		bool trace_started_event = false;
+		bool trace_final_event = false;
 		int evidence_phase = 0;
 	};
 
 	MCPToolRegistry *tool_registry = nullptr;
+	MCPTraceService *trace_service = nullptr;
+	Dictionary trace_project_metadata;
+	String trace_root_directory_override;
 	HashMap<String, Job> jobs;
 	Vector<String> job_order;
 	uint64_t next_job_id = 1;
@@ -102,8 +116,12 @@ private:
 	MCPToolRegistry::CallResult _call_tool(const Job &p_job, const String &p_tool, const Dictionary &p_arguments) const;
 	void _record_step_start(Job &r_job, const Dictionary &p_step, const Dictionary &p_arguments);
 	void _record_step_end(Job &r_job, const MCPToolRegistry::CallResult &p_result, bool p_passed);
+	void _record_trace_event(Job &r_job, const String &p_event, const String &p_severity, const Dictionary &p_data = Dictionary(), const Dictionary &p_error = Dictionary());
+	void _ensure_trace_started(Job &r_job);
+	void _begin_finalization(Job &r_job, const String &p_final_state, const Dictionary &p_failure = Dictionary());
 	void _begin_failure(Job &r_job, const Dictionary &p_failure);
 	void _complete_job(Job &r_job);
+	int _start_performance(Job &r_job);
 	int _advance_job(Job &r_job);
 	int _advance_child(Job &r_job);
 	int _advance_cancellation(Job &r_job);

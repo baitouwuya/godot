@@ -59,6 +59,7 @@ class MCPRuntimeDebugService;
 class MCPRuntimeProvider;
 class MCPSceneProvider;
 class MCPScriptProvider;
+class MCPTraceService;
 
 class MCPEditorPlugin : public EditorPlugin, public MCPHostSessionObserver {
 	GDCLASS(MCPEditorPlugin, EditorPlugin);
@@ -111,6 +112,7 @@ class MCPEditorPlugin : public EditorPlugin, public MCPHostSessionObserver {
 	MCPGDScriptProvider *gdscript_provider = nullptr;
 	MCPGDScriptSessionManager *gdscript_session_manager = nullptr;
 	MCPHarnessProvider *harness_provider = nullptr;
+	MCPTraceService *trace_service = nullptr;
 
 	void _notification(int p_what);
 	Error _register_tools(String &r_error);

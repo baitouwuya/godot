@@ -50,6 +50,11 @@ TEST_CASE("[MCP] Trace service is opt-in and records a single explicit lifecycle
 	CHECK(service.is_started());
 	const String session_directory = service.get_session_directory();
 	CHECK(DirAccess::dir_exists_absolute(session_directory));
+	const Dictionary safe_reference = service.get_safe_reference("job-1");
+	CHECK(bool(safe_reference.get("available", false)));
+	CHECK_FALSE(String(safe_reference.get("traceId", String())).is_empty());
+	CHECK(String(safe_reference.get("manifest", String())) == "manifest.json");
+	CHECK_FALSE(JSON::stringify(safe_reference).contains(session_directory));
 
 	Dictionary nested;
 	nested["password"] = "nested-password";

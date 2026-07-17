@@ -229,3 +229,16 @@ String MCPTraceService::get_session_directory() const {
 	MutexLock lock(mutex);
 	return writer.get_session_directory();
 }
+
+Dictionary MCPTraceService::get_safe_reference(const String &p_correlation_id) const {
+	MutexLock lock(mutex);
+	Dictionary reference;
+	reference["available"] = writer.is_open();
+	const String writer_session_id = writer.get_session_id();
+	reference["traceId"] = writer_session_id.is_empty() ? String("active") : writer_session_id;
+	reference["manifest"] = "manifest.json";
+	if (!p_correlation_id.is_empty()) {
+		reference["correlationId"] = _bounded_text(p_correlation_id, 256);
+	}
+	return reference;
+}

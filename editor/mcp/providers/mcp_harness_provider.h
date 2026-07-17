@@ -41,6 +41,7 @@ public:
 
 	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr);
 	void unregister_tools();
+	void set_trace_service(MCPTraceService *p_service, const Dictionary &p_project_metadata = Dictionary(), const String &p_root_directory_override = String()) { service.set_trace_service(p_service, p_project_metadata, p_root_directory_override); }
 
 	Dictionary start(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary get_status(const Dictionary &p_arguments, const Dictionary &p_context);

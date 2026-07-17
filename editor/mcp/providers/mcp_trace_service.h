@@ -27,6 +27,7 @@ public:
 
 	bool is_started() const;
 	String get_session_directory() const;
+	Dictionary get_safe_reference(const String &p_correlation_id = String()) const;
 
 private:
 	static void _set_error(String *r_error, const String &p_message);

@@ -44,6 +44,7 @@
 #include "providers/mcp_runtime_debug_service.h"
 #include "providers/mcp_runtime_provider.h"
 #include "providers/mcp_scene_provider.h"
+#include "providers/mcp_trace_service.h"
 
 #include "core/config/project_settings.h"
 #include "core/object/callable_mp.h"
@@ -251,6 +252,7 @@ Error MCPEditorPlugin::_start_mcp(String &r_error) {
 		r_error = "Unable to start the MCP Streamable HTTP Host.";
 		return error;
 	}
+	harness_provider->set_trace_service(trace_service, host.get_project_metadata());
 
 	discovery_record.endpoint = host.get_endpoint();
 	error = _publish_discovery(r_error);
@@ -290,6 +292,7 @@ Error MCPEditorPlugin::_start_mcp(String &r_error) {
 void MCPEditorPlugin::_stop_mcp() {
 	project_heartbeat.stop();
 	harness_provider->shutdown();
+	trace_service->stop();
 	runtime_debug_service->shutdown_input();
 	if (runtime_observation_debugger_registered) {
 		remove_debugger_plugin(runtime_observation_debugger_plugin);
@@ -441,6 +444,7 @@ MCPEditorPlugin::MCPEditorPlugin() {
 	runtime_observation_debugger_plugin.instantiate();
 	runtime_debug_service->set_observation_plugin(runtime_observation_debugger_plugin.ptr());
 	runtime_provider = memnew(MCPRuntimeProvider(runtime_debug_service));
+	trace_service = memnew(MCPTraceService);
 	harness_provider = memnew(MCPHarnessProvider);
 	editor_provider = memnew(MCPEditorProvider);
 	editor_ui_provider = memnew(MCPEditorUIProvider);
@@ -475,6 +479,7 @@ MCPEditorPlugin::~MCPEditorPlugin() {
 	memdelete(editor_provider);
 	memdelete(runtime_provider);
 	memdelete(harness_provider);
+	memdelete(trace_service);
 	memdelete(runtime_debug_service);
 	memdelete(debug_provider);
 	memdelete(debug_capture);

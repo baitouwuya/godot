@@ -360,6 +360,11 @@ Error MCPScriptProvider::register_tools(MCPToolRegistry *p_registry, String *r_e
 			callable_mp(this, &MCPScriptProvider::create), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
 	if (err == OK) {
 		err = p_registry->register_tool(
+				MCPToolUtils::make_tool_definition("godot.script.open", "Open an external or built-in GDScript in the Script editor.", _script_selector_schema()),
+				callable_mp(this, &MCPScriptProvider::open), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
+	}
+	if (err == OK) {
+		err = p_registry->register_tool(
 				MCPToolUtils::make_tool_definition("godot.script.get", "Read a GDScript as documentation, a member, or full source.", _get_schema()),
 				callable_mp(this, &MCPScriptProvider::get), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
 	}
@@ -393,6 +398,26 @@ void MCPScriptProvider::unregister_tools() {
 	}
 	tool_registry->unregister_tools_for_owner(this);
 	tool_registry = nullptr;
+}
+
+Dictionary MCPScriptProvider::open(const Dictionary &p_arguments, const Dictionary &) {
+	PackedStringArray allowed_arguments;
+	allowed_arguments.push_back("path");
+	allowed_arguments.push_back("nodePath");
+	String unknown_argument;
+	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed_arguments, unknown_argument)) {
+		return _unknown_argument_error(unknown_argument);
+	}
+
+	MCPScriptBuffer buffer;
+	const Dictionary buffer_error = _open_selected_buffer(p_arguments, buffer);
+	if (!buffer_error.is_empty()) {
+		return buffer_error;
+	}
+	Dictionary result = buffer.get_snapshot();
+	result.erase("text");
+	result["opened"] = true;
+	return MCPToolUtils::make_success_result(result);
 }
 
 Dictionary MCPScriptProvider::create(const Dictionary &p_arguments, const Dictionary &p_context) {

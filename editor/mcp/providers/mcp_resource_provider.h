@@ -34,6 +34,7 @@
 #include "core/variant/dictionary.h"
 
 class MCPToolRegistry;
+class Resource;
 
 class MCPResourceProvider : public Object {
 public:
@@ -48,9 +49,13 @@ public:
 
 	Dictionary import_options(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary import_resource(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary get_properties(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary set_property(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary save(const Dictionary &p_arguments, const Dictionary &p_context);
 
 private:
 	MCPToolRegistry *tool_registry = nullptr;
+	HashMap<String, Ref<Resource>> resource_cache;
 	String project_root;
 	ImportFunction import_function = nullptr;
 	ScanFunction scan_function = nullptr;

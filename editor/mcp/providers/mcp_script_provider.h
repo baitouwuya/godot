@@ -51,6 +51,7 @@ public:
 	const Ref<MCPGDScriptSessionManager> &get_session_manager() const { return session_manager; }
 
 	Dictionary create(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary open(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary get(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary usages(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary edit(const Dictionary &p_arguments, const Dictionary &p_context);

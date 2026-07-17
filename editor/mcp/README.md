@@ -86,9 +86,13 @@ Pass the returned `snapshotId`, one `targetId`, and an advertised action to `god
 
 Snapshots are isolated per MCP session. Targets are revalidated against the visible editor tree and active window before every operation. When a modal dialog or popup is active, only that scope is exposed. Raw object IDs, node paths, arbitrary callables, and screen-coordinate clicks are not accepted.
 
+## Batch MCP Tools
+
+`godot.automation.batch` prevalidates and then invokes up to 64 MCP tools sequentially in the same session. It is fail-fast by default and rejects recursive batch calls. CLI clients obtain this capability only through the standard stdio bridge to the project's running MCP Host; there is no separate batch CLI implementation.
+
 ## Edit Scene Structure
 
-Node structure changes use the current scene's `EditorUndoRedoManager` history and leave the scene unsaved until `godot.scene.save` is called. The structural tools are:
+`godot.scene.open` opens a project-local `.tscn` or `.scn` through the editor. Node structure changes use the current scene's `EditorUndoRedoManager` history and leave the scene unsaved until `godot.scene.save` is called. The structural tools are:
 
 - `godot.node.delete`
 - `godot.node.rename`
@@ -101,9 +105,15 @@ Only the edited scene root and nodes owned by it are editable. Operations reject
 
 ## Find Script Usages
 
+`godot.script.open` accepts the same external-script `path` or edited-scene `nodePath` selector as the other script tools. It opens the authoritative Script editor buffer without returning source text; built-in GDScripts are supported through their scene subresource or attached node.
+
 `godot.script.usages` accepts the same external-script `path` or edited-scene `nodePath` selector as `godot.script.get`, plus an exact `member` selector. Supported member kinds are classes, properties, constants, enums, enum values, signals, methods, and parameters. Parameter selectors use `owner` for the method or signal name and may use `classPath` for a nested class.
 
 The tool synchronizes all open GDScript editor buffers into the calling MCP analysis session, resolves the selected member through the built-in GDScript parser, and returns semantic LSP locations using zero-based UTF-16 positions. Declarations are excluded by default; set `includeDeclaration` to `true` to include them. Built-in scripts and unsaved buffers participate in the search without being written to disk.
+
+## Edit Resources
+
+`godot.resource.get_properties` reads the editable Inspector property list of a project-local Resource from `ResourceLoader`'s cache. Values use the same restricted Variant codec as node properties. `godot.resource.set_property` updates that cached object, integrates with editor Undo/Redo when available, refreshes the Inspector, and deliberately leaves the resource unsaved. `godot.resource.save` explicitly persists the same cached object. Arbitrary paths and unsafe object references are rejected.
 
 ## Inspect Debug Output
 
@@ -155,4 +165,4 @@ pwsh -File tests/editor/mcp/test_mcp_cli_smoke.ps1 `
   -Binary bin/godot.windows.editor.dev.x86_64.console.exe
 ```
 
-Optional parameters are `-TimeoutSeconds <5-300>` and `-KeepTemporaryProjects`. The test creates two temporary projects and verifies explicit-path errors, CLI/editor conflicts, ordinary editor behavior, public discovery fields, independent multi-project routing, same-project Host exclusion, JSON-only stdio stdout, the complete 54-tool MCP surface, native class search/documentation, editor UI discovery, runtime tool discovery, compressed debug output and errors, cross-session dirty ScriptEditor revision/diagnostic/save/usage behavior, structural Node edits with `NodePath` rewrites, and explicit scene save. Temporary editor plugins request clean Host shutdown; forced termination is used only as a timeout fallback.
+Optional parameters are `-TimeoutSeconds <5-300>` and `-KeepTemporaryProjects`. The test creates two temporary projects and verifies explicit-path errors, CLI/editor conflicts, ordinary editor behavior, public discovery fields, independent multi-project routing, same-project Host exclusion, JSON-only stdio stdout, the complete 65-tool MCP surface, native class search/documentation, editor UI discovery, runtime tool discovery, compressed debug output and errors, cross-session dirty ScriptEditor revision/diagnostic/save/usage behavior, structural Node edits with `NodePath` rewrites, and explicit scene save. Temporary editor plugins request clean Host shutdown; forced termination is used only as a timeout fallback.

@@ -46,6 +46,7 @@ public:
 
 	Dictionary get_tree(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary get_selection(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary open(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary save(const Dictionary &p_arguments, const Dictionary &p_context);
 
 private:

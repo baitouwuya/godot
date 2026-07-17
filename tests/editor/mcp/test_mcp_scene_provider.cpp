@@ -44,15 +44,18 @@ TEST_CASE("[MCP][Provider] Scene tools register in order on the MCP surface") {
 	CHECK(provider->register_tools(&registry) == ERR_ALREADY_IN_USE);
 
 	const PackedStringArray names = registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_MCP);
-	REQUIRE(names.size() == 3);
-	CHECK(names[0] == "godot.scene.get_tree");
-	CHECK(names[1] == "godot.scene.get_selection");
-	CHECK(names[2] == "godot.scene.save");
+	REQUIRE(names.size() == 4);
+	CHECK(names[0] == "godot.scene.open");
+	CHECK(names[1] == "godot.scene.get_tree");
+	CHECK(names[2] == "godot.scene.get_selection");
+	CHECK(names[3] == "godot.scene.save");
 	CHECK(registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_CLI).is_empty());
 
 	const Array definitions = registry.get_tool_definitions(MCPToolRegistry::TOOL_SURFACE_MCP);
-	REQUIRE(definitions.size() == 3);
-	const Dictionary tree_schema = Dictionary(definitions[0]).get("inputSchema", Dictionary());
+	REQUIRE(definitions.size() == 4);
+	const Dictionary open_schema = Dictionary(definitions[0]).get("inputSchema", Dictionary());
+	CHECK(PackedStringArray(open_schema.get("required", PackedStringArray())).has("path"));
+	const Dictionary tree_schema = Dictionary(definitions[1]).get("inputSchema", Dictionary());
 	const Dictionary tree_properties = tree_schema.get("properties", Dictionary());
 	CHECK(tree_properties.has("rootPath"));
 	CHECK(tree_properties.has("maxDepth"));

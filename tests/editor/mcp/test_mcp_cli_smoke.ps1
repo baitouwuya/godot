@@ -585,6 +585,7 @@ try {
 	Assert-Condition ($responsesById.ContainsKey("6")) "stdio editor/ui/get_actions response is missing."
 
 	$expectedTools = @(
+		"godot.automation.batch",
 		"godot.class.search",
 		"godot.class.get_documentation",
 		"godot.debug.get_logs",
@@ -604,14 +605,23 @@ try {
 		"godot.runtime.input.sequence_status",
 		"godot.runtime.input.sequence_cancel",
 		"godot.runtime.input.release_all",
+		"godot.runtime.get_screenshot",
+		"godot.runtime.get_viewport_summary",
+		"godot.runtime.query_nodes",
+		"godot.runtime.get_interactables",
+		"godot.runtime.get_node_snapshot",
 		"godot.editor.get_state",
 		"godot.editor.undo",
 		"godot.editor.redo",
 		"godot.editor.ui.get_actions",
 		"godot.editor.ui.perform",
 		"godot.file.create",
+		"godot.resource.get_properties",
+		"godot.resource.set_property",
+		"godot.resource.save",
 		"godot.resource.import_options",
 		"godot.resource.import",
+		"godot.scene.open",
 		"godot.scene.get_tree",
 		"godot.scene.get_selection",
 		"godot.scene.save",
@@ -626,6 +636,7 @@ try {
 		"godot.node.duplicate",
 		"godot.node.instantiate_scene",
 		"godot.script.create",
+		"godot.script.open",
 		"godot.script.get",
 		"godot.script.usages",
 		"godot.script.edit",
@@ -641,8 +652,8 @@ try {
 		"godot.gdscript.rename"
 	) | Sort-Object
 	$actualTools = @($responsesById["2"].result.tools | ForEach-Object { [string]$_.name } | Sort-Object)
-	Assert-Condition ($actualTools.Count -eq 54) "tools/list returned $($actualTools.Count) tools instead of 54."
-	Assert-Condition (($actualTools -join "`n") -ceq ($expectedTools -join "`n")) "tools/list did not expose the expected 54-tool surface."
+	Assert-Condition ($actualTools.Count -eq 65) "tools/list returned $($actualTools.Count) tools instead of 65."
+	Assert-Condition (($actualTools -join "`n") -ceq ($expectedTools -join "`n")) "tools/list did not expose the expected 65-tool surface."
 	$createResult = $responsesById["3"].result.structuredContent
 	Assert-Condition (-not (Test-ToolResultError -Result $responsesById["3"].result)) "script/create returned a tool error."
 	Assert-Condition ([string]$createResult.sha256 -ceq $initialScriptSha) "script/create returned an unexpected SHA-256."

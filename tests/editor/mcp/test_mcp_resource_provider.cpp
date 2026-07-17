@@ -33,11 +33,14 @@
 #include "core/io/file_access.h"
 #include "core/io/resource_importer.h"
 #include "core/io/resource_loader.h"
+#include "core/io/resource_saver.h"
 #include "core/mcp/mcp_tool_registry.h"
 #include "core/os/os.h"
 #include "editor/file_system/editor_file_system.h"
 #include "editor/import/resource_importer_csv_translation.h"
 #include "editor/mcp/providers/mcp_resource_provider.h"
+#include "editor/mcp/providers/mcp_variant_codec.h"
+#include "scene/resources/gradient.h"
 #include "tests/test_macros.h"
 
 TEST_FORCE_LINK(test_mcp_resource_provider);
@@ -344,9 +347,12 @@ TEST_CASE("[MCP][Provider] Resource options expose candidates, presets, Property
 	REQUIRE(provider->register_tools(&registry) == OK);
 	CHECK(provider->register_tools(&registry) == ERR_ALREADY_IN_USE);
 	const PackedStringArray names = registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_MCP);
-	REQUIRE(names.size() == 2);
-	CHECK(names[0] == "godot.resource.import_options");
-	CHECK(names[1] == "godot.resource.import");
+	REQUIRE(names.size() == 5);
+	CHECK(names[0] == "godot.resource.get_properties");
+	CHECK(names[1] == "godot.resource.set_property");
+	CHECK(names[2] == "godot.resource.save");
+	CHECK(names[3] == "godot.resource.import_options");
+	CHECK(names[4] == "godot.resource.import");
 	CHECK(registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_CLI).is_empty());
 
 	MCPToolCallContext context;
@@ -400,6 +406,64 @@ TEST_CASE("[MCP][Provider] Resource options expose candidates, presets, Property
 	arguments["options"] = Array();
 	call_result = registry.call_tool("godot.resource.import_options", arguments, context);
 	CHECK(_error_code(call_result) == "INVALID_OPTIONS");
+
+	provider->unregister_tools();
+	memdelete(provider);
+}
+
+TEST_CASE("[MCP][Provider] Resource properties use the cache until explicit save") {
+	TestPaths paths = _make_test_paths();
+	REQUIRE(paths.temporary_directory.is_valid());
+	const String unique_suffix = String::num_int64(OS::get_singleton()->get_process_id()) + "_" + String::num_uint64(OS::get_singleton()->get_ticks_usec());
+	const String resource_path = "res://assets/resource_provider_" + unique_suffix + ".tres";
+	const String absolute_path = paths.project_root.path_join(resource_path.trim_prefix("res://"));
+	REQUIRE(DirAccess::make_dir_recursive_absolute(absolute_path.get_base_dir()) == OK);
+
+	Ref<Gradient> gradient;
+	gradient.instantiate();
+	gradient->set_interpolation_mode(Gradient::GRADIENT_INTERPOLATE_LINEAR);
+	REQUIRE(ResourceSaver::save(gradient, absolute_path) == OK);
+	gradient.unref();
+
+	MCPToolRegistry registry;
+	MCPResourceProvider *provider = memnew(MCPResourceProvider(paths.project_root));
+	REQUIRE(provider->register_tools(&registry) == OK);
+	MCPToolCallContext context;
+	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
+	Dictionary arguments;
+	arguments["path"] = resource_path;
+
+	MCPToolRegistry::CallResult call_result = registry.call_tool("godot.resource.get_properties", arguments, context);
+	REQUIRE(call_result.status == MCPToolRegistry::CALL_OK);
+	INFO(call_result.result.get("structuredContent", Dictionary()));
+	REQUIRE_FALSE(bool(call_result.result.get("isError", false)));
+	const Dictionary properties_result = call_result.result.get("structuredContent", Dictionary());
+	CHECK(properties_result.get("type", String()) == "Gradient");
+	CHECK(int(properties_result.get("propertyCount", 0)) > 0);
+
+	arguments["property"] = "interpolation_mode";
+	Variant encoded_mode;
+	REQUIRE(MCPVariantCodec::encode(int(Gradient::GRADIENT_INTERPOLATE_CONSTANT), encoded_mode) == OK);
+	arguments["value"] = encoded_mode;
+	call_result = registry.call_tool("godot.resource.set_property", arguments, context);
+	REQUIRE_FALSE(bool(call_result.result.get("isError", false)));
+	const Dictionary set_result = call_result.result.get("structuredContent", Dictionary());
+	CHECK(bool(set_result.get("changed", false)));
+	CHECK_FALSE(bool(set_result.get("saved", true)));
+	Ref<Gradient> cached_gradient = ResourceLoader::load(absolute_path);
+	REQUIRE(cached_gradient.is_valid());
+	CHECK(cached_gradient->get_interpolation_mode() == Gradient::GRADIENT_INTERPOLATE_CONSTANT);
+	Ref<Gradient> disk_gradient = ResourceLoader::load(absolute_path, "", ResourceFormatLoader::CACHE_MODE_IGNORE);
+	REQUIRE(disk_gradient.is_valid());
+	CHECK(disk_gradient->get_interpolation_mode() == Gradient::GRADIENT_INTERPOLATE_LINEAR);
+
+	arguments.erase("property");
+	arguments.erase("value");
+	call_result = registry.call_tool("godot.resource.save", arguments, context);
+	REQUIRE_FALSE(bool(call_result.result.get("isError", false)));
+	disk_gradient = ResourceLoader::load(absolute_path, "", ResourceFormatLoader::CACHE_MODE_IGNORE);
+	REQUIRE(disk_gradient.is_valid());
+	CHECK(disk_gradient->get_interpolation_mode() == Gradient::GRADIENT_INTERPOLATE_CONSTANT);
 
 	provider->unregister_tools();
 	memdelete(provider);

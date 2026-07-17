@@ -40,6 +40,7 @@
 #include "core/object/callable_mp.h"
 #include "editor/editor_data.h"
 #include "editor/editor_interface.h"
+#include "editor/editor_node.h"
 #include "scene/main/node.h"
 
 namespace {
@@ -83,6 +84,17 @@ static Dictionary _save_schema() {
 	return _object_schema(properties);
 }
 
+static Dictionary _open_schema() {
+	Dictionary path = _property_schema("string", "Project scene path beginning with res://.");
+	Dictionary properties;
+	properties["path"] = path;
+	Dictionary schema = _object_schema(properties);
+	PackedStringArray required;
+	required.push_back("path");
+	schema["required"] = required;
+	return schema;
+}
+
 static Dictionary _unknown_argument_error(const String &p_name) {
 	return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "Unknown argument: " + p_name);
 }
@@ -121,8 +133,13 @@ Error MCPSceneProvider::register_tools(MCPToolRegistry *p_registry, String *r_er
 	}
 
 	Error err = p_registry->register_tool(
-			MCPToolUtils::make_tool_definition("godot.scene.get_tree", "Get the current edited scene tree.", _tree_schema()),
-			callable_mp(this, &MCPSceneProvider::get_tree), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
+			MCPToolUtils::make_tool_definition("godot.scene.open", "Open a project scene in the editor.", _open_schema()),
+			callable_mp(this, &MCPSceneProvider::open), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
+	if (err == OK) {
+		err = p_registry->register_tool(
+				MCPToolUtils::make_tool_definition("godot.scene.get_tree", "Get the current edited scene tree.", _tree_schema()),
+				callable_mp(this, &MCPSceneProvider::get_tree), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
+	}
 	if (err == OK) {
 		err = p_registry->register_tool(
 				MCPToolUtils::make_tool_definition("godot.scene.get_selection", "Get nodes selected in the editor.", _object_schema()),
@@ -148,6 +165,50 @@ void MCPSceneProvider::unregister_tools() {
 	}
 	tool_registry->unregister_tools_for_owner(this);
 	tool_registry = nullptr;
+}
+
+Dictionary MCPSceneProvider::open(const Dictionary &p_arguments, const Dictionary &) {
+	PackedStringArray allowed_arguments;
+	allowed_arguments.push_back("path");
+	String unknown_argument;
+	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed_arguments, unknown_argument)) {
+		return _unknown_argument_error(unknown_argument);
+	}
+	const Variant path_value = p_arguments.get("path", Variant());
+	if (path_value.get_type() != Variant::STRING || String(path_value).is_empty()) {
+		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "A non-empty string path is required.");
+	}
+
+	String scene_path;
+	String absolute_path;
+	String path_error;
+	if (MCPPathUtils::resolve_project_file_path(path_value, scene_path, absolute_path, &path_error) != OK) {
+		return MCPToolUtils::make_error_result("INVALID_PATH", path_error);
+	}
+	const String extension = scene_path.get_extension().to_lower();
+	if (extension != "tscn" && extension != "scn") {
+		return MCPToolUtils::make_error_result("INVALID_PATH", "Scene path must use the .tscn or .scn extension.");
+	}
+	if (!FileAccess::exists(absolute_path)) {
+		return MCPToolUtils::make_error_result("SCENE_NOT_FOUND", "Scene does not exist: " + scene_path);
+	}
+
+	EditorNode *editor_node = EditorNode::get_singleton();
+	if (!editor_node) {
+		return MCPToolUtils::make_error_result("EDITOR_UNAVAILABLE", "The editor is not available.");
+	}
+	if (editor_node->is_changing_scene()) {
+		return MCPToolUtils::make_error_result("EDITOR_BUSY", "The editor is already changing scenes.");
+	}
+	const Error err = editor_node->open_scene(scene_path);
+	if (err != OK) {
+		return MCPToolUtils::make_error_result("OPEN_FAILED", error_names[err]);
+	}
+
+	Dictionary result;
+	result["path"] = scene_path;
+	result["opened"] = true;
+	return MCPToolUtils::make_success_result(result);
 }
 
 Dictionary MCPSceneProvider::get_tree(const Dictionary &p_arguments, const Dictionary &) {

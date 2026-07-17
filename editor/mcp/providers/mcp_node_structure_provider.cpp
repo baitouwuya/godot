@@ -258,7 +258,7 @@ Error MCPNodeStructureProvider::register_tools(MCPToolRegistry *p_registry, Stri
 	};
 	for (const ToolRegistration &tool : tools) {
 		const Error err = p_registry->register_tool(MCPToolUtils::make_tool_definition(tool.name, tool.description, tool.schema),
-				tool.handler, MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
+				tool.handler, this, r_error);
 		if (err != OK) {
 			p_registry->unregister_tools_for_owner(this);
 			return err;

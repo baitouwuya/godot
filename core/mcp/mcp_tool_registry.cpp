@@ -32,7 +32,6 @@
 
 Dictionary MCPToolCallContext::to_dictionary() const {
 	Dictionary context;
-	context["surface"] = surface;
 	context["requestId"] = request_id;
 	context["protocolVersion"] = protocol_version;
 	context["session"] = session.duplicate(true);
@@ -40,31 +39,28 @@ Dictionary MCPToolCallContext::to_dictionary() const {
 	return context;
 }
 
-bool MCPToolRegistry::_matches_surface(const ToolEntry &p_entry, uint32_t p_surface) const {
-	return p_surface == 0 || (p_entry.surfaces & p_surface) != 0;
-}
-
 void MCPToolRegistry::_invalidate_definition_cache() {
 	definition_cache.clear();
+	definition_cache_valid = false;
 }
 
-const Array &MCPToolRegistry::_get_cached_tool_definitions(uint32_t p_surface) const {
-	if (const Array *cached = definition_cache.getptr(p_surface)) {
-		return *cached;
+const Array &MCPToolRegistry::_get_cached_tool_definitions() const {
+	if (definition_cache_valid) {
+		return definition_cache;
 	}
 
-	Array definitions;
+	definition_cache.clear();
 	for (const StringName &name : registration_order) {
 		const ToolEntry *entry = tools.getptr(name);
-		if (entry && entry->handler.is_valid() && _matches_surface(*entry, p_surface)) {
-			definitions.push_back(entry->definition);
+		if (entry && entry->handler.is_valid()) {
+			definition_cache.push_back(entry->definition);
 		}
 	}
-	definition_cache.insert(p_surface, definitions);
-	return *definition_cache.getptr(p_surface);
+	definition_cache_valid = true;
+	return definition_cache;
 }
 
-Error MCPToolRegistry::register_tool(const Dictionary &p_definition, const Callable &p_handler, uint32_t p_surfaces, Object *p_owner, String *r_error) {
+Error MCPToolRegistry::register_tool(const Dictionary &p_definition, const Callable &p_handler, Object *p_owner, String *r_error) {
 	if (r_error) {
 		*r_error = String();
 	}
@@ -102,12 +98,6 @@ Error MCPToolRegistry::register_tool(const Dictionary &p_definition, const Calla
 		}
 		return ERR_INVALID_PARAMETER;
 	}
-	if (p_surfaces == 0 || (p_surfaces & ~uint32_t(TOOL_SURFACE_ALL)) != 0) {
-		if (r_error) {
-			*r_error = "Tool surfaces must contain MCP, CLI, or both.";
-		}
-		return ERR_INVALID_PARAMETER;
-	}
 	if (!p_handler.is_valid()) {
 		if (r_error) {
 			*r_error = "Tool handler is not callable.";
@@ -129,7 +119,6 @@ Error MCPToolRegistry::register_tool(const Dictionary &p_definition, const Calla
 	ToolEntry entry;
 	entry.definition = definition;
 	entry.handler = p_handler;
-	entry.surfaces = p_surfaces;
 	entry.owner_id = p_owner ? p_owner->get_instance_id() : p_handler.get_object_id();
 	tools.insert(name, entry);
 	registration_order.push_back(name);
@@ -168,20 +157,20 @@ int MCPToolRegistry::unregister_tools_for_owner(ObjectID p_owner_id) {
 	return names_to_remove.size();
 }
 
-bool MCPToolRegistry::has_tool(const StringName &p_name, uint32_t p_surface) const {
+bool MCPToolRegistry::has_tool(const StringName &p_name) const {
 	const ToolEntry *entry = tools.getptr(p_name);
-	return entry && entry->handler.is_valid() && _matches_surface(*entry, p_surface);
+	return entry && entry->handler.is_valid();
 }
 
-Array MCPToolRegistry::get_tool_definitions(uint32_t p_surface) const {
-	return _get_cached_tool_definitions(p_surface).duplicate(true);
+Array MCPToolRegistry::get_tool_definitions() const {
+	return _get_cached_tool_definitions().duplicate(true);
 }
 
-PackedStringArray MCPToolRegistry::get_tool_names(uint32_t p_surface) const {
+PackedStringArray MCPToolRegistry::get_tool_names() const {
 	PackedStringArray names;
 	for (const StringName &name : registration_order) {
 		const ToolEntry *entry = tools.getptr(name);
-		if (entry && entry->handler.is_valid() && _matches_surface(*entry, p_surface)) {
+		if (entry && entry->handler.is_valid()) {
 			names.push_back(String(name));
 		}
 	}
@@ -191,7 +180,7 @@ PackedStringArray MCPToolRegistry::get_tool_names(uint32_t p_surface) const {
 MCPToolRegistry::CallResult MCPToolRegistry::call_tool(const StringName &p_name, const Dictionary &p_arguments, const MCPToolCallContext &p_context) const {
 	CallResult call_result;
 	const ToolEntry *entry = tools.getptr(p_name);
-	if (!entry || !_matches_surface(*entry, p_context.surface)) {
+	if (!entry) {
 		call_result.status = CALL_TOOL_NOT_FOUND;
 		call_result.message = "Unknown tool: " + String(p_name);
 		return call_result;

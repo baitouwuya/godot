@@ -97,7 +97,6 @@ private:
 
 static MCPToolRegistry::CallResult _call(MCPToolRegistry &p_registry, const StringName &p_name, const Dictionary &p_arguments) {
 	MCPToolCallContext context;
-	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
 	return p_registry.call_tool(p_name, p_arguments, context);
 }
 
@@ -114,7 +113,7 @@ TEST_CASE("[MCP][Provider] Node structure tools expose strict schemas") {
 	REQUIRE(provider->register_tools(&registry) == OK);
 	CHECK(provider->register_tools(&registry) == ERR_ALREADY_IN_USE);
 
-	const PackedStringArray names = registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_MCP);
+	const PackedStringArray names = registry.get_tool_names();
 	REQUIRE(names.size() == 6);
 	CHECK(names[0] == "godot.node.delete");
 	CHECK(names[1] == "godot.node.rename");

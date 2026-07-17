@@ -225,7 +225,6 @@ Dictionary MCPHarnessService::start(const Dictionary &p_arguments, const MCPTool
 	job.debugger_session = int(debugger_session);
 	job.runtime_generation = uint64_t(generation);
 	job.context = p_context;
-	job.context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
 	job.context.request_id = Variant();
 	job.plan = plan;
 	job.steps = steps;

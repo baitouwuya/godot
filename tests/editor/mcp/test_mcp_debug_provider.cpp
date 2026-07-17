@@ -39,7 +39,6 @@ namespace TestMCPDebugProvider {
 
 static MCPToolRegistry::CallResult _call(MCPToolRegistry &p_registry, const StringName &p_name, const Dictionary &p_arguments) {
 	MCPToolCallContext context;
-	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
 	return p_registry.call_tool(p_name, p_arguments, context);
 }
 
@@ -79,22 +78,21 @@ static MCPDebugEventStore::Event _event(MCPDebugEventStore::Source p_source, MCP
 	return event;
 }
 
-TEST_CASE("[MCP][Provider] Debug tools register in order with strict MCP-only schemas") {
+TEST_CASE("[MCP][Provider] Debug tools register in order with strict schemas") {
 	MCPDebugEventStore store;
 	MCPToolRegistry registry;
 	MCPDebugProvider provider(&store);
 	REQUIRE(provider.register_tools(&registry) == OK);
 	CHECK(provider.register_tools(&registry) == ERR_ALREADY_IN_USE);
 
-	const PackedStringArray names = registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_MCP);
+	const PackedStringArray names = registry.get_tool_names();
 	REQUIRE(names.size() == 4);
 	CHECK(names[0] == "godot.debug.get_logs");
 	CHECK(names[1] == "godot.debug.get_errors");
 	CHECK(names[2] == "godot.debug.get_latest_log");
 	CHECK(names[3] == "godot.debug.get_stack");
-	CHECK(registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_CLI).is_empty());
 
-	const Array definitions = registry.get_tool_definitions(MCPToolRegistry::TOOL_SURFACE_MCP);
+	const Array definitions = registry.get_tool_definitions();
 	REQUIRE(definitions.size() == 4);
 	for (const Variant &definition_value : definitions) {
 		const Dictionary schema = Dictionary(definition_value).get("inputSchema", Dictionary());

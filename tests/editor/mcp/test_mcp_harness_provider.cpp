@@ -107,15 +107,15 @@ struct Fixture {
 
 	Fixture() {
 		REQUIRE(provider->register_tools(&registry) == OK);
-		REQUIRE(registry.register_tool(_definition("godot.runtime.get_state"), callable_mp(tools, &HarnessTools::get_state), MCPToolRegistry::TOOL_SURFACE_MCP, tools) == OK);
-		REQUIRE(registry.register_tool(_definition("godot.runtime.input.sequence"), callable_mp(tools, &HarnessTools::sequence_start), MCPToolRegistry::TOOL_SURFACE_MCP, tools) == OK);
-		REQUIRE(registry.register_tool(_definition("godot.runtime.input.sequence_status"), callable_mp(tools, &HarnessTools::sequence_status), MCPToolRegistry::TOOL_SURFACE_MCP, tools) == OK);
-		REQUIRE(registry.register_tool(_definition("godot.runtime.input.sequence_cancel"), callable_mp(tools, &HarnessTools::cancel_child), MCPToolRegistry::TOOL_SURFACE_MCP, tools) == OK);
-		REQUIRE(registry.register_tool(_definition("godot.runtime.wait.start"), callable_mp(tools, &HarnessTools::wait_start), MCPToolRegistry::TOOL_SURFACE_MCP, tools) == OK);
-		REQUIRE(registry.register_tool(_definition("godot.runtime.wait.status"), callable_mp(tools, &HarnessTools::wait_status), MCPToolRegistry::TOOL_SURFACE_MCP, tools) == OK);
-		REQUIRE(registry.register_tool(_definition("godot.runtime.wait.cancel"), callable_mp(tools, &HarnessTools::cancel_child), MCPToolRegistry::TOOL_SURFACE_MCP, tools) == OK);
-		REQUIRE(registry.register_tool(_definition("godot.runtime.get_screenshot"), callable_mp(tools, &HarnessTools::screenshot), MCPToolRegistry::TOOL_SURFACE_MCP, tools) == OK);
-		REQUIRE(registry.register_tool(_definition("godot.debug.get_errors"), callable_mp(tools, &HarnessTools::errors), MCPToolRegistry::TOOL_SURFACE_MCP, tools) == OK);
+		REQUIRE(registry.register_tool(_definition("godot.runtime.get_state"), callable_mp(tools, &HarnessTools::get_state), tools) == OK);
+		REQUIRE(registry.register_tool(_definition("godot.runtime.input.sequence"), callable_mp(tools, &HarnessTools::sequence_start), tools) == OK);
+		REQUIRE(registry.register_tool(_definition("godot.runtime.input.sequence_status"), callable_mp(tools, &HarnessTools::sequence_status), tools) == OK);
+		REQUIRE(registry.register_tool(_definition("godot.runtime.input.sequence_cancel"), callable_mp(tools, &HarnessTools::cancel_child), tools) == OK);
+		REQUIRE(registry.register_tool(_definition("godot.runtime.wait.start"), callable_mp(tools, &HarnessTools::wait_start), tools) == OK);
+		REQUIRE(registry.register_tool(_definition("godot.runtime.wait.status"), callable_mp(tools, &HarnessTools::wait_status), tools) == OK);
+		REQUIRE(registry.register_tool(_definition("godot.runtime.wait.cancel"), callable_mp(tools, &HarnessTools::cancel_child), tools) == OK);
+		REQUIRE(registry.register_tool(_definition("godot.runtime.get_screenshot"), callable_mp(tools, &HarnessTools::screenshot), tools) == OK);
+		REQUIRE(registry.register_tool(_definition("godot.debug.get_errors"), callable_mp(tools, &HarnessTools::errors), tools) == OK);
 	}
 
 	~Fixture() {
@@ -127,7 +127,6 @@ struct Fixture {
 
 	MCPToolRegistry::CallResult call(const String &p_name, const Dictionary &p_arguments, const String &p_session = "session-a") {
 		MCPToolCallContext context;
-		context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
 		context.session["sessionId"] = p_session;
 		return registry.call_tool(p_name, p_arguments, context);
 	}
@@ -157,17 +156,16 @@ static Dictionary _job_arguments(const String &p_job_id, int p_generation = 7) {
 	return arguments;
 }
 
-TEST_CASE("[MCP][Harness] Provider registers four MCP-only tools") {
+TEST_CASE("[MCP][Harness] Provider registers four MCP tools") {
 	MCPToolRegistry registry;
 	MCPHarnessProvider *provider = memnew(MCPHarnessProvider);
 	REQUIRE(provider->register_tools(&registry) == OK);
-	const PackedStringArray names = registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_MCP);
+	const PackedStringArray names = registry.get_tool_names();
 	REQUIRE(names.size() == 4);
 	CHECK(names[0] == "godot.runtime.harness.start");
 	CHECK(names[1] == "godot.runtime.harness.status");
 	CHECK(names[2] == "godot.runtime.harness.cancel");
 	CHECK(names[3] == "godot.runtime.harness.get_report");
-	CHECK(registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_CLI).is_empty());
 	provider->unregister_tools();
 	memdelete(provider);
 }

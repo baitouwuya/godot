@@ -128,7 +128,7 @@ TEST_CASE("[MCP][Provider] GDScript semantic tools use injected analysis session
 	CHECK(provider->get_analysis_service() == service);
 	CHECK(provider->get_analysis_session() == session);
 
-	const PackedStringArray names = registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_MCP);
+	const PackedStringArray names = registry.get_tool_names();
 	REQUIRE(names.size() == 9);
 	CHECK(names[0] == "godot.gdscript.diagnostics");
 	CHECK(names[1] == "godot.gdscript.symbols");
@@ -139,9 +139,8 @@ TEST_CASE("[MCP][Provider] GDScript semantic tools use injected analysis session
 	CHECK(names[6] == "godot.gdscript.references");
 	CHECK(names[7] == "godot.gdscript.signature_help");
 	CHECK(names[8] == "godot.gdscript.rename");
-	CHECK(registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_CLI).is_empty());
 
-	const Array definitions = registry.get_tool_definitions(MCPToolRegistry::TOOL_SURFACE_MCP);
+	const Array definitions = registry.get_tool_definitions();
 	REQUIRE(definitions.size() == 9);
 	const Dictionary diagnostics_schema = Dictionary(definitions[0]).get("inputSchema", Dictionary());
 	CHECK(Array(diagnostics_schema.get("oneOf", Array())).size() == 2);
@@ -167,7 +166,6 @@ TEST_CASE("[MCP][Provider] GDScript semantic tools use injected analysis session
 	CHECK(rename_required.has("newName"));
 
 	MCPToolCallContext context;
-	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
 	Dictionary missing_script;
 	missing_script["path"] = "res://mcp_semantic_missing.gd";
 	const MCPToolRegistry::CallResult missing_call = registry.call_tool("godot.gdscript.diagnostics", missing_script, context);
@@ -313,10 +311,8 @@ TEST_CASE("[MCP][Provider] GDScript queries synchronize project authority into e
 	Dictionary arguments;
 	arguments["path"] = absolute_path;
 	MCPToolCallContext first_context;
-	first_context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
 	first_context.session["sessionId"] = first_id;
 	MCPToolCallContext second_context;
-	second_context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
 	second_context.session["sessionId"] = second_id;
 
 	const MCPToolRegistry::CallResult first_call = registry.call_tool("godot.gdscript.diagnostics", arguments, first_context);

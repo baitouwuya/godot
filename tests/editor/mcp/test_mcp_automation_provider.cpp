@@ -76,11 +76,10 @@ TEST_CASE("[MCP][Provider] Automation batch composes MCP tools in one session") 
 	MCPAutomationProvider *automation = memnew(MCPAutomationProvider);
 	RecordingProvider *recording = memnew(RecordingProvider);
 	REQUIRE(automation->register_tools(&registry) == OK);
-	REQUIRE(registry.register_tool(_definition("test.succeed"), callable_mp(recording, &RecordingProvider::succeed), MCPToolRegistry::TOOL_SURFACE_MCP, recording) == OK);
-	REQUIRE(registry.register_tool(_definition("test.fail"), callable_mp(recording, &RecordingProvider::fail), MCPToolRegistry::TOOL_SURFACE_MCP, recording) == OK);
+	REQUIRE(registry.register_tool(_definition("test.succeed"), callable_mp(recording, &RecordingProvider::succeed), recording) == OK);
+	REQUIRE(registry.register_tool(_definition("test.fail"), callable_mp(recording, &RecordingProvider::fail), recording) == OK);
 
-	CHECK(registry.has_tool("godot.automation.batch", MCPToolRegistry::TOOL_SURFACE_MCP));
-	CHECK_FALSE(registry.has_tool("godot.automation.batch", MCPToolRegistry::TOOL_SURFACE_CLI));
+	CHECK(registry.has_tool("godot.automation.batch"));
 
 	Dictionary first_arguments;
 	first_arguments["value"] = 7;
@@ -91,7 +90,6 @@ TEST_CASE("[MCP][Provider] Automation batch composes MCP tools in one session") 
 	arguments["calls"] = calls;
 
 	MCPToolCallContext context;
-	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
 	context.session["sessionId"] = "session-1";
 	const MCPToolRegistry::CallResult result = registry.call_tool("godot.automation.batch", arguments, context);
 	REQUIRE(result.status == MCPToolRegistry::CALL_OK);
@@ -114,11 +112,10 @@ TEST_CASE("[MCP][Provider] Automation batch validates before mutation and stops 
 	MCPAutomationProvider *automation = memnew(MCPAutomationProvider);
 	RecordingProvider *recording = memnew(RecordingProvider);
 	REQUIRE(automation->register_tools(&registry) == OK);
-	REQUIRE(registry.register_tool(_definition("test.succeed"), callable_mp(recording, &RecordingProvider::succeed), MCPToolRegistry::TOOL_SURFACE_MCP, recording) == OK);
-	REQUIRE(registry.register_tool(_definition("test.fail"), callable_mp(recording, &RecordingProvider::fail), MCPToolRegistry::TOOL_SURFACE_MCP, recording) == OK);
+	REQUIRE(registry.register_tool(_definition("test.succeed"), callable_mp(recording, &RecordingProvider::succeed), recording) == OK);
+	REQUIRE(registry.register_tool(_definition("test.fail"), callable_mp(recording, &RecordingProvider::fail), recording) == OK);
 
 	MCPToolCallContext context;
-	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
 	Array invalid_calls;
 	invalid_calls.push_back(_call("test.succeed"));
 	invalid_calls.push_back(_call("test.missing"));

@@ -102,7 +102,6 @@ bool MCPProtocol::_is_batch_supported() const {
 
 MCPToolCallContext MCPProtocol::_make_tool_call_context(const Variant &p_id, const Dictionary &p_session_context) const {
 	MCPToolCallContext context;
-	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
 	context.request_id = p_id;
 	context.protocol_version = protocol_version;
 	context.session = p_session_context.duplicate(true);
@@ -249,7 +248,7 @@ Variant MCPProtocol::_dispatch_request(const Dictionary &p_request, bool &r_resp
 			return _make_error(id, INTERNAL_ERROR, "MCP tool registry is not configured.");
 		}
 		Dictionary result;
-		result["tools"] = tool_registry->get_tool_definitions(MCPToolRegistry::TOOL_SURFACE_MCP);
+		result["tools"] = tool_registry->get_tool_definitions();
 		return _make_response(id, result);
 	}
 	if (method == "tools/call") {

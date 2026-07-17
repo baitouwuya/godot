@@ -1,6 +1,6 @@
-# Godot MCP Host and CLI
+# Godot MCP Host and CLI Transport Adapters
 
-Godot exposes MCP as an opt-in editor Host plus two terminal CLI commands. A normal editor or game launch does not start MCP.
+Godot exposes MCP as an opt-in editor Host plus two terminal CLI transport adapters. The editor Host, MCP protocol, Tool Registry, and Providers are the only source of business functionality. The CLI implements only project discovery and standard stdio forwarding; it has no business Tool Registry and never invokes a Provider directly. A normal editor or game launch does not start MCP.
 
 ## Start a Host
 
@@ -41,6 +41,8 @@ godot --mcp-stdio --path C:\projects\my-game
 ```
 
 The bridge reads one JSON-RPC object or batch per stdin line. It resolves the selected project's current discovery record, adds the private bearer credential internally, forwards requests to that Host, and writes only JSON-RPC responses to stdout. Blank input lines are ignored and diagnostics use stderr.
+
+`--mcp-discover` and `--mcp-stdio` are the complete CLI adapter surface. Features such as logging, LSP queries, runtime input, performance recording, and Harness jobs are MCP tools served by the editor Host, including when a client reaches them through stdio.
 
 An MCP client configuration should keep the executable and arguments separate so paths with spaces remain intact:
 
@@ -142,6 +144,8 @@ Runtime tools reuse the editor's built-in run bar and remote debugger connection
 - `godot.runtime.drag_target_to_target` resolves both endpoints atomically and runs the drag through the existing input sequence scheduler.
 - `godot.runtime.type_text` focuses a runtime Control and injects bounded Unicode key events; `godot.runtime.scroll_view` injects bounded wheel input at a selector-resolved target.
 - `godot.runtime.wait.start` creates an asynchronous `node_exists`, `node_gone`, `property`, `scene_changed`, or `screenshot_diff` condition job in the running project. `wait.status` polls it and `wait.cancel` stops it without holding the editor main thread for the condition duration.
+- `godot.runtime.performance.start` creates a bounded in-process sampler that shares one monitor collection pass per runtime frame across active MCP jobs. `performance.status` returns lightweight progress, while `performance.stop` returns the final compressed summary.
+- `godot.runtime.harness.start` compiles and starts a bounded asynchronous automation plan. `harness.status`, `harness.cancel`, and `harness.get_report` expose progress and evidence without blocking the editor while input sequences or runtime waits are active.
 
 When more than one project instance is connected to the same editor, runtime tools require the `debuggerSession` returned by `godot.runtime.get_state`. Mutating tools also require `runtimeGeneration`; a generation changes whenever that debugger slot connects to a new process, so delayed calls cannot accidentally modify a restarted game. Scene tree and property requests use a bounded remote-debugger round trip and return `RUNTIME_TIMEOUT` if the game does not answer.
 
@@ -171,4 +175,4 @@ pwsh -File tests/editor/mcp/test_mcp_cli_smoke.ps1 `
   -Binary bin/godot.windows.editor.dev.x86_64.console.exe
 ```
 
-Optional parameters are `-TimeoutSeconds <5-300>` and `-KeepTemporaryProjects`. The test creates two temporary projects and verifies explicit-path errors, CLI/editor conflicts, ordinary editor behavior, public discovery fields, independent multi-project routing, same-project Host exclusion, JSON-only stdio stdout, the complete 76-tool MCP surface, native class search/documentation, editor UI discovery, runtime tool discovery, compressed debug output and errors, cross-session dirty ScriptEditor revision/diagnostic/save/usage behavior, structural Node edits with `NodePath` rewrites, and explicit scene save. Temporary editor plugins request clean Host shutdown; forced termination is used only as a timeout fallback.
+Optional parameters are `-TimeoutSeconds <5-300>` and `-KeepTemporaryProjects`. The test creates two temporary projects and verifies explicit-path errors, CLI/editor conflicts, ordinary editor behavior, public discovery fields, independent multi-project routing, same-project Host exclusion, JSON-only stdio stdout, the complete 83-tool MCP surface, native class search/documentation, editor UI discovery, runtime tool discovery, compressed debug output and errors, cross-session dirty ScriptEditor revision/diagnostic/save/usage behavior, structural Node edits with `NodePath` rewrites, and explicit scene save. Temporary editor plugins request clean Host shutdown; forced termination is used only as a timeout fallback.

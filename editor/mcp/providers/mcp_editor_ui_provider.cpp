@@ -136,11 +136,11 @@ Error MCPEditorUIProvider::register_tools(MCPToolRegistry *p_registry, String *r
 
 	Error error = p_registry->register_tool(
 			MCPToolUtils::make_tool_definition("godot.editor.ui.get_actions", "Inspect the currently visible editor controls and their semantic actions. Returns snapshot-bound opaque target IDs.", _get_actions_schema()),
-			callable_mp(this, &MCPEditorUIProvider::get_actions), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
+			callable_mp(this, &MCPEditorUIProvider::get_actions), this, r_error);
 	if (error == OK) {
 		error = p_registry->register_tool(
 				MCPToolUtils::make_tool_definition("godot.editor.ui.perform", "Perform a semantic action on a target from the latest editor UI snapshot for this MCP session.", _perform_schema()),
-				callable_mp(this, &MCPEditorUIProvider::perform), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
+				callable_mp(this, &MCPEditorUIProvider::perform), this, r_error);
 	}
 	if (error != OK) {
 		p_registry->unregister_tools_for_owner(this);

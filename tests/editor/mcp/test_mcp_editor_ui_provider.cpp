@@ -43,7 +43,6 @@ namespace TestMCPEditorUIProvider {
 
 static MCPToolRegistry::CallResult _call(MCPToolRegistry &p_registry, const StringName &p_name, const Dictionary &p_arguments, const String &p_session_id = "ui-test-session") {
 	MCPToolCallContext context;
-	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
 	if (!p_session_id.is_empty()) {
 		context.session["sessionId"] = p_session_id;
 	}
@@ -105,13 +104,12 @@ TEST_CASE("[MCP][Provider] Editor UI tools expose strict session-bound schemas")
 	REQUIRE(provider.register_tools(&registry) == OK);
 	CHECK(provider.register_tools(&registry) == ERR_ALREADY_IN_USE);
 
-	const PackedStringArray names = registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_MCP);
+	const PackedStringArray names = registry.get_tool_names();
 	REQUIRE(names.size() == 2);
 	CHECK(names[0] == "godot.editor.ui.get_actions");
 	CHECK(names[1] == "godot.editor.ui.perform");
-	CHECK(registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_CLI).is_empty());
 
-	const Array definitions = registry.get_tool_definitions(MCPToolRegistry::TOOL_SURFACE_MCP);
+	const Array definitions = registry.get_tool_definitions();
 	REQUIRE(definitions.size() == 2);
 	for (const Variant &definition_value : definitions) {
 		const Dictionary schema = Dictionary(definition_value).get("inputSchema", Dictionary());

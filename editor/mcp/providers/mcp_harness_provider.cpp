@@ -80,7 +80,6 @@ static Dictionary _job_schema() {
 
 static MCPToolCallContext _make_context(const Dictionary &p_context) {
 	MCPToolCallContext context;
-	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
 	context.request_id = p_context.get("requestId", Variant());
 	context.protocol_version = p_context.get("protocolVersion", String());
 	const Variant session = p_context.get("session", Dictionary());
@@ -141,7 +140,7 @@ Error MCPHarnessProvider::register_tools(MCPToolRegistry *p_registry, String *r_
 	for (int i = 0; i < 4; i++) {
 		const Dictionary schema = i == 0 ? _start_schema() : _job_schema();
 		const Error error = p_registry->register_tool(MCPToolUtils::make_tool_definition(tools[i].name, tools[i].description, schema),
-				tools[i].callable, MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
+				tools[i].callable, this, r_error);
 		if (error != OK) {
 			p_registry->unregister_tools_for_owner(this);
 			return error;

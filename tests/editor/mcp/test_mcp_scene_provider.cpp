@@ -37,21 +37,20 @@ TEST_FORCE_LINK(test_mcp_scene_provider);
 
 namespace TestMCPSceneProvider {
 
-TEST_CASE("[MCP][Provider] Scene tools register in order on the MCP surface") {
+TEST_CASE("[MCP][Provider] Scene tools register in order") {
 	MCPToolRegistry registry;
 	MCPSceneProvider *provider = memnew(MCPSceneProvider);
 	REQUIRE(provider->register_tools(&registry) == OK);
 	CHECK(provider->register_tools(&registry) == ERR_ALREADY_IN_USE);
 
-	const PackedStringArray names = registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_MCP);
+	const PackedStringArray names = registry.get_tool_names();
 	REQUIRE(names.size() == 4);
 	CHECK(names[0] == "godot.scene.open");
 	CHECK(names[1] == "godot.scene.get_tree");
 	CHECK(names[2] == "godot.scene.get_selection");
 	CHECK(names[3] == "godot.scene.save");
-	CHECK(registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_CLI).is_empty());
 
-	const Array definitions = registry.get_tool_definitions(MCPToolRegistry::TOOL_SURFACE_MCP);
+	const Array definitions = registry.get_tool_definitions();
 	REQUIRE(definitions.size() == 4);
 	const Dictionary open_schema = Dictionary(definitions[0]).get("inputSchema", Dictionary());
 	CHECK(PackedStringArray(open_schema.get("required", PackedStringArray())).has("path"));
@@ -62,7 +61,6 @@ TEST_CASE("[MCP][Provider] Scene tools register in order on the MCP surface") {
 	CHECK(tree_properties.has("includeInternal"));
 
 	MCPToolCallContext context;
-	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
 	Dictionary invalid_arguments;
 	invalid_arguments["unknown"] = true;
 	const MCPToolRegistry::CallResult invalid_call = registry.call_tool("godot.scene.get_tree", invalid_arguments, context);
@@ -91,7 +89,6 @@ TEST_CASE("[MCP][Provider] Scene tree tool returns the injected edited scene") {
 	arguments["maxDepth"] = 1.0;
 	arguments["includeInternal"] = false;
 	MCPToolCallContext context;
-	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
 	const MCPToolRegistry::CallResult call_result = registry.call_tool("godot.scene.get_tree", arguments, context);
 	REQUIRE(call_result.status == MCPToolRegistry::CALL_OK);
 	REQUIRE_FALSE(bool(call_result.result.get("isError", false)));

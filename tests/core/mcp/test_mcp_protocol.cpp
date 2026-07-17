@@ -160,7 +160,7 @@ TEST_CASE("[MCP][Protocol] Lists and invokes tools without injecting the JSON-RP
 	Dictionary definition;
 	definition["name"] = "echo";
 	definition["description"] = "Echo arguments and context.";
-	CHECK_EQ(registry.register_tool(definition, callable_mp(provider, &ToolProvider::echo), MCPToolRegistry::TOOL_SURFACE_MCP, provider), OK);
+	CHECK_EQ(registry.register_tool(definition, callable_mp(provider, &ToolProvider::echo), provider), OK);
 
 	MCPProtocol protocol(&registry);
 	Dictionary project;
@@ -207,7 +207,7 @@ TEST_CASE("[MCP][Protocol] Returns standard JSON-RPC errors and does not execute
 	ToolProvider *provider = memnew(ToolProvider);
 	Dictionary definition;
 	definition["name"] = "echo";
-	CHECK_EQ(registry.register_tool(definition, callable_mp(provider, &ToolProvider::echo), MCPToolRegistry::TOOL_SURFACE_MCP, provider), OK);
+	CHECK_EQ(registry.register_tool(definition, callable_mp(provider, &ToolProvider::echo), provider), OK);
 
 	MCPProtocol protocol(&registry);
 	CHECK_EQ(get_error_code(protocol.dispatch_json("{")), MCPProtocol::PARSE_ERROR);

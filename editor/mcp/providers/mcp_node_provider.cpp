@@ -213,21 +213,21 @@ Error MCPNodeProvider::register_tools(MCPToolRegistry *p_registry, String *r_err
 
 	Error err = p_registry->register_tool(
 			MCPToolUtils::make_tool_definition("godot.node.get_properties", "Get all native and script-exposed node properties marked for editor use.", _path_schema()),
-			callable_mp(this, &MCPNodeProvider::get_properties), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
+			callable_mp(this, &MCPNodeProvider::get_properties), this, r_error);
 	if (err == OK) {
 		err = p_registry->register_tool(
 				MCPToolUtils::make_tool_definition("godot.node.create", "Create a node through editor undo/redo.", _create_schema()),
-				callable_mp(this, &MCPNodeProvider::create), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
+				callable_mp(this, &MCPNodeProvider::create), this, r_error);
 	}
 	if (err == OK) {
 		err = p_registry->register_tool(
 				MCPToolUtils::make_tool_definition("godot.node.set_property", "Set a node property through editor undo/redo.", _set_property_schema()),
-				callable_mp(this, &MCPNodeProvider::set_property), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
+				callable_mp(this, &MCPNodeProvider::set_property), this, r_error);
 	}
 	if (err == OK) {
 		err = p_registry->register_tool(
 				MCPToolUtils::make_tool_definition("godot.node.attach_script", "Attach a project script through editor undo/redo.", _attach_script_schema()),
-				callable_mp(this, &MCPNodeProvider::attach_script), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
+				callable_mp(this, &MCPNodeProvider::attach_script), this, r_error);
 	}
 	if (err != OK) {
 		p_registry->unregister_tools_for_owner(this);

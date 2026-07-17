@@ -47,7 +47,6 @@ namespace TestMCPRuntimeProvider {
 
 static MCPToolRegistry::CallResult _call(MCPToolRegistry &p_registry, const StringName &p_name, const Dictionary &p_arguments, const Dictionary &p_session = Dictionary()) {
 	MCPToolCallContext context;
-	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
 	if (!p_session.is_empty()) {
 		context.session = p_session;
 	}
@@ -62,14 +61,14 @@ static String _error_code(const MCPToolRegistry::CallResult &p_result) {
 	return Dictionary(content.get("error", Dictionary())).get("code", String());
 }
 
-TEST_CASE("[MCP][Provider] Runtime tools register in a stable strict surface") {
+TEST_CASE("[MCP][Provider] Runtime tools register in a stable order") {
 	MCPRuntimeDebugService service(nullptr);
 	MCPRuntimeProvider provider(&service);
 	MCPToolRegistry registry;
 	REQUIRE(provider.register_tools(&registry) == OK);
 	CHECK(provider.register_tools(&registry) == ERR_ALREADY_IN_USE);
 
-	const PackedStringArray names = registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_MCP);
+	const PackedStringArray names = registry.get_tool_names();
 	REQUIRE(names.size() == 32);
 	CHECK(names[0] == "godot.runtime.get_state");
 	CHECK(names[1] == "godot.runtime.play");
@@ -103,9 +102,8 @@ TEST_CASE("[MCP][Provider] Runtime tools register in a stable strict surface") {
 	CHECK(names[29] == "godot.runtime.input.sequence_status");
 	CHECK(names[30] == "godot.runtime.input.sequence_cancel");
 	CHECK(names[31] == "godot.runtime.input.release_all");
-	CHECK(registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_CLI).is_empty());
 
-	const Array definitions = registry.get_tool_definitions(MCPToolRegistry::TOOL_SURFACE_MCP);
+	const Array definitions = registry.get_tool_definitions();
 	REQUIRE(definitions.size() == 32);
 	for (const Variant &definition_value : definitions) {
 		const Dictionary schema = Dictionary(definition_value).get("inputSchema", Dictionary());
@@ -208,7 +206,7 @@ TEST_CASE("[MCP][Provider] Runtime target actions require MCP ownership and expo
 	arguments["runtimeGeneration"] = 1;
 	CHECK(_error_code(_call(registry, "godot.runtime.click_target", arguments)) == "MCP_SESSION_REQUIRED");
 
-	const Array definitions = registry.get_tool_definitions(MCPToolRegistry::TOOL_SURFACE_MCP);
+	const Array definitions = registry.get_tool_definitions();
 	for (const Variant &definition_value : definitions) {
 		const Dictionary definition = definition_value;
 		if (!String(definition.get("name", String())).ends_with("click_target")) {

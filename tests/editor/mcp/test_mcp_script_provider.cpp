@@ -59,7 +59,7 @@ TEST_CASE("[MCP][Provider] Script tools register with optimistic edit requiremen
 	REQUIRE(provider->register_tools(&registry) == OK);
 	CHECK(provider->register_tools(&registry) == ERR_ALREADY_IN_USE);
 
-	const PackedStringArray names = registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_MCP);
+	const PackedStringArray names = registry.get_tool_names();
 	REQUIRE(names.size() == 6);
 	CHECK(names[0] == "godot.script.create");
 	CHECK(names[1] == "godot.script.open");
@@ -67,9 +67,8 @@ TEST_CASE("[MCP][Provider] Script tools register with optimistic edit requiremen
 	CHECK(names[3] == "godot.script.usages");
 	CHECK(names[4] == "godot.script.edit");
 	CHECK(names[5] == "godot.script.save");
-	CHECK(registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_CLI).is_empty());
 
-	const Array definitions = registry.get_tool_definitions(MCPToolRegistry::TOOL_SURFACE_MCP);
+	const Array definitions = registry.get_tool_definitions();
 	REQUIRE(definitions.size() == 6);
 	const Dictionary open_schema = Dictionary(definitions[1]).get("inputSchema", Dictionary());
 	CHECK(Array(open_schema.get("oneOf", Array())).size() == 2);
@@ -100,7 +99,6 @@ TEST_CASE("[MCP][Provider] Script tools register with optimistic edit requiremen
 	CHECK(Array(Dictionary(edit_constraints[1]).get("anyOf", Array())).size() == 2);
 
 	MCPToolCallContext context;
-	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
 	const MCPToolRegistry::CallResult invalid_call = registry.call_tool("godot.script.create", Dictionary(), context);
 	REQUIRE(invalid_call.status == MCPToolRegistry::CALL_OK);
 	CHECK(bool(invalid_call.result.get("isError", false)));

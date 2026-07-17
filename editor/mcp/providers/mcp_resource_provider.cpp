@@ -350,26 +350,26 @@ Error MCPResourceProvider::register_tools(MCPToolRegistry *p_registry, String *r
 
 	Error error = p_registry->register_tool(
 			MCPToolUtils::make_tool_definition("godot.resource.get_properties", "Get editable Inspector properties from a cached project Resource.", _resource_path_schema()),
-			callable_mp(this, &MCPResourceProvider::get_properties), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
+			callable_mp(this, &MCPResourceProvider::get_properties), this, r_error);
 	if (error == OK) {
 		error = p_registry->register_tool(
 				MCPToolUtils::make_tool_definition("godot.resource.set_property", "Set a cached project Resource property without saving it.", _resource_set_property_schema()),
-				callable_mp(this, &MCPResourceProvider::set_property), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
+				callable_mp(this, &MCPResourceProvider::set_property), this, r_error);
 	}
 	if (error == OK) {
 		error = p_registry->register_tool(
 				MCPToolUtils::make_tool_definition("godot.resource.save", "Explicitly save a cached project Resource.", _resource_path_schema()),
-				callable_mp(this, &MCPResourceProvider::save), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
+				callable_mp(this, &MCPResourceProvider::save), this, r_error);
 	}
 	if (error == OK) {
 		error = p_registry->register_tool(
 				MCPToolUtils::make_tool_definition("godot.resource.import_options", "List ResourceImporter candidates and effective import options for an external asset.", _resource_options_schema(false)),
-				callable_mp(this, &MCPResourceProvider::import_options), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
+				callable_mp(this, &MCPResourceProvider::import_options), this, r_error);
 	}
 	if (error == OK) {
 		error = p_registry->register_tool(
 				MCPToolUtils::make_tool_definition("godot.resource.import", "Copy an external asset into the project with rollback for target-owned import artifacts.", _resource_options_schema(true)),
-				callable_mp(this, &MCPResourceProvider::import_resource), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
+				callable_mp(this, &MCPResourceProvider::import_resource), this, r_error);
 	}
 	if (error != OK) {
 		p_registry->unregister_tools_for_owner(this);

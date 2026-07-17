@@ -346,17 +346,15 @@ TEST_CASE("[MCP][Provider] Resource options expose candidates, presets, Property
 	MCPResourceProvider *provider = memnew(MCPResourceProvider(paths.project_root, _fake_import, _fake_scan));
 	REQUIRE(provider->register_tools(&registry) == OK);
 	CHECK(provider->register_tools(&registry) == ERR_ALREADY_IN_USE);
-	const PackedStringArray names = registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_MCP);
+	const PackedStringArray names = registry.get_tool_names();
 	REQUIRE(names.size() == 5);
 	CHECK(names[0] == "godot.resource.get_properties");
 	CHECK(names[1] == "godot.resource.set_property");
 	CHECK(names[2] == "godot.resource.save");
 	CHECK(names[3] == "godot.resource.import_options");
 	CHECK(names[4] == "godot.resource.import");
-	CHECK(registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_CLI).is_empty());
 
 	MCPToolCallContext context;
-	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
 	Dictionary arguments;
 	arguments["source"] = paths.source_path;
 	MCPToolRegistry::CallResult call_result = registry.call_tool("godot.resource.import_options", arguments, context);
@@ -429,7 +427,6 @@ TEST_CASE("[MCP][Provider] Resource properties use the cache until explicit save
 	MCPResourceProvider *provider = memnew(MCPResourceProvider(paths.project_root));
 	REQUIRE(provider->register_tools(&registry) == OK);
 	MCPToolCallContext context;
-	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
 	Dictionary arguments;
 	arguments["path"] = resource_path;
 
@@ -554,7 +551,6 @@ TEST_CASE("[MCP][Provider] Resource import reads an external source, validates t
 	REQUIRE(provider->register_tools(&registry) == OK);
 
 	MCPToolCallContext context;
-	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
 	Dictionary arguments;
 	arguments["source"] = paths.source_path;
 	const String orphan_target = "res://assets/orphan.mcpimport";
@@ -624,7 +620,6 @@ TEST_CASE("[MCP][Provider] Failed resource import restores target metadata and p
 	REQUIRE(provider->register_tools(&registry) == OK);
 
 	MCPToolCallContext context;
-	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
 	Dictionary arguments;
 	arguments["source"] = paths.source_path;
 	arguments["target"] = "res://assets/imported.mcpimport";
@@ -673,7 +668,6 @@ TEST_CASE("[MCP][Provider] Failed resource import restores owned products and re
 	REQUIRE(provider->register_tools(&registry) == OK);
 
 	MCPToolCallContext context;
-	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
 	Dictionary arguments;
 	arguments["source"] = paths.source_path;
 	arguments["target"] = target_resource_path;
@@ -719,7 +713,6 @@ TEST_CASE("[MCP][Provider] Failed resource import preserves an unknown preexisti
 	REQUIRE(provider->register_tools(&registry) == OK);
 
 	MCPToolCallContext context;
-	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
 	Dictionary arguments;
 	arguments["source"] = paths.source_path;
 	arguments["target"] = target_resource_path;
@@ -760,7 +753,6 @@ TEST_CASE("[MCP][Provider] Resource import rejects unsafe destination paths from
 	REQUIRE(provider->register_tools(&registry) == OK);
 
 	MCPToolCallContext context;
-	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
 	Dictionary arguments;
 	arguments["source"] = paths.source_path;
 	arguments["target"] = "res://assets/imported.mcpimport";

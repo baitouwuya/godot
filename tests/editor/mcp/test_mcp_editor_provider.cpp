@@ -36,19 +36,18 @@ TEST_FORCE_LINK(test_mcp_editor_provider);
 
 namespace TestMCPEditorProvider {
 
-TEST_CASE("[MCP][Provider] Editor tools register as MCP-only composable handlers") {
+TEST_CASE("[MCP][Provider] Editor tools register as composable MCP handlers") {
 	MCPToolRegistry registry;
 	MCPEditorProvider *provider = memnew(MCPEditorProvider);
 	REQUIRE(provider->register_tools(&registry) == OK);
 	CHECK(provider->register_tools(&registry) == ERR_ALREADY_IN_USE);
 
-	const PackedStringArray names = registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_MCP);
+	const PackedStringArray names = registry.get_tool_names();
 	REQUIRE(names.size() == 3);
 	CHECK(names[0] == "godot.editor.get_state");
 	CHECK(names[1] == "godot.editor.undo");
 	CHECK(names[2] == "godot.editor.redo");
-	CHECK(registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_CLI).is_empty());
-	const Array definitions = registry.get_tool_definitions(MCPToolRegistry::TOOL_SURFACE_MCP);
+	const Array definitions = registry.get_tool_definitions();
 	REQUIRE(definitions.size() == 3);
 	const Dictionary state_output_schema = Dictionary(definitions[0]).get("outputSchema", Dictionary());
 	const Dictionary state_properties = state_output_schema.get("properties", Dictionary());
@@ -56,7 +55,6 @@ TEST_CASE("[MCP][Provider] Editor tools register as MCP-only composable handlers
 	CHECK(PackedStringArray(state_output_schema.get("required", PackedStringArray())).has("unsavedScenes"));
 
 	MCPToolCallContext context;
-	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
 	const MCPToolRegistry::CallResult call_result = registry.call_tool("godot.editor.get_state", Dictionary(), context);
 	REQUIRE(call_result.status == MCPToolRegistry::CALL_OK);
 	CHECK_FALSE(bool(call_result.result.get("isError", false)));
@@ -75,11 +73,8 @@ TEST_CASE("[MCP][Provider] Editor tools register as MCP-only composable handlers
 			registry.call_tool("godot.editor.get_state", unexpected_arguments, context);
 	REQUIRE(invalid_call.status == MCPToolRegistry::CALL_OK);
 	CHECK(bool(invalid_call.result.get("isError", false)));
-
-	context.surface = MCPToolRegistry::TOOL_SURFACE_CLI;
-	CHECK(registry.call_tool("godot.editor.get_state", Dictionary(), context).status == MCPToolRegistry::CALL_TOOL_NOT_FOUND);
-
 	provider->unregister_tools();
+	CHECK(registry.call_tool("godot.editor.get_state", Dictionary(), context).status == MCPToolRegistry::CALL_TOOL_NOT_FOUND);
 	CHECK(registry.get_tool_names().is_empty());
 	memdelete(provider);
 }

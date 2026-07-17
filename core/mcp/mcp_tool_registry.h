@@ -38,7 +38,6 @@
 #include "core/variant/type_info.h"
 
 struct MCPToolCallContext {
-	uint32_t surface = 0;
 	Variant request_id;
 	String protocol_version;
 	Dictionary session;
@@ -49,12 +48,6 @@ struct MCPToolCallContext {
 
 class MCPToolRegistry {
 public:
-	enum ToolSurface : uint32_t {
-		TOOL_SURFACE_MCP = 1 << 0,
-		TOOL_SURFACE_CLI = 1 << 1,
-		TOOL_SURFACE_ALL = TOOL_SURFACE_MCP | TOOL_SURFACE_CLI,
-	};
-
 	enum CallStatus {
 		CALL_OK,
 		CALL_TOOL_NOT_FOUND,
@@ -69,32 +62,30 @@ public:
 		String message;
 	};
 
-	Error register_tool(const Dictionary &p_definition, const Callable &p_handler, uint32_t p_surfaces = TOOL_SURFACE_MCP, Object *p_owner = nullptr, String *r_error = nullptr);
+	Error register_tool(const Dictionary &p_definition, const Callable &p_handler, Object *p_owner = nullptr, String *r_error = nullptr);
 	bool unregister_tool(const StringName &p_name);
 	int unregister_tools_for_owner(Object *p_owner);
 	int unregister_tools_for_owner(ObjectID p_owner_id);
 
-	bool has_tool(const StringName &p_name, uint32_t p_surface = TOOL_SURFACE_ALL) const;
-	Array get_tool_definitions(uint32_t p_surface = TOOL_SURFACE_ALL) const;
-	PackedStringArray get_tool_names(uint32_t p_surface = TOOL_SURFACE_ALL) const;
+	bool has_tool(const StringName &p_name) const;
+	Array get_tool_definitions() const;
+	PackedStringArray get_tool_names() const;
 	CallResult call_tool(const StringName &p_name, const Dictionary &p_arguments, const MCPToolCallContext &p_context) const;
 
 private:
 	struct ToolEntry {
 		Dictionary definition;
 		Callable handler;
-		uint32_t surfaces = TOOL_SURFACE_ALL;
 		ObjectID owner_id;
 	};
 
 	HashMap<StringName, ToolEntry> tools;
 	Vector<StringName> registration_order;
-	mutable HashMap<uint32_t, Array> definition_cache;
+	mutable Array definition_cache;
+	mutable bool definition_cache_valid = false;
 
-	bool _matches_surface(const ToolEntry &p_entry, uint32_t p_surface) const;
 	void _invalidate_definition_cache();
-	const Array &_get_cached_tool_definitions(uint32_t p_surface) const;
+	const Array &_get_cached_tool_definitions() const;
 };
 
-VARIANT_ENUM_CAST(MCPToolRegistry::ToolSurface);
 VARIANT_ENUM_CAST(MCPToolRegistry::CallStatus);

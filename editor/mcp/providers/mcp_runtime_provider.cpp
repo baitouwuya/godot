@@ -540,7 +540,7 @@ Error MCPRuntimeProvider::register_tools(MCPToolRegistry *p_registry, String *r_
 	for (const ToolRegistration &tool : tools) {
 		const Error error = p_registry->register_tool(
 				MCPToolUtils::make_tool_definition(tool.name, tool.description, tool.schema), tool.callable,
-				MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
+				this, r_error);
 		if (error != OK) {
 			p_registry->unregister_tools_for_owner(this);
 			return error;

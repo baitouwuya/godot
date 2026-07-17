@@ -88,7 +88,6 @@ static Dictionary _invalid_arguments(const String &p_message) {
 
 static MCPToolCallContext _make_nested_context(const Dictionary &p_context) {
 	MCPToolCallContext context;
-	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
 	context.request_id = p_context.get("requestId", Variant());
 	context.protocol_version = p_context.get("protocolVersion", String());
 	const Variant session = p_context.get("session", Dictionary());
@@ -146,7 +145,7 @@ Error MCPAutomationProvider::register_tools(MCPToolRegistry *p_registry, String 
 
 	const Error error = p_registry->register_tool(
 			MCPToolUtils::make_tool_definition(BATCH_TOOL_NAME, "Execute an ordered batch through the shared MCP Tool Registry.", _batch_schema()),
-			callable_mp(this, &MCPAutomationProvider::batch), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
+			callable_mp(this, &MCPAutomationProvider::batch), this, r_error);
 	if (error == OK) {
 		tool_registry = p_registry;
 	}
@@ -203,7 +202,7 @@ Dictionary MCPAutomationProvider::batch(const Dictionary &p_arguments, const Dic
 		if (name == BATCH_TOOL_NAME) {
 			return _invalid_arguments("Recursive automation batches are not allowed.");
 		}
-		if (!tool_registry->has_tool(name, MCPToolRegistry::TOOL_SURFACE_MCP)) {
+		if (!tool_registry->has_tool(name)) {
 			return _invalid_arguments(vformat("calls[%d] references an unknown MCP tool: %s", i, name));
 		}
 	}

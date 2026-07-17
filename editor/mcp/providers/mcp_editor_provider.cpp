@@ -117,16 +117,16 @@ Error MCPEditorProvider::register_tools(MCPToolRegistry *p_registry, String *r_e
 	state_definition["outputSchema"] = _state_output_schema();
 	Error err = p_registry->register_tool(
 			state_definition,
-			callable_mp(this, &MCPEditorProvider::get_state), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
+			callable_mp(this, &MCPEditorProvider::get_state), this, r_error);
 	if (err == OK) {
 		err = p_registry->register_tool(
 				MCPToolUtils::make_tool_definition("godot.editor.undo", "Undo the latest editor action.", schema),
-				callable_mp(this, &MCPEditorProvider::undo), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
+				callable_mp(this, &MCPEditorProvider::undo), this, r_error);
 	}
 	if (err == OK) {
 		err = p_registry->register_tool(
 				MCPToolUtils::make_tool_definition("godot.editor.redo", "Redo the latest editor action.", schema),
-				callable_mp(this, &MCPEditorProvider::redo), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
+				callable_mp(this, &MCPEditorProvider::redo), this, r_error);
 	}
 	if (err != OK) {
 		p_registry->unregister_tools_for_owner(this);

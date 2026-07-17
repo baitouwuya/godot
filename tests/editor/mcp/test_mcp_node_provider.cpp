@@ -136,7 +136,6 @@ private:
 
 static MCPToolRegistry::CallResult _call_tool(MCPToolRegistry &p_registry, const StringName &p_name, const Dictionary &p_arguments) {
 	MCPToolCallContext context;
-	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
 	return p_registry.call_tool(p_name, p_arguments, context);
 }
 
@@ -177,15 +176,14 @@ TEST_CASE("[MCP][Provider] Node tools expose encoded property and undoable mutat
 	REQUIRE(provider->register_tools(&registry) == OK);
 	CHECK(provider->register_tools(&registry) == ERR_ALREADY_IN_USE);
 
-	const PackedStringArray names = registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_MCP);
+	const PackedStringArray names = registry.get_tool_names();
 	REQUIRE(names.size() == 4);
 	CHECK(names[0] == "godot.node.get_properties");
 	CHECK(names[1] == "godot.node.create");
 	CHECK(names[2] == "godot.node.set_property");
 	CHECK(names[3] == "godot.node.attach_script");
-	CHECK(registry.get_tool_names(MCPToolRegistry::TOOL_SURFACE_CLI).is_empty());
 
-	const Array definitions = registry.get_tool_definitions(MCPToolRegistry::TOOL_SURFACE_MCP);
+	const Array definitions = registry.get_tool_definitions();
 	REQUIRE(definitions.size() == 4);
 	const Dictionary set_schema = Dictionary(definitions[2]).get("inputSchema", Dictionary());
 	const PackedStringArray required = set_schema.get("required", PackedStringArray());
@@ -194,7 +192,6 @@ TEST_CASE("[MCP][Provider] Node tools expose encoded property and undoable mutat
 	CHECK(required.has("value"));
 
 	MCPToolCallContext context;
-	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
 	const MCPToolRegistry::CallResult invalid_call = registry.call_tool("godot.node.create", Dictionary(), context);
 	REQUIRE(invalid_call.status == MCPToolRegistry::CALL_OK);
 	CHECK(bool(invalid_call.result.get("isError", false)));

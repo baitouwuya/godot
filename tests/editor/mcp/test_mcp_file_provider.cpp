@@ -59,7 +59,7 @@ public:
 	}
 };
 
-TEST_CASE("[MCP][Provider] File create is MCP-only, UTF-8 safe, and overwrite-aware") {
+TEST_CASE("[MCP][Provider] File create is UTF-8 safe and overwrite-aware") {
 	REQUIRE(OS::get_singleton() != nullptr);
 	Error temp_error = OK;
 	Ref<DirAccess> temporary_directory = DirAccess::create_temp("mcp_file_provider", false, &temp_error);
@@ -75,8 +75,7 @@ TEST_CASE("[MCP][Provider] File create is MCP-only, UTF-8 safe, and overwrite-aw
 	MCPToolRegistry registry;
 	MCPFileProvider *provider = memnew(MCPFileProvider(project_root));
 	REQUIRE(provider->register_tools(&registry) == OK);
-	CHECK(registry.has_tool("godot.file.create", MCPToolRegistry::TOOL_SURFACE_MCP));
-	CHECK_FALSE(registry.has_tool("godot.file.create", MCPToolRegistry::TOOL_SURFACE_CLI));
+	CHECK(registry.has_tool("godot.file.create"));
 
 	const String first_content = "hello " + String::chr(0x4E16) + String::chr(0x754C);
 	Dictionary arguments;
@@ -84,7 +83,6 @@ TEST_CASE("[MCP][Provider] File create is MCP-only, UTF-8 safe, and overwrite-aw
 	arguments["content"] = first_content;
 
 	MCPToolCallContext context;
-	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
 	MCPToolRegistry::CallResult call_result = registry.call_tool("godot.file.create", arguments, context);
 	REQUIRE(call_result.status == MCPToolRegistry::CALL_OK);
 	CHECK_FALSE(bool(call_result.result.get("isError", false)));
@@ -113,11 +111,8 @@ TEST_CASE("[MCP][Provider] File create is MCP-only, UTF-8 safe, and overwrite-aw
 	CHECK_FALSE(bool(call_result.result.get("isError", false)));
 	CHECK(bool(Dictionary(call_result.result.get("structuredContent", Dictionary())).get("overwritten", false)));
 	CHECK(FileAccess::get_file_as_string(absolute_path) == replacement_content);
-
-	context.surface = MCPToolRegistry::TOOL_SURFACE_CLI;
-	CHECK(registry.call_tool("godot.file.create", arguments, context).status == MCPToolRegistry::CALL_TOOL_NOT_FOUND);
-
 	provider->unregister_tools();
+	CHECK(registry.call_tool("godot.file.create", arguments, context).status == MCPToolRegistry::CALL_TOOL_NOT_FOUND);
 	memdelete(provider);
 }
 
@@ -127,7 +122,6 @@ TEST_CASE("[MCP][Provider] File create rejects traversal and malformed arguments
 	REQUIRE(provider->register_tools(&registry) == OK);
 
 	MCPToolCallContext context;
-	context.surface = MCPToolRegistry::TOOL_SURFACE_MCP;
 
 	Dictionary arguments;
 	arguments["path"] = "res://../outside.txt";

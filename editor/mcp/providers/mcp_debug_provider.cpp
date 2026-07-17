@@ -526,21 +526,21 @@ Error MCPDebugProvider::register_tools(MCPToolRegistry *p_registry, String *r_er
 
 	Error error = p_registry->register_tool(
 			MCPToolUtils::make_tool_definition("godot.debug.get_logs", "Read bounded editor and running-project logs with global deduplication.", _query_schema(false)),
-			callable_mp(this, &MCPDebugProvider::get_logs), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
+			callable_mp(this, &MCPDebugProvider::get_logs), this, r_error);
 	if (error == OK) {
 		error = p_registry->register_tool(
 				MCPToolUtils::make_tool_definition("godot.debug.get_errors", "Read compressed structured warnings and errors.", _query_schema(true)),
-				callable_mp(this, &MCPDebugProvider::get_errors), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
+				callable_mp(this, &MCPDebugProvider::get_errors), this, r_error);
 	}
 	if (error == OK) {
 		error = p_registry->register_tool(
 				MCPToolUtils::make_tool_definition("godot.debug.get_latest_log", "Read the latest configured project log as a bounded raw tail or compressed summary.", _latest_log_schema()),
-				callable_mp(this, &MCPDebugProvider::get_latest_log), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
+				callable_mp(this, &MCPDebugProvider::get_latest_log), this, r_error);
 	}
 	if (error == OK) {
 		error = p_registry->register_tool(
 				MCPToolUtils::make_tool_definition("godot.debug.get_stack", "Read a full error stack or the latest paused running-project stack.", _stack_schema()),
-				callable_mp(this, &MCPDebugProvider::get_stack), MCPToolRegistry::TOOL_SURFACE_MCP, this, r_error);
+				callable_mp(this, &MCPDebugProvider::get_stack), this, r_error);
 	}
 	if (error != OK) {
 		p_registry->unregister_tools_for_owner(this);

@@ -40,6 +40,7 @@
 #include "editor/plugins/editor_plugin.h"
 
 class ConfirmationDialog;
+class MCPAutomationProvider;
 class MCPClassProvider;
 class MCPDebugCapture;
 class MCPDebugEventStore;
@@ -86,6 +87,7 @@ class MCPEditorPlugin : public EditorPlugin, public MCPHostSessionObserver {
 	String last_start_error;
 	ConfirmationDialog *conflict_dialog = nullptr;
 	MCPDiscoveryRecord conflicting_owner;
+	MCPAutomationProvider *automation_provider = nullptr;
 	MCPClassProvider *class_provider = nullptr;
 	MCPDebugEventStore *debug_event_store = nullptr;
 	MCPDebugCapture *debug_capture = nullptr;

@@ -29,6 +29,7 @@
 
 #include "mcp_editor_plugin.h"
 
+#include "providers/mcp_automation_provider.h"
 #include "providers/mcp_class_provider.h"
 #include "providers/mcp_debug_capture.h"
 #include "providers/mcp_debug_event_store.h"
@@ -86,8 +87,13 @@ Error MCPEditorPlugin::_register_tools(String &r_error) {
 	gdscript_session_manager->set_analysis_service(language_protocol->get_analysis_service());
 #endif
 
-	Error error = class_provider->register_tools(&tool_registry, &r_error);
+	Error error = automation_provider->register_tools(&tool_registry, &r_error);
 	if (error != OK) {
+		return error;
+	}
+	error = class_provider->register_tools(&tool_registry, &r_error);
+	if (error != OK) {
+		_unregister_tools();
 		return error;
 	}
 	error = debug_provider->register_tools(&tool_registry, &r_error);
@@ -169,6 +175,7 @@ void MCPEditorPlugin::_unregister_tools() {
 	runtime_provider->unregister_tools();
 	debug_provider->unregister_tools();
 	class_provider->unregister_tools();
+	automation_provider->unregister_tools();
 }
 
 void MCPEditorPlugin::on_mcp_session_removed(const String &p_session_id) {
@@ -404,6 +411,7 @@ MCPEditorPlugin::MCPEditorPlugin() {
 	session_manager.instantiate();
 	gdscript_session_manager = session_manager.ptr();
 #endif
+	automation_provider = memnew(MCPAutomationProvider);
 	class_provider = memnew(MCPClassProvider);
 	debug_event_store = memnew(MCPDebugEventStore);
 	debug_capture = memnew(MCPDebugCapture(debug_event_store));
@@ -449,6 +457,7 @@ MCPEditorPlugin::~MCPEditorPlugin() {
 	memdelete(debug_capture);
 	memdelete(debug_event_store);
 	memdelete(class_provider);
+	memdelete(automation_provider);
 #if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
 	gdscript_session_manager = nullptr;
 #endif

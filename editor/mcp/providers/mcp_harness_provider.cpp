@@ -129,17 +129,18 @@ Error MCPHarnessProvider::register_tools(MCPToolRegistry *p_registry, String *r_
 	struct ToolRegistration {
 		const char *name;
 		const char *description;
+		MCPToolUtils::ToolBehavior behavior;
 		Callable callable;
 	};
 	const ToolRegistration tools[] = {
-		{ "godot.runtime.harness.start", "Compile and start an asynchronous inline runtime Harness job.", callable_mp(this, &MCPHarnessProvider::start) },
-		{ "godot.runtime.harness.status", "Get bounded progress for a runtime Harness job.", callable_mp(this, &MCPHarnessProvider::get_status) },
-		{ "godot.runtime.harness.cancel", "Cancel a runtime Harness job and its active asynchronous child.", callable_mp(this, &MCPHarnessProvider::cancel) },
-		{ "godot.runtime.harness.get_report", "Get the structured report accumulated by a runtime Harness job.", callable_mp(this, &MCPHarnessProvider::get_report) },
+		{ "godot.runtime.harness.start", "Compile and start an asynchronous inline runtime Harness job.", MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPHarnessProvider::start) },
+		{ "godot.runtime.harness.status", "Get bounded progress for a runtime Harness job.", MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPHarnessProvider::get_status) },
+		{ "godot.runtime.harness.cancel", "Cancel a runtime Harness job and its active asynchronous child.", MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPHarnessProvider::cancel) },
+		{ "godot.runtime.harness.get_report", "Get the structured report accumulated by a runtime Harness job.", MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPHarnessProvider::get_report) },
 	};
 	for (int i = 0; i < 4; i++) {
 		const Dictionary schema = i == 0 ? _start_schema() : _job_schema();
-		const Error error = p_registry->register_tool(MCPToolUtils::make_tool_definition(tools[i].name, tools[i].description, schema),
+		const Error error = p_registry->register_tool(MCPToolUtils::make_tool_definition(tools[i].name, tools[i].description, schema, tools[i].behavior),
 				tools[i].callable, this, r_error);
 		if (error != OK) {
 			p_registry->unregister_tools_for_owner(this);

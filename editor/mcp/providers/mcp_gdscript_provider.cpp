@@ -734,7 +734,7 @@ Error MCPGDScriptProvider::register_tools(MCPToolRegistry *p_registry, String *r
 	Error error = OK;
 	auto register_tool = [&](const String &p_name, const String &p_description, const Dictionary &p_schema, const Callable &p_handler) {
 		if (error == OK) {
-			error = p_registry->register_tool(MCPToolUtils::make_tool_definition(p_name, p_description, p_schema), p_handler, this, r_error);
+			error = p_registry->register_tool(MCPToolUtils::make_tool_definition(p_name, p_description, p_schema, MCPToolUtils::TOOL_READ_ONLY), p_handler, this, r_error);
 		}
 	};
 	register_tool("godot.gdscript.diagnostics", "Return diagnostics for a GDScript document.", MCPGDScriptToolUtils::diagnostics_schema(), callable_mp(this, &MCPGDScriptProvider::diagnostics));

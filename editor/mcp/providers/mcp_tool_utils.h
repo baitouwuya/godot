@@ -37,7 +37,13 @@ struct PropertyInfo;
 
 namespace MCPToolUtils {
 
-Dictionary make_tool_definition(const String &p_name, const String &p_description, const Dictionary &p_input_schema);
+enum ToolBehavior {
+	TOOL_READ_ONLY,
+	TOOL_ADDITIVE,
+	TOOL_DESTRUCTIVE,
+};
+
+Dictionary make_tool_definition(const String &p_name, const String &p_description, const Dictionary &p_input_schema, ToolBehavior p_behavior, const Dictionary &p_output_schema = Dictionary());
 Dictionary make_property_description(const PropertyInfo &p_property);
 Dictionary make_success_result(const Dictionary &p_structured_content);
 Dictionary make_error_result(const String &p_code, const String &p_message, const Dictionary &p_details = Dictionary());

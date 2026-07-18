@@ -672,6 +672,25 @@ try {
 	$actualTools = @($responsesById["2"].result.tools | ForEach-Object { [string]$_.name } | Sort-Object)
 	Assert-Condition ($actualTools.Count -eq 83) "tools/list returned $($actualTools.Count) tools instead of 83."
 	Assert-Condition (($actualTools -join "`n") -ceq ($expectedTools -join "`n")) "tools/list did not expose the expected 83-tool surface."
+	foreach ($tool in @($responsesById["2"].result.tools)) {
+		Assert-Condition ($null -ne $tool.outputSchema) "Tool $($tool.name) is missing outputSchema."
+		Assert-Condition ([string]$tool.outputSchema.type -ceq "object") "Tool $($tool.name) outputSchema is not an object schema."
+		Assert-Condition ($null -ne $tool.annotations) "Tool $($tool.name) is missing annotations."
+		foreach ($hint in @("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")) {
+			Assert-Condition ($tool.annotations.PSObject.Properties.Name -contains $hint) "Tool $($tool.name) is missing annotation $hint."
+		}
+		Assert-Condition (-not [bool]$tool.annotations.openWorldHint) "Tool $($tool.name) must declare openWorldHint=false."
+	}
+	$toolsByName = @{}
+	foreach ($tool in @($responsesById["2"].result.tools)) {
+		$toolsByName[[string]$tool.name] = $tool
+	}
+	foreach ($toolName in @("godot.editor.ui.get_actions", "godot.editor.ui.perform", "godot.runtime.play", "godot.runtime.input.send", "godot.resource.set_property", "godot.runtime.harness.start")) {
+		Assert-Condition ([bool]$toolsByName[$toolName].annotations.destructiveHint) "Tool $toolName must be classified as destructive."
+	}
+	Assert-Condition ([bool]$toolsByName["godot.class.search"].annotations.readOnlyHint) "class.search must be classified as read-only."
+	Assert-Condition ([bool]$toolsByName["godot.class.search"].annotations.idempotentHint) "class.search must be classified as idempotent."
+	Assert-Condition (-not [bool]$toolsByName["godot.node.create"].annotations.destructiveHint) "node.create must be classified as additive."
 	$createResult = $responsesById["3"].result.structuredContent
 	Assert-Condition (-not (Test-ToolResultError -Result $responsesById["3"].result)) "script/create returned a tool error."
 	Assert-Condition ([string]$createResult.sha256 -ceq $initialScriptSha) "script/create returned an unexpected SHA-256."

@@ -133,21 +133,21 @@ Error MCPSceneProvider::register_tools(MCPToolRegistry *p_registry, String *r_er
 	}
 
 	Error err = p_registry->register_tool(
-			MCPToolUtils::make_tool_definition("godot.scene.open", "Open a project scene in the editor.", _open_schema()),
+			MCPToolUtils::make_tool_definition("godot.scene.open", "Open a project scene in the editor.", _open_schema(), MCPToolUtils::TOOL_DESTRUCTIVE),
 			callable_mp(this, &MCPSceneProvider::open), this, r_error);
 	if (err == OK) {
 		err = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.scene.get_tree", "Get the current edited scene tree.", _tree_schema()),
+				MCPToolUtils::make_tool_definition("godot.scene.get_tree", "Get the current edited scene tree.", _tree_schema(), MCPToolUtils::TOOL_READ_ONLY),
 				callable_mp(this, &MCPSceneProvider::get_tree), this, r_error);
 	}
 	if (err == OK) {
 		err = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.scene.get_selection", "Get nodes selected in the editor.", _object_schema()),
+				MCPToolUtils::make_tool_definition("godot.scene.get_selection", "Get nodes selected in the editor.", _object_schema(), MCPToolUtils::TOOL_READ_ONLY),
 				callable_mp(this, &MCPSceneProvider::get_selection), this, r_error);
 	}
 	if (err == OK) {
 		err = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.scene.save", "Explicitly save the current edited scene.", _save_schema()),
+				MCPToolUtils::make_tool_definition("godot.scene.save", "Explicitly save the current edited scene.", _save_schema(), MCPToolUtils::TOOL_DESTRUCTIVE),
 				callable_mp(this, &MCPSceneProvider::save), this, r_error);
 	}
 	if (err != OK) {

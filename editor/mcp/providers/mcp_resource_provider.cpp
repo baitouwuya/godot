@@ -345,26 +345,26 @@ Error MCPResourceProvider::register_tools(MCPToolRegistry *p_registry, String *r
 	}
 
 	Error error = p_registry->register_tool(
-			MCPToolUtils::make_tool_definition("godot.resource.get_properties", "Get editable Inspector properties from a cached project Resource.", _resource_path_schema()),
+			MCPToolUtils::make_tool_definition("godot.resource.get_properties", "Get editable Inspector properties from a cached project Resource.", _resource_path_schema(), MCPToolUtils::TOOL_READ_ONLY),
 			callable_mp(this, &MCPResourceProvider::get_properties), this, r_error);
 	if (error == OK) {
 		error = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.resource.set_property", "Set a cached project Resource property without saving it.", _resource_set_property_schema()),
+				MCPToolUtils::make_tool_definition("godot.resource.set_property", "Set a cached project Resource property without saving it.", _resource_set_property_schema(), MCPToolUtils::TOOL_DESTRUCTIVE),
 				callable_mp(this, &MCPResourceProvider::set_property), this, r_error);
 	}
 	if (error == OK) {
 		error = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.resource.save", "Explicitly save a cached project Resource.", _resource_path_schema()),
+				MCPToolUtils::make_tool_definition("godot.resource.save", "Explicitly save a cached project Resource.", _resource_path_schema(), MCPToolUtils::TOOL_DESTRUCTIVE),
 				callable_mp(this, &MCPResourceProvider::save), this, r_error);
 	}
 	if (error == OK) {
 		error = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.resource.import_options", "List ResourceImporter candidates and effective import options for an external asset.", _resource_options_schema(false)),
+				MCPToolUtils::make_tool_definition("godot.resource.import_options", "List ResourceImporter candidates and effective import options for an external asset.", _resource_options_schema(false), MCPToolUtils::TOOL_READ_ONLY),
 				callable_mp(this, &MCPResourceProvider::import_options), this, r_error);
 	}
 	if (error == OK) {
 		error = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.resource.import", "Copy an external asset into the project, roll back known target-owned artifacts, and report unowned residuals.", _resource_options_schema(true)),
+				MCPToolUtils::make_tool_definition("godot.resource.import", "Copy an external asset into the project, roll back known target-owned artifacts, and report unowned residuals.", _resource_options_schema(true), MCPToolUtils::TOOL_DESTRUCTIVE),
 				callable_mp(this, &MCPResourceProvider::import_resource), this, r_error);
 	}
 	if (error != OK) {

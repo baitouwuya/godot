@@ -2,6 +2,8 @@
 
 Godot exposes MCP as an opt-in editor Host plus two terminal CLI transport adapters. The editor Host, MCP protocol, Tool Registry, and Providers are the only source of business functionality. The CLI implements only project discovery and standard stdio forwarding; it has no business Tool Registry and never invokes a Provider directly. A normal editor or game launch does not start MCP.
 
+Every advertised tool includes an object `outputSchema` and the standard MCP `readOnlyHint`, `destructiveHint`, `idempotentHint`, and `openWorldHint` annotations. Godot tools always declare `openWorldHint=false`; Providers classify state-changing and potentially destructive operations explicitly through the shared tool-definition factory.
+
 ## Start a Host
 
 Start one editor Host for a project with an explicit project path:

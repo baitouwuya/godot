@@ -113,19 +113,19 @@ Error MCPEditorProvider::register_tools(MCPToolRegistry *p_registry, String *r_e
 
 	const Dictionary schema = _empty_input_schema();
 	Dictionary state_definition = MCPToolUtils::make_tool_definition(
-			"godot.editor.get_state", "Get the current scene, unsaved scenes, scripts, and undo state.", schema);
-	state_definition["outputSchema"] = _state_output_schema();
+			"godot.editor.get_state", "Get the current scene, unsaved scenes, scripts, and undo state.", schema,
+			MCPToolUtils::TOOL_READ_ONLY, _state_output_schema());
 	Error err = p_registry->register_tool(
 			state_definition,
 			callable_mp(this, &MCPEditorProvider::get_state), this, r_error);
 	if (err == OK) {
 		err = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.editor.undo", "Undo the latest editor action.", schema),
+				MCPToolUtils::make_tool_definition("godot.editor.undo", "Undo the latest editor action.", schema, MCPToolUtils::TOOL_DESTRUCTIVE),
 				callable_mp(this, &MCPEditorProvider::undo), this, r_error);
 	}
 	if (err == OK) {
 		err = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.editor.redo", "Redo the latest editor action.", schema),
+				MCPToolUtils::make_tool_definition("godot.editor.redo", "Redo the latest editor action.", schema, MCPToolUtils::TOOL_DESTRUCTIVE),
 				callable_mp(this, &MCPEditorProvider::redo), this, r_error);
 	}
 	if (err != OK) {

@@ -356,31 +356,31 @@ Error MCPScriptProvider::register_tools(MCPToolRegistry *p_registry, String *r_e
 	}
 
 	Error err = p_registry->register_tool(
-			MCPToolUtils::make_tool_definition("godot.script.create", "Create and open an external GDScript.", _create_schema()),
+			MCPToolUtils::make_tool_definition("godot.script.create", "Create and open an external GDScript.", _create_schema(), MCPToolUtils::TOOL_ADDITIVE),
 			callable_mp(this, &MCPScriptProvider::create), this, r_error);
 	if (err == OK) {
 		err = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.script.open", "Open an external or built-in GDScript in the Script editor.", _script_selector_schema()),
+				MCPToolUtils::make_tool_definition("godot.script.open", "Open an external or built-in GDScript in the Script editor.", _script_selector_schema(), MCPToolUtils::TOOL_DESTRUCTIVE),
 				callable_mp(this, &MCPScriptProvider::open), this, r_error);
 	}
 	if (err == OK) {
 		err = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.script.get", "Read a GDScript as documentation, a member, or full source.", _get_schema()),
+				MCPToolUtils::make_tool_definition("godot.script.get", "Read a GDScript as documentation, a member, or full source.", _get_schema(), MCPToolUtils::TOOL_READ_ONLY),
 				callable_mp(this, &MCPScriptProvider::get), this, r_error);
 	}
 	if (err == OK) {
 		err = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.script.usages", "Find semantic LSP usages of a named GDScript member.", _usages_schema()),
+				MCPToolUtils::make_tool_definition("godot.script.usages", "Find semantic LSP usages of a named GDScript member.", _usages_schema(), MCPToolUtils::TOOL_READ_ONLY),
 				callable_mp(this, &MCPScriptProvider::usages), this, r_error);
 	}
 	if (err == OK) {
 		err = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.script.edit", "Replace a Script editor buffer with optimistic concurrency.", _edit_schema()),
+				MCPToolUtils::make_tool_definition("godot.script.edit", "Replace a Script editor buffer with optimistic concurrency.", _edit_schema(), MCPToolUtils::TOOL_DESTRUCTIVE),
 				callable_mp(this, &MCPScriptProvider::edit), this, r_error);
 	}
 	if (err == OK) {
 		err = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.script.save", "Explicitly save an authoritative Script editor buffer.", _script_selector_schema()),
+				MCPToolUtils::make_tool_definition("godot.script.save", "Explicitly save an authoritative Script editor buffer.", _script_selector_schema(), MCPToolUtils::TOOL_DESTRUCTIVE),
 				callable_mp(this, &MCPScriptProvider::save), this, r_error);
 	}
 	if (err != OK) {

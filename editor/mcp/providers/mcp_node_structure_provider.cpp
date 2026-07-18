@@ -240,24 +240,25 @@ Error MCPNodeStructureProvider::register_tools(MCPToolRegistry *p_registry, Stri
 		String name;
 		String description;
 		Dictionary schema;
+		MCPToolUtils::ToolBehavior behavior;
 		Callable handler;
 	};
 	const ToolRegistration tools[] = {
 		{ "godot.node.delete", "Delete a node through editor undo/redo.",
-				_path_schema(), callable_mp(this, &MCPNodeStructureProvider::delete_node) },
+				_path_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPNodeStructureProvider::delete_node) },
 		{ "godot.node.rename", "Rename a node and update scene path references through editor undo/redo.",
-				_rename_schema(), callable_mp(this, &MCPNodeStructureProvider::rename_node) },
+				_rename_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPNodeStructureProvider::rename_node) },
 		{ "godot.node.reparent", "Reparent a node and update scene path references through editor undo/redo.",
-				_reparent_schema(), callable_mp(this, &MCPNodeStructureProvider::reparent_node) },
+				_reparent_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPNodeStructureProvider::reparent_node) },
 		{ "godot.node.move", "Move a node to a sibling index through editor undo/redo.",
-				_move_schema(), callable_mp(this, &MCPNodeStructureProvider::move_node) },
+				_move_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPNodeStructureProvider::move_node) },
 		{ "godot.node.duplicate", "Duplicate an editable node subtree through editor undo/redo.",
-				_duplicate_schema(), callable_mp(this, &MCPNodeStructureProvider::duplicate_node) },
+				_duplicate_schema(), MCPToolUtils::TOOL_ADDITIVE, callable_mp(this, &MCPNodeStructureProvider::duplicate_node) },
 		{ "godot.node.instantiate_scene", "Instantiate a project PackedScene through editor undo/redo.",
-				_instantiate_schema(), callable_mp(this, &MCPNodeStructureProvider::instantiate_scene) },
+				_instantiate_schema(), MCPToolUtils::TOOL_ADDITIVE, callable_mp(this, &MCPNodeStructureProvider::instantiate_scene) },
 	};
 	for (const ToolRegistration &tool : tools) {
-		const Error err = p_registry->register_tool(MCPToolUtils::make_tool_definition(tool.name, tool.description, tool.schema),
+		const Error err = p_registry->register_tool(MCPToolUtils::make_tool_definition(tool.name, tool.description, tool.schema, tool.behavior),
 				tool.handler, this, r_error);
 		if (err != OK) {
 			p_registry->unregister_tools_for_owner(this);

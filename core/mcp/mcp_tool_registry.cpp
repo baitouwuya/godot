@@ -98,6 +98,36 @@ Error MCPToolRegistry::register_tool(const Dictionary &p_definition, const Calla
 		}
 		return ERR_INVALID_PARAMETER;
 	}
+	if (p_definition.has("outputSchema") && p_definition["outputSchema"].get_type() != Variant::DICTIONARY) {
+		if (r_error) {
+			*r_error = "Tool definition 'outputSchema' must be a dictionary.";
+		}
+		return ERR_INVALID_PARAMETER;
+	}
+	if (p_definition.has("annotations")) {
+		if (p_definition["annotations"].get_type() != Variant::DICTIONARY) {
+			if (r_error) {
+				*r_error = "Tool definition 'annotations' must be a dictionary.";
+			}
+			return ERR_INVALID_PARAMETER;
+		}
+		const Dictionary annotations = p_definition["annotations"];
+		const char *boolean_hints[] = { "readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint" };
+		for (const char *hint : boolean_hints) {
+			if (annotations.has(hint) && annotations[hint].get_type() != Variant::BOOL) {
+				if (r_error) {
+					*r_error = "Tool annotation '" + String(hint) + "' must be a boolean.";
+				}
+				return ERR_INVALID_PARAMETER;
+			}
+		}
+		if (annotations.has("title") && annotations["title"].get_type() != Variant::STRING) {
+			if (r_error) {
+				*r_error = "Tool annotation 'title' must be a string.";
+			}
+			return ERR_INVALID_PARAMETER;
+		}
+	}
 	if (!p_handler.is_valid()) {
 		if (r_error) {
 			*r_error = "Tool handler is not callable.";

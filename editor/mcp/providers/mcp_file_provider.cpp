@@ -101,7 +101,7 @@ Error MCPFileProvider::register_tools(MCPToolRegistry *p_registry, String *r_err
 	}
 
 	const Dictionary definition = MCPToolUtils::make_tool_definition(
-			"godot.file.create", "Create a UTF-8 text file inside the current Godot project.", _create_file_schema());
+			"godot.file.create", "Create a UTF-8 text file inside the current Godot project.", _create_file_schema(), MCPToolUtils::TOOL_DESTRUCTIVE);
 	const Error err = p_registry->register_tool(definition, callable_mp(this, &MCPFileProvider::create_file),
 			this, r_error);
 	if (err != OK) {

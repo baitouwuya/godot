@@ -170,12 +170,12 @@ Error MCPClassProvider::register_tools(MCPToolRegistry *p_registry, String *r_er
 	}
 
 	Error err = p_registry->register_tool(
-			MCPToolUtils::make_tool_definition("godot.class.search", "Search native and project script classes.", _search_schema()),
+			MCPToolUtils::make_tool_definition("godot.class.search", "Search native and project script classes.", _search_schema(), MCPToolUtils::TOOL_READ_ONLY),
 			callable_mp(this, &MCPClassProvider::search), this, r_error);
 	if (err == OK) {
 		err = p_registry->register_tool(
 			MCPToolUtils::make_tool_definition("godot.class.get_documentation",
-					"Read structured Godot class documentation.", _documentation_schema()),
+					"Read structured Godot class documentation.", _documentation_schema(), MCPToolUtils::TOOL_READ_ONLY),
 				callable_mp(this, &MCPClassProvider::get_documentation), this, r_error);
 	}
 	if (err != OK) {

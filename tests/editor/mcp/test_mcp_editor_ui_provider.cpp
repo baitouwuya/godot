@@ -103,6 +103,12 @@ TEST_CASE("[MCP][Provider] Editor UI tools expose strict session-bound schemas")
 	MCPEditorUIProvider provider;
 	REQUIRE(provider.register_tools(&registry) == OK);
 	CHECK(provider.register_tools(&registry) == ERR_ALREADY_IN_USE);
+	const Array tool_definitions = registry.get_tool_definitions();
+	REQUIRE(tool_definitions.size() == 2);
+	const Dictionary snapshot_annotations = Dictionary(tool_definitions[0]).get("annotations", Dictionary());
+	CHECK_FALSE(bool(snapshot_annotations.get("readOnlyHint", true)));
+	CHECK(bool(snapshot_annotations.get("destructiveHint", false)));
+	CHECK_FALSE(bool(snapshot_annotations.get("idempotentHint", true)));
 
 	const PackedStringArray names = registry.get_tool_names();
 	REQUIRE(names.size() == 2);

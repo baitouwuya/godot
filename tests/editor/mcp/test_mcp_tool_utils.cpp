@@ -39,6 +39,54 @@ TEST_FORCE_LINK(test_mcp_tool_utils);
 
 namespace TestMCPToolUtils {
 
+TEST_CASE("[MCP][Provider] Tool definitions expose output schemas and standard behavior annotations") {
+	Dictionary input_schema;
+	input_schema["type"] = "object";
+
+	Dictionary output_schema;
+	output_schema["type"] = "object";
+	Dictionary output_properties;
+	Dictionary count_schema;
+	count_schema["type"] = "integer";
+	output_properties["count"] = count_schema;
+	output_schema["properties"] = output_properties;
+
+	const Dictionary read_definition = MCPToolUtils::make_tool_definition(
+			"test.read", "Read test data.", input_schema, MCPToolUtils::TOOL_READ_ONLY, output_schema);
+	CHECK(Dictionary(read_definition.get("outputSchema", Dictionary())) == output_schema);
+	const Dictionary read_annotations = read_definition.get("annotations", Dictionary());
+	CHECK(bool(read_annotations.get("readOnlyHint", false)));
+	CHECK_FALSE(bool(read_annotations.get("destructiveHint", true)));
+	CHECK(bool(read_annotations.get("idempotentHint", false)));
+	CHECK_FALSE(bool(read_annotations.get("openWorldHint", true)));
+
+	const Dictionary additive_definition = MCPToolUtils::make_tool_definition(
+			"test.add", "Add test data.", input_schema, MCPToolUtils::TOOL_ADDITIVE);
+	const Dictionary additive_annotations = additive_definition.get("annotations", Dictionary());
+	CHECK_FALSE(bool(additive_annotations.get("readOnlyHint", true)));
+	CHECK_FALSE(bool(additive_annotations.get("destructiveHint", true)));
+	CHECK_FALSE(bool(additive_annotations.get("idempotentHint", true)));
+	CHECK_FALSE(bool(additive_annotations.get("openWorldHint", true)));
+	const Dictionary default_output = additive_definition.get("outputSchema", Dictionary());
+	CHECK(default_output.get("type", String()) == "object");
+	CHECK(bool(default_output.get("additionalProperties", false)));
+
+	const Dictionary destructive_definition = MCPToolUtils::make_tool_definition(
+			"test.destroy", "Destroy test data.", input_schema, MCPToolUtils::TOOL_DESTRUCTIVE);
+	const Dictionary destructive_annotations = destructive_definition.get("annotations", Dictionary());
+	CHECK_FALSE(bool(destructive_annotations.get("readOnlyHint", true)));
+	CHECK(bool(destructive_annotations.get("destructiveHint", false)));
+	CHECK_FALSE(bool(destructive_annotations.get("idempotentHint", true)));
+	CHECK_FALSE(bool(destructive_annotations.get("openWorldHint", true)));
+
+	count_schema["type"] = "string";
+	output_properties["count"] = count_schema;
+	const Dictionary stored_output = read_definition.get("outputSchema", Dictionary());
+	const Dictionary stored_properties = stored_output.get("properties", Dictionary());
+	const Dictionary stored_count = stored_properties.get("count", Dictionary());
+	CHECK(stored_count.get("type", String()) == "integer");
+}
+
 TEST_CASE("[MCP][Provider] JSON integers accept exact parser doubles and enforce ranges") {
 	int64_t value = 0;
 	CHECK(MCPToolUtils::try_get_json_integer(int64_t(-7), -10, 10, value));

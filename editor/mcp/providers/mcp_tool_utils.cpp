@@ -50,11 +50,26 @@ static Array _make_text_content(const String &p_text) {
 	return content;
 }
 
-Dictionary make_tool_definition(const String &p_name, const String &p_description, const Dictionary &p_input_schema) {
+Dictionary make_tool_definition(const String &p_name, const String &p_description, const Dictionary &p_input_schema, ToolBehavior p_behavior, const Dictionary &p_output_schema) {
+	Dictionary output_schema = p_output_schema;
+	if (output_schema.is_empty()) {
+		output_schema["type"] = "object";
+		output_schema["additionalProperties"] = true;
+	}
+
+	const bool read_only = p_behavior == TOOL_READ_ONLY;
+	Dictionary annotations;
+	annotations["readOnlyHint"] = read_only;
+	annotations["destructiveHint"] = p_behavior == TOOL_DESTRUCTIVE;
+	annotations["idempotentHint"] = read_only;
+	annotations["openWorldHint"] = false;
+
 	Dictionary definition;
 	definition["name"] = p_name;
 	definition["description"] = p_description;
 	definition["inputSchema"] = p_input_schema.duplicate(true);
+	definition["outputSchema"] = output_schema.duplicate(true);
+	definition["annotations"] = annotations;
 	return definition;
 }
 

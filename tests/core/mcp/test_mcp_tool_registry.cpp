@@ -93,6 +93,51 @@ TEST_CASE("[MCP][ToolRegistry] Registers in order and rejects duplicates") {
 	memdelete(provider);
 }
 
+TEST_CASE("[MCP][ToolRegistry] Validates and isolates tool result metadata") {
+	MCPToolRegistry registry;
+	ToolProvider *provider = memnew(ToolProvider);
+	const Callable handler = callable_mp(provider, &ToolProvider::echo);
+
+	Dictionary definition = make_definition("metadata");
+	Dictionary output_schema;
+	output_schema["type"] = "object";
+	definition["outputSchema"] = output_schema;
+	Dictionary annotations;
+	annotations["readOnlyHint"] = true;
+	annotations["destructiveHint"] = false;
+	annotations["idempotentHint"] = true;
+	annotations["openWorldHint"] = false;
+	definition["annotations"] = annotations;
+	CHECK_EQ(registry.register_tool(definition, handler, provider), OK);
+
+	output_schema["type"] = "array";
+	annotations["readOnlyHint"] = false;
+	const Dictionary registered = registry.get_tool_definitions()[0];
+	CHECK(Dictionary(registered.get("outputSchema", Dictionary())).get("type", String()) == "object");
+	CHECK(bool(Dictionary(registered.get("annotations", Dictionary())).get("readOnlyHint", false)));
+
+	Dictionary invalid_output = make_definition("invalid_output");
+	invalid_output["outputSchema"] = "object";
+	String error;
+	CHECK_EQ(registry.register_tool(invalid_output, handler, provider, &error), ERR_INVALID_PARAMETER);
+	CHECK(error.contains("outputSchema"));
+
+	Dictionary invalid_annotations = make_definition("invalid_annotations");
+	invalid_annotations["annotations"] = Array();
+	CHECK_EQ(registry.register_tool(invalid_annotations, handler, provider, &error), ERR_INVALID_PARAMETER);
+	CHECK(error.contains("annotations"));
+
+	Dictionary invalid_hint = make_definition("invalid_hint");
+	Dictionary bad_annotations;
+	bad_annotations["readOnlyHint"] = "true";
+	invalid_hint["annotations"] = bad_annotations;
+	CHECK_EQ(registry.register_tool(invalid_hint, handler, provider, &error), ERR_INVALID_PARAMETER);
+	CHECK(error.contains("readOnlyHint"));
+
+	CHECK_EQ(registry.unregister_tools_for_owner(provider), 1);
+	memdelete(provider);
+}
+
 TEST_CASE("[MCP][ToolRegistry] Keeps transport context separate from tool arguments") {
 	MCPToolRegistry registry;
 	ToolProvider *provider = memnew(ToolProvider);

@@ -144,7 +144,7 @@ Error MCPAutomationProvider::register_tools(MCPToolRegistry *p_registry, String 
 	}
 
 	const Error error = p_registry->register_tool(
-			MCPToolUtils::make_tool_definition(BATCH_TOOL_NAME, "Execute an ordered batch through the shared MCP Tool Registry.", _batch_schema()),
+			MCPToolUtils::make_tool_definition(BATCH_TOOL_NAME, "Execute an ordered batch through the shared MCP Tool Registry.", _batch_schema(), MCPToolUtils::TOOL_DESTRUCTIVE),
 			callable_mp(this, &MCPAutomationProvider::batch), this, r_error);
 	if (error == OK) {
 		tool_registry = p_registry;

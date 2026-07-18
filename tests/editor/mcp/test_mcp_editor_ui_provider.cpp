@@ -199,6 +199,7 @@ TEST_CASE("[MCP][Provider] Editor UI snapshots inspect and operate native editor
 	Dictionary content = _content(_call(registry, "godot.editor.ui.get_actions", Dictionary()));
 	const String snapshot_id = content.get("snapshotId", String());
 	const Array items = content.get("items", Array());
+	const Dictionary other_session = _content(_call(registry, "godot.editor.ui.get_actions", Dictionary(), "other-ui-session"));
 	const Dictionary secret_item = _find_item(items, "text_field", "MCP Secret Field");
 	const Dictionary range_item = _find_item(items, "range", "MCP Test Range");
 	const Dictionary second_option = _find_item(items, "option", "Second");
@@ -218,6 +219,11 @@ TEST_CASE("[MCP][Provider] Editor UI snapshots inspect and operate native editor
 	CHECK(bool(content.get("snapshotInvalidated", false)));
 	CHECK(range->get_value() == doctest::Approx(8));
 	CHECK(_error_code(_call(registry, "godot.editor.ui.perform", perform)) == "STALE_UI_SNAPSHOT");
+	Dictionary other_perform;
+	other_perform["snapshotId"] = other_session.get("snapshotId", String());
+	other_perform["targetId"] = "missing";
+	other_perform["action"] = "click";
+	CHECK(_error_code(_call(registry, "godot.editor.ui.perform", other_perform, "other-ui-session")) == "UI_TARGET_NOT_FOUND");
 
 	content = _content(_call(registry, "godot.editor.ui.get_actions", Dictionary()));
 	perform["snapshotId"] = content.get("snapshotId", String());

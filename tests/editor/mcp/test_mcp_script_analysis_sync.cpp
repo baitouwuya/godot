@@ -63,10 +63,11 @@ TEST_CASE("[MCP][Provider] Script snapshots and GDScript diagnostics share one s
 	snapshot["savedRevision"] = int64_t(20);
 	snapshot["sha256"] = invalid_source.sha256_text();
 	snapshot["unsaved"] = true;
+	snapshot["sourceState"] = "editor";
 
 	Array edit_diagnostics;
 	String sync_error;
-	REQUIRE(MCPScriptAnalysisSync::sync_snapshot(manager, session_id, snapshot, edit_diagnostics, &sync_error) == OK);
+	REQUIRE(MCPScriptAnalysisSync::sync_snapshot(manager, session_id, snapshot, &edit_diagnostics, &sync_error) == OK);
 	CHECK(sync_error.is_empty());
 	CHECK_FALSE(edit_diagnostics.is_empty());
 	Ref<GDScriptAnalysisSession> session = manager->get_session(session_id);
@@ -82,7 +83,7 @@ TEST_CASE("[MCP][Provider] Script snapshots and GDScript diagnostics share one s
 	CHECK(session->get_diagnostics(path) == edit_diagnostics);
 
 	Array repeated_diagnostics;
-	REQUIRE(MCPScriptAnalysisSync::sync_snapshot(manager, session_id, snapshot, repeated_diagnostics, &sync_error) == OK);
+	REQUIRE(MCPScriptAnalysisSync::sync_snapshot(manager, session_id, snapshot, &repeated_diagnostics, &sync_error) == OK);
 	CHECK(session->get_revision() == analysis_revision);
 	CHECK(session->get_parse_result(path) == parser);
 	CHECK(repeated_diagnostics == edit_diagnostics);
@@ -118,6 +119,8 @@ TEST_CASE("[MCP][Provider] Script snapshots and GDScript diagnostics share one s
 	const Dictionary current = details.get("current", Dictionary());
 	CHECK_EQ(int64_t(current.get("revision", -1)), int64_t(snapshot["revision"]));
 	CHECK_EQ(String(current.get("sha256", String())), String(snapshot["sha256"]));
+	REQUIRE(manager->reconcile_open_editor_documents(session_id, HashSet<String>(), &sync_error) == OK);
+	CHECK_FALSE(session->has_document(path));
 
 	manager->clear();
 }

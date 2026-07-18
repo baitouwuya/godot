@@ -105,7 +105,13 @@ Error MCPGDScriptSessionManager::resolve_context(const Dictionary &p_context, St
 }
 
 Error MCPGDScriptSessionManager::sync_document(const String &p_session_id, const String &p_path, const String &p_text, int64_t p_client_version, Array &r_diagnostics, String *r_error) {
-	r_diagnostics.clear();
+	return sync_document(p_session_id, p_path, p_text, String(), p_client_version, &r_diagnostics, r_error);
+}
+
+Error MCPGDScriptSessionManager::sync_document(const String &p_session_id, const String &p_path, const String &p_text, const String &p_sha256, int64_t p_client_version, Array *r_diagnostics, String *r_error) {
+	if (r_diagnostics) {
+		r_diagnostics->clear();
+	}
 	if (r_error) {
 		*r_error = String();
 	}
@@ -125,19 +131,28 @@ Error MCPGDScriptSessionManager::sync_document(const String &p_session_id, const
 	Error sync_error = OK;
 	if (!document || document->source_state == GDScriptAnalysisSession::SOURCE_STATE_DISK) {
 		sync_error = session->open_document(p_path, p_text, LSP::LanguageId::GDSCRIPT, p_client_version);
-	} else if (document->text != p_text || document->sha256 != p_text.sha256_text() || document->client_version != p_client_version) {
+	} else if (document->client_version != p_client_version ||
+			(!p_sha256.is_empty() ? document->sha256 != p_sha256 : document->text != p_text)) {
 		sync_error = session->change_document(p_path, p_text, p_client_version);
 	}
 	if (sync_error != OK) {
 		return _session_manager_fail("The authoritative Script buffer could not be synchronized with GDScript analysis.", r_error, sync_error);
 	}
 
-	Error diagnostics_error = OK;
-	r_diagnostics = session->get_diagnostics(p_path, &diagnostics_error);
-	if (diagnostics_error != OK) {
-		return _session_manager_fail("GDScript diagnostics could not be read after synchronizing the Script buffer.", r_error, diagnostics_error);
+	if (r_diagnostics) {
+		Error diagnostics_error = OK;
+		*r_diagnostics = session->get_diagnostics(p_path, &diagnostics_error);
+		if (diagnostics_error != OK) {
+			return _session_manager_fail("GDScript diagnostics could not be read after synchronizing the Script buffer.", r_error, diagnostics_error);
+		}
 	}
 	return OK;
+}
+
+void MCPGDScriptSessionManager::track_open_editor_document(const String &p_session_id, const String &p_path) {
+	if (!p_session_id.is_empty() && !p_path.is_empty()) {
+		open_editor_paths_by_session[p_session_id].insert(p_path.simplify_path());
+	}
 }
 
 Error MCPGDScriptSessionManager::reconcile_open_editor_documents(const String &p_session_id, const HashSet<String> &p_open_paths, String *r_error) {
@@ -149,18 +164,22 @@ Error MCPGDScriptSessionManager::reconcile_open_editor_documents(const String &p
 		return _session_manager_fail("The MCP GDScript analysis session is unavailable.", r_error, ERR_UNCONFIGURED);
 	}
 
-	Vector<String> closed_paths;
-	for (const KeyValue<String, GDScriptAnalysisSession::DocumentState> &entry : session->get_documents()) {
-		if (entry.value.source_state == GDScriptAnalysisSession::SOURCE_STATE_OPEN_DOCUMENT && !p_open_paths.has(entry.key)) {
-			closed_paths.push_back(entry.key);
+	const HashSet<String> *previous_open_paths = open_editor_paths_by_session.getptr(p_session_id);
+	if (previous_open_paths) {
+		Vector<String> closed_paths;
+		for (const String &path : *previous_open_paths) {
+			if (!p_open_paths.has(path)) {
+				closed_paths.push_back(path);
+			}
+		}
+		for (const String &path : closed_paths) {
+			const Error close_error = session->close_document(path);
+			if (close_error != OK && close_error != ERR_DOES_NOT_EXIST) {
+				return _session_manager_fail("A closed ScriptEditor document could not be released from MCP analysis.", r_error, close_error);
+			}
 		}
 	}
-	for (const String &path : closed_paths) {
-		const Error close_error = session->close_document(path);
-		if (close_error != OK && close_error != ERR_DOES_NOT_EXIST) {
-			return _session_manager_fail("A closed ScriptEditor document could not be released from MCP analysis.", r_error, close_error);
-		}
-	}
+	open_editor_paths_by_session[p_session_id] = p_open_paths;
 	return OK;
 }
 
@@ -173,6 +192,7 @@ bool MCPGDScriptSessionManager::release_session(const String &p_session_id) {
 		analysis_service->remove_session((*session)->get_session_id());
 	}
 	sessions.erase(p_session_id);
+	open_editor_paths_by_session.erase(p_session_id);
 	return true;
 }
 

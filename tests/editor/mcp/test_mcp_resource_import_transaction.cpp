@@ -102,7 +102,7 @@ TEST_CASE("[MCP][Provider] Resource import transaction restores protected files 
 	CHECK_FALSE(FileAccess::exists(generated));
 }
 
-TEST_CASE("[MCP][Provider] Resource import transaction only removes paths absent from its project snapshot") {
+TEST_CASE("[MCP][Provider] Resource import transaction removes only explicitly tracked paths") {
 	Error temp_error = OK;
 	Ref<DirAccess> temporary_directory = DirAccess::create_temp("mcp-resource-transaction-snapshot", false, &temp_error);
 	REQUIRE(temp_error == OK);
@@ -112,32 +112,18 @@ TEST_CASE("[MCP][Provider] Resource import transaction only removes paths absent
 	const String project_root = root.path_join("project");
 	const String existing = project_root.path_join("generated/existing.res");
 	const String created = project_root.path_join("generated/created.res");
-	String project_data_directory = ProjectSettings::get_singleton()->get_project_data_dir_name();
-	if (project_data_directory.is_empty()) {
-		project_data_directory = ".godot";
-	}
-	const String project_data = project_root.path_join(project_data_directory).path_join("existing.cache");
 	const String outside = root.path_join("outside.res");
 	REQUIRE(DirAccess::make_dir_recursive_absolute(existing.get_base_dir()) == OK);
-	REQUIRE(DirAccess::make_dir_recursive_absolute(project_data.get_base_dir()) == OK);
 	REQUIRE(_write_text(existing, "before") == OK);
-	REQUIRE(_write_text(project_data, "cache") == OK);
 
 	MCPResourceImportTransaction transaction;
 	String transaction_error;
 	REQUIRE(transaction.begin(&transaction_error) == OK);
-	REQUIRE(transaction.capture_existing_files(project_root, &transaction_error) == OK);
-	CHECK(transaction.has_preimport_path_state(existing));
-	CHECK(transaction.existed_before_import(existing));
-	CHECK_FALSE(transaction.existed_before_import(created));
-	CHECK_FALSE(transaction.has_preimport_path_state(project_data));
-	CHECK_FALSE(transaction.existed_before_import(outside));
 
 	REQUIRE(_write_text(existing, "changed but unprotected") == OK);
 	REQUIRE(_write_text(created, "new project product") == OK);
 	REQUIRE(_write_text(outside, "new outside product") == OK);
 	transaction.track_created_path(created);
-	transaction.track_created_path(outside);
 
 	CHECK(transaction.rollback(&transaction_error) == OK);
 	CHECK(transaction_error.is_empty());

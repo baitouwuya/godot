@@ -637,7 +637,7 @@ TEST_CASE("[MCP][Provider] Failed resource import restores target metadata and p
 	memdelete(provider);
 }
 
-TEST_CASE("[MCP][Provider] Failed resource import restores owned products and removes newly reported products") {
+TEST_CASE("[MCP][Provider] Failed resource import restores owned products without deleting unowned products") {
 	REQUIRE(ResourceFormatImporter::get_singleton() != nullptr);
 	ScopedImporterRegistration importer_registration;
 	TestPaths paths = _make_test_paths();
@@ -677,11 +677,13 @@ TEST_CASE("[MCP][Provider] Failed resource import restores owned products and re
 	CHECK(FileAccess::get_file_as_string(target_absolute_path) == "original target");
 	CHECK(FileAccess::get_file_as_string(target_absolute_path + ".import") == old_metadata);
 	CHECK(FileAccess::get_file_as_string(owned_absolute_path) == "original generated product");
-	CHECK_FALSE(FileAccess::exists(residual_absolute_path));
+	CHECK(FileAccess::get_file_as_string(residual_absolute_path) == "partial generated product");
 	const Dictionary details = _error_details(call_result);
 	CHECK(bool(details.get("rollbackSucceeded", false)));
-	CHECK(bool(details.get("rollbackComplete", false)));
-	CHECK_FALSE(details.has("possibleResidualProducts"));
+	CHECK_FALSE(bool(details.get("rollbackComplete", true)));
+	const PackedStringArray possible_residuals = details.get("possibleResidualProducts", PackedStringArray());
+	REQUIRE(possible_residuals.size() == 1);
+	CHECK(possible_residuals[0] == residual_resource_path);
 
 	provider->unregister_tools();
 	memdelete(provider);

@@ -366,7 +366,7 @@ Error MCPScriptBuffer::read_open_snapshots(Array &r_snapshots, String *r_error) 
 	}
 	ScriptEditor *script_editor = ScriptEditor::get_singleton();
 	if (!script_editor) {
-		return _script_buffer_fail("The Script editor is not available.", r_error, ERR_UNCONFIGURED);
+		return OK;
 	}
 
 	const Array open_editors = script_editor->call("get_open_script_editors");
@@ -472,6 +472,7 @@ Dictionary MCPScriptBuffer::get_snapshot() const {
 	snapshot["savedRevision"] = int64_t(code_edit->get_saved_version());
 	snapshot["sha256"] = text.sha256_text();
 	snapshot["unsaved"] = editor->is_unsaved();
+	snapshot["sourceState"] = "editor";
 	snapshot["sourceType"] = built_in ? "builtIn" : "external";
 	if (built_in && !scene_path.is_empty()) {
 		snapshot["scenePath"] = scene_path;

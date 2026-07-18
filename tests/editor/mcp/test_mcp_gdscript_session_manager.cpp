@@ -35,6 +35,7 @@
 #if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
 
 #include "core/io/file_access.h"
+#include "core/os/os.h"
 #include "editor/mcp/providers/mcp_gdscript_session_manager.h"
 
 #include "modules/gdscript/language_server/gdscript_workspace.h"
@@ -93,7 +94,7 @@ TEST_CASE("[MCP][Provider] GDScript session manager synchronizes authoritative s
 	CHECK(manager->sync_document("invalid-version", path, valid_source, -1, diagnostics, &error) == ERR_PARAMETER_RANGE_ERROR);
 	CHECK(manager->get_session_count() == session_count);
 
-	const String disk_path = "res://modules/gdscript/tests/scripts/utils.notest.gd";
+	const String disk_path = OS::get_singleton()->get_executable_path().get_base_dir().get_base_dir().path_join("modules/gdscript/tests/scripts/utils.notest.gd");
 	Error read_error = OK;
 	const String disk_source = FileAccess::get_file_as_string(disk_path, &read_error);
 	REQUIRE(read_error == OK);
@@ -137,6 +138,12 @@ TEST_CASE("[MCP][Provider] GDScript session manager releases closed editor docum
 	REQUIRE(manager->sync_document(first_id, closed_path, "var stale := true\n", 2, diagnostics, &error) == OK);
 	REQUIRE(manager->sync_document(second_id, closed_path, "var isolated := true\n", 3, diagnostics, &error) == OK);
 
+	HashSet<String> initially_open_paths;
+	initially_open_paths.insert(kept_path);
+	initially_open_paths.insert(closed_path);
+	manager->track_open_editor_document(first_id, kept_path);
+	manager->track_open_editor_document(first_id, closed_path);
+	REQUIRE(manager->reconcile_open_editor_documents(first_id, initially_open_paths, &error) == OK);
 	HashSet<String> open_paths;
 	open_paths.insert(kept_path);
 	REQUIRE(manager->reconcile_open_editor_documents(first_id, open_paths, &error) == OK);

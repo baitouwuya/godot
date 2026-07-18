@@ -441,6 +441,7 @@ Dictionary MCPScriptProvider::create(const Dictionary &p_arguments, const Dictio
 	if (!_resolve_analysis_context(p_context, session_id, session, analysis_error)) {
 		return MCPToolUtils::make_error_result("ANALYSIS_UNAVAILABLE", analysis_error);
 	}
+	MCPGDScriptTransientParserCleanup cleanup(session);
 
 	String resource_path;
 	String absolute_path;
@@ -491,7 +492,7 @@ Dictionary MCPScriptProvider::create(const Dictionary &p_arguments, const Dictio
 
 	Dictionary result = buffer.get_snapshot();
 	Array diagnostics;
-	if (MCPScriptAnalysisSync::sync_snapshot(session_manager, session_id, result, diagnostics, &analysis_error) != OK) {
+	if (MCPScriptAnalysisSync::sync_snapshot(session_manager, session_id, result, &diagnostics, &analysis_error) != OK) {
 		return MCPScriptAnalysisSync::make_failure(result, true, true, true, analysis_error);
 	}
 	result["created"] = true;
@@ -523,6 +524,7 @@ Dictionary MCPScriptProvider::get(const Dictionary &p_arguments, const Dictionar
 	if (!_resolve_analysis_context(p_context, session_id, session, analysis_error)) {
 		return MCPToolUtils::make_error_result("ANALYSIS_UNAVAILABLE", analysis_error);
 	}
+	MCPGDScriptTransientParserCleanup cleanup(session);
 
 	MCPScriptBuffer buffer;
 	const Dictionary buffer_error = _open_selected_buffer(p_arguments, buffer);
@@ -530,8 +532,7 @@ Dictionary MCPScriptProvider::get(const Dictionary &p_arguments, const Dictionar
 		return buffer_error;
 	}
 	Dictionary result = buffer.get_snapshot();
-	Array diagnostics;
-	if (MCPScriptAnalysisSync::sync_snapshot(session_manager, session_id, result, diagnostics, &analysis_error) != OK) {
+	if (MCPScriptAnalysisSync::sync_snapshot(session_manager, session_id, result, nullptr, &analysis_error) != OK) {
 		return MCPScriptAnalysisSync::make_failure(result, false, false, false, analysis_error);
 	}
 	ExtendGDScriptParser *parser = session->get_parse_result(result.get("path", String()));
@@ -550,7 +551,6 @@ Dictionary MCPScriptProvider::get(const Dictionary &p_arguments, const Dictionar
 	for (const KeyValue<Variant, Variant> &entry : document) {
 		result[entry.key] = entry.value;
 	}
-	result["diagnostics"] = diagnostics;
 	return MCPToolUtils::make_success_result(result);
 }
 
@@ -581,6 +581,7 @@ Dictionary MCPScriptProvider::usages(const Dictionary &p_arguments, const Dictio
 	if (!_resolve_analysis_context(p_context, session_id, session, analysis_error)) {
 		return MCPToolUtils::make_error_result("ANALYSIS_UNAVAILABLE", analysis_error);
 	}
+	MCPGDScriptTransientParserCleanup cleanup(session);
 
 	MCPScriptBuffer buffer;
 	const Dictionary buffer_error = _open_selected_buffer(p_arguments, buffer);
@@ -588,8 +589,7 @@ Dictionary MCPScriptProvider::usages(const Dictionary &p_arguments, const Dictio
 		return buffer_error;
 	}
 	Dictionary result = buffer.get_snapshot();
-	Array diagnostics;
-	if (MCPScriptAnalysisSync::sync_snapshot(session_manager, session_id, result, diagnostics, &analysis_error) != OK) {
+	if (MCPScriptAnalysisSync::sync_snapshot(session_manager, session_id, result, nullptr, &analysis_error) != OK) {
 		return MCPScriptAnalysisSync::make_failure(result, false, false, false, analysis_error);
 	}
 	if (MCPScriptAnalysisSync::sync_open_buffers(session_manager, session_id, &analysis_error) != OK) {
@@ -643,6 +643,7 @@ Dictionary MCPScriptProvider::edit(const Dictionary &p_arguments, const Dictiona
 	if (!_resolve_analysis_context(p_context, session_id, session, analysis_error)) {
 		return MCPToolUtils::make_error_result("ANALYSIS_UNAVAILABLE", analysis_error);
 	}
+	MCPGDScriptTransientParserCleanup cleanup(session);
 
 	MCPScriptBuffer buffer;
 	const Dictionary buffer_error = _open_selected_buffer(p_arguments, buffer);
@@ -667,7 +668,7 @@ Dictionary MCPScriptProvider::edit(const Dictionary &p_arguments, const Dictiona
 
 	Dictionary result = buffer.get_snapshot();
 	Array diagnostics;
-	if (MCPScriptAnalysisSync::sync_snapshot(session_manager, session_id, result, diagnostics, &analysis_error) != OK) {
+	if (MCPScriptAnalysisSync::sync_snapshot(session_manager, session_id, result, &diagnostics, &analysis_error) != OK) {
 		return MCPScriptAnalysisSync::make_failure(result, true, changed, false, analysis_error);
 	}
 	result["changed"] = changed;
@@ -689,6 +690,7 @@ Dictionary MCPScriptProvider::save(const Dictionary &p_arguments, const Dictiona
 	if (!_resolve_analysis_context(p_context, session_id, session, analysis_error)) {
 		return MCPToolUtils::make_error_result("ANALYSIS_UNAVAILABLE", analysis_error);
 	}
+	MCPGDScriptTransientParserCleanup cleanup(session);
 
 	MCPScriptBuffer buffer;
 	const Dictionary buffer_error = _open_selected_buffer(p_arguments, buffer);

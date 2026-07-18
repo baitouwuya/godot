@@ -83,7 +83,7 @@ private:
 	bool _is_ready(String &r_error) const;
 	bool _validate_ready_arguments(const Dictionary &p_arguments, const PackedStringArray &p_allowed, String &r_error, Dictionary &r_error_result) const;
 	bool _resolve_session(const Dictionary &p_context, String &r_session_id, Ref<GDScriptAnalysisSession> &r_session, String &r_error);
-	bool _prepare_document(const Dictionary &p_context, const String &p_path, Ref<GDScriptAnalysisSession> &r_session, Array &r_diagnostics, Dictionary &r_error_result);
+	bool _prepare_document(const Dictionary &p_context, const String &p_path, bool p_sync_open_buffers, Ref<GDScriptAnalysisSession> &r_session, Array *r_diagnostics, Dictionary &r_error_result);
 	bool _parse_path(const Dictionary &p_arguments, String &r_path, String &r_error) const;
 	bool _parse_position(const Dictionary &p_arguments, String &r_path, LSP::TextDocumentPositionParams &r_params, String &r_error) const;
 	bool _parse_reference_position(const Dictionary &p_arguments, String &r_path, LSP::ReferenceParams &r_params, String &r_error) const;
@@ -94,6 +94,6 @@ private:
 	Dictionary _script_not_found(const String &p_path) const;
 	Dictionary _locations_result(const Ref<GDScriptAnalysisSession> &p_session, const String &p_path, const Vector<LSP::Location> &p_locations, const LSP::DocumentSymbol *p_symbol = nullptr) const;
 
-	Array _completion_items(const Ref<GDScriptAnalysisSession> &p_session, const String &p_path, const LSP::CompletionParams &p_params, const List<ScriptLanguage::CodeCompletionOption> &p_options) const;
+	Array _completion_items(const Ref<GDScriptAnalysisSession> &p_session, const String &p_path, const List<ScriptLanguage::CodeCompletionOption> &p_options, int p_limit) const;
 	Dictionary _symbol_result(const Ref<GDScriptAnalysisSession> &p_session, const String &p_path, const LSP::TextDocumentPositionParams &p_params, bool p_declaration) const;
 };

@@ -40,7 +40,7 @@ The stdio bridge lets a standard MCP client reach the project-specific Streamabl
 godot --mcp-stdio --path C:\projects\my-game
 ```
 
-The bridge reads one JSON-RPC object or batch per stdin line. It resolves the selected project's current discovery record, adds the private bearer credential internally, forwards requests to that Host, and writes only JSON-RPC responses to stdout. Blank input lines are ignored and diagnostics use stderr.
+The bridge reads one JSON-RPC message per stdin line. Legacy `2025-03-26` sessions may use JSON-RPC batches; newer MCP protocol revisions do not support JSON-RPC batching. Use `godot.automation.batch` when an ordered tool batch is needed. The bridge resolves the selected project's current discovery record, adds the private bearer credential internally, forwards requests to that Host, and writes only JSON-RPC responses to stdout. Blank input lines are ignored and diagnostics use stderr.
 
 `--mcp-discover` and `--mcp-stdio` are the complete CLI adapter surface. Features such as logging, LSP queries, runtime input, performance recording, and Harness jobs are MCP tools served by the editor Host, including when a client reaches them through stdio.
 
@@ -90,7 +90,7 @@ Snapshots are isolated per MCP session. Targets are revalidated against the visi
 
 ## Batch MCP Tools
 
-`godot.automation.batch` prevalidates and then invokes up to 64 MCP tools sequentially in the same session. It is fail-fast by default and rejects recursive batch calls. CLI clients obtain this capability only through the standard stdio bridge to the project's running MCP Host; there is no separate batch CLI implementation.
+`godot.automation.batch` prevalidates and then invokes up to 64 MCP tools sequentially in the same session. It is fail-fast by default and rejects recursive batch calls. CLI clients obtain this capability only through the standard stdio bridge to the project's running MCP Host; there is no separate batch CLI implementation. Long-running runtime automation belongs in the asynchronous Harness instead of one synchronous batch.
 
 ## Edit Scene Structure
 
@@ -116,6 +116,8 @@ The tool synchronizes all open GDScript editor buffers into the calling MCP anal
 ## Edit Resources
 
 `godot.resource.get_properties` reads the editable Inspector property list of a project-local Resource from `ResourceLoader`'s cache. Values use the same restricted Variant codec as node properties. `godot.resource.set_property` updates that cached object, integrates with editor Undo/Redo when available, refreshes the Inspector, and deliberately leaves the resource unsaved. `godot.resource.save` explicitly persists the same cached object. Arbitrary paths and unsafe object references are rejected.
+
+`godot.resource.import` rolls back the target, metadata, previous destination files, and files in the importer-owned save namespace. A custom importer that reports a new destination outside those known namespaces is never allowed to make MCP delete a path whose prior ownership cannot be proven; failed imports report such paths in `possibleResidualProducts` with `rollbackComplete: false`.
 
 ## Inspect Debug Output
 

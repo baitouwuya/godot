@@ -150,6 +150,7 @@ TEST_CASE("[MCP][Provider] GDScript semantic tools use injected analysis session
 	CHECK(completion_properties.has("position"));
 	CHECK(completion_properties.has("line"));
 	CHECK(completion_properties.has("character"));
+	CHECK(completion_properties.has("limit"));
 	const Array completion_constraints = completion_schema.get("allOf", Array());
 	REQUIRE(completion_constraints.size() == 2);
 	CHECK(Array(Dictionary(completion_constraints[0]).get("oneOf", Array())).size() == 2);

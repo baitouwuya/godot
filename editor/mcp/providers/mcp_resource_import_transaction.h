@@ -42,10 +42,6 @@ class MCPResourceImportTransaction {
 	Ref<DirAccess> backup_directory;
 	HashMap<String, ProtectedPath> protected_paths;
 	HashSet<String> created_paths;
-	HashSet<String> existing_paths;
-	HashSet<String> excluded_snapshot_roots;
-	String snapshot_root;
-	bool snapshot_captured = false;
 	bool active = false;
 
 	static void _set_error(String *r_error, const String &p_message);
@@ -54,12 +50,10 @@ public:
 	~MCPResourceImportTransaction();
 
 	Error begin(String *r_error = nullptr);
-	Error capture_existing_files(const String &p_project_root, String *r_error = nullptr);
 	Error protect_path(const String &p_path, String *r_error = nullptr);
 	void track_created_path(const String &p_path);
 	bool is_path_protected(const String &p_path) const;
-	bool has_preimport_path_state(const String &p_path) const;
-	bool existed_before_import(const String &p_path) const;
+	bool is_path_tracked_created(const String &p_path) const;
 
 	void commit();
 	Error rollback(String *r_error = nullptr);

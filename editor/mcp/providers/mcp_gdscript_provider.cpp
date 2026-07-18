@@ -44,10 +44,27 @@
 
 namespace {
 
+static constexpr int DEFAULT_COMPLETION_LIMIT = 100;
+static constexpr int MAX_COMPLETION_LIMIT = 500;
+
 static void _set_error(String *r_error, const String &p_message) {
 	if (r_error) {
 		*r_error = p_message;
 	}
+}
+
+static Dictionary _completion_schema() {
+	Dictionary schema = MCPGDScriptToolUtils::position_schema();
+	Dictionary properties = schema.get("properties", Dictionary());
+	Dictionary limit;
+	limit["type"] = "integer";
+	limit["description"] = "Maximum completion items returned.";
+	limit["minimum"] = 1;
+	limit["maximum"] = MAX_COMPLETION_LIMIT;
+	limit["default"] = DEFAULT_COMPLETION_LIMIT;
+	properties["limit"] = limit;
+	schema["properties"] = properties;
+	return schema;
 }
 
 } // namespace
@@ -139,10 +156,14 @@ bool MCPGDScriptProvider::_resolve_session(const Dictionary &p_context, String &
 	return session_manager->resolve_context(p_context, r_session_id, r_session, &r_error) == OK;
 }
 
-bool MCPGDScriptProvider::_prepare_document(const Dictionary &p_context, const String &p_path, Ref<GDScriptAnalysisSession> &r_session, Array &r_diagnostics, Dictionary &r_error_result) {
+bool MCPGDScriptProvider::_prepare_document(const Dictionary &p_context, const String &p_path, bool p_sync_open_buffers, Ref<GDScriptAnalysisSession> &r_session, Array *r_diagnostics, Dictionary &r_error_result) {
 	String session_id;
 	String error;
 	if (!_resolve_session(p_context, session_id, r_session, error)) {
+		r_error_result = _unavailable(error);
+		return false;
+	}
+	if (p_sync_open_buffers && MCPScriptAnalysisSync::sync_open_buffers(session_manager, session_id, &error) != OK) {
 		r_error_result = _unavailable(error);
 		return false;
 	}
@@ -327,19 +348,19 @@ Dictionary MCPGDScriptProvider::_locations_result(const Ref<GDScriptAnalysisSess
 	return MCPToolUtils::make_success_result(result);
 }
 
-Array MCPGDScriptProvider::_completion_items(const Ref<GDScriptAnalysisSession> &p_session, const String &p_path, const LSP::CompletionParams &p_params, const List<ScriptLanguage::CodeCompletionOption> &p_options) const {
+Array MCPGDScriptProvider::_completion_items(const Ref<GDScriptAnalysisSession> &p_session, const String &p_path, const List<ScriptLanguage::CodeCompletionOption> &p_options, int p_limit) const {
 	Array items;
-	items.resize(p_options.size());
-	LSP::CompletionParams request_params = p_params;
-	const Dictionary request_data = request_params.to_json();
+	items.resize(MIN(p_options.size(), p_limit));
 	ExtendGDScriptParser *parser = p_session->get_parse_result(p_path);
 	int index = 0;
 	for (const ScriptLanguage::CodeCompletionOption &option : p_options) {
+		if (index >= p_limit) {
+			break;
+		}
 		LSP::CompletionItem item;
 		item.label = option.display;
 		item.insertText = option.insert_text;
 		item.kind = MCPGDScriptToolUtils::completion_kind(option.kind);
-		item.data = request_data;
 		if (option.text_edit.is_set()) {
 			item.textEdit.newText = option.text_edit.new_text;
 			if (parser) {
@@ -389,9 +410,10 @@ Dictionary MCPGDScriptProvider::diagnostics(const Dictionary &p_arguments, const
 	Ref<GDScriptAnalysisSession> session;
 	Array diagnostic_list;
 	Dictionary preparation_error;
-	if (!_prepare_document(p_context, path, session, diagnostic_list, preparation_error)) {
+	if (!_prepare_document(p_context, path, false, session, &diagnostic_list, preparation_error)) {
 		return preparation_error;
 	}
+	MCPGDScriptTransientParserCleanup cleanup(session);
 	Dictionary result = _metadata(session, path);
 	result["diagnostics"] = diagnostic_list;
 	return MCPToolUtils::make_success_result(result);
@@ -411,11 +433,11 @@ Dictionary MCPGDScriptProvider::symbols(const Dictionary &p_arguments, const Dic
 		return _invalid_arguments(argument_error);
 	}
 	Ref<GDScriptAnalysisSession> session;
-	Array diagnostics;
 	Dictionary preparation_error;
-	if (!_prepare_document(p_context, path, session, diagnostics, preparation_error)) {
+	if (!_prepare_document(p_context, path, false, session, nullptr, preparation_error)) {
 		return preparation_error;
 	}
+	MCPGDScriptTransientParserCleanup cleanup(session);
 	ExtendGDScriptParser *parser = session->get_parse_result(path);
 	if (!parser) {
 		return _script_not_found(path);
@@ -434,6 +456,7 @@ Dictionary MCPGDScriptProvider::completion(const Dictionary &p_arguments, const 
 	allowed.push_back("line");
 	allowed.push_back("character");
 	allowed.push_back("position");
+	allowed.push_back("limit");
 	String argument_error;
 	Dictionary request_error;
 	if (!_validate_ready_arguments(p_arguments, allowed, argument_error, request_error)) {
@@ -444,12 +467,16 @@ Dictionary MCPGDScriptProvider::completion(const Dictionary &p_arguments, const 
 	if (!_parse_position(p_arguments, path, position, argument_error)) {
 		return _invalid_arguments(argument_error);
 	}
+	int64_t limit = DEFAULT_COMPLETION_LIMIT;
+	if (!MCPToolUtils::try_get_json_integer(p_arguments.get("limit", DEFAULT_COMPLETION_LIMIT), 1, MAX_COMPLETION_LIMIT, limit)) {
+		return _invalid_arguments("limit is outside its allowed range.");
+	}
 	Ref<GDScriptAnalysisSession> session;
-	Array diagnostics;
 	Dictionary preparation_error;
-	if (!_prepare_document(p_context, path, session, diagnostics, preparation_error)) {
+	if (!_prepare_document(p_context, path, true, session, nullptr, preparation_error)) {
 		return preparation_error;
 	}
+	MCPGDScriptTransientParserCleanup cleanup(session);
 	if (!session->get_parse_result(path)) {
 		return _script_not_found(path);
 	}
@@ -459,8 +486,9 @@ Dictionary MCPGDScriptProvider::completion(const Dictionary &p_arguments, const 
 	List<ScriptLanguage::CodeCompletionOption> options;
 	_get_workspace()->completion(session, params, &options);
 	Dictionary result = _metadata(session, path);
-	result["items"] = _completion_items(session, path, params, options);
-	result["isIncomplete"] = false;
+	result["items"] = _completion_items(session, path, options, int(limit));
+	result["totalItemCount"] = options.size();
+	result["isIncomplete"] = options.size() > limit;
 	return MCPToolUtils::make_success_result(result);
 }
 
@@ -482,11 +510,11 @@ Dictionary MCPGDScriptProvider::hover(const Dictionary &p_arguments, const Dicti
 		return _invalid_arguments(argument_error);
 	}
 	Ref<GDScriptAnalysisSession> session;
-	Array diagnostics;
 	Dictionary preparation_error;
-	if (!_prepare_document(p_context, path, session, diagnostics, preparation_error)) {
+	if (!_prepare_document(p_context, path, true, session, nullptr, preparation_error)) {
 		return preparation_error;
 	}
+	MCPGDScriptTransientParserCleanup cleanup(session);
 	if (!session->get_parse_result(path)) {
 		return _script_not_found(path);
 	}
@@ -524,11 +552,11 @@ Dictionary MCPGDScriptProvider::definition(const Dictionary &p_arguments, const 
 		return _invalid_arguments(argument_error);
 	}
 	Ref<GDScriptAnalysisSession> session;
-	Array diagnostics;
 	Dictionary preparation_error;
-	if (!_prepare_document(p_context, path, session, diagnostics, preparation_error)) {
+	if (!_prepare_document(p_context, path, true, session, nullptr, preparation_error)) {
 		return preparation_error;
 	}
+	MCPGDScriptTransientParserCleanup cleanup(session);
 	if (!session->get_parse_result(path)) {
 		return _script_not_found(path);
 	}
@@ -553,11 +581,11 @@ Dictionary MCPGDScriptProvider::declaration(const Dictionary &p_arguments, const
 		return _invalid_arguments(argument_error);
 	}
 	Ref<GDScriptAnalysisSession> session;
-	Array diagnostics;
 	Dictionary preparation_error;
-	if (!_prepare_document(p_context, path, session, diagnostics, preparation_error)) {
+	if (!_prepare_document(p_context, path, true, session, nullptr, preparation_error)) {
 		return preparation_error;
 	}
+	MCPGDScriptTransientParserCleanup cleanup(session);
 	if (!session->get_parse_result(path)) {
 		return _script_not_found(path);
 	}
@@ -583,11 +611,11 @@ Dictionary MCPGDScriptProvider::references(const Dictionary &p_arguments, const 
 		return _invalid_arguments(argument_error);
 	}
 	Ref<GDScriptAnalysisSession> session;
-	Array diagnostics;
 	Dictionary preparation_error;
-	if (!_prepare_document(p_context, path, session, diagnostics, preparation_error)) {
+	if (!_prepare_document(p_context, path, true, session, nullptr, preparation_error)) {
 		return preparation_error;
 	}
+	MCPGDScriptTransientParserCleanup cleanup(session);
 	if (!session->get_parse_result(path)) {
 		return _script_not_found(path);
 	}
@@ -630,11 +658,11 @@ Dictionary MCPGDScriptProvider::signature_help(const Dictionary &p_arguments, co
 		return _invalid_arguments(argument_error);
 	}
 	Ref<GDScriptAnalysisSession> session;
-	Array diagnostics;
 	Dictionary preparation_error;
-	if (!_prepare_document(p_context, path, session, diagnostics, preparation_error)) {
+	if (!_prepare_document(p_context, path, true, session, nullptr, preparation_error)) {
 		return preparation_error;
 	}
+	MCPGDScriptTransientParserCleanup cleanup(session);
 	if (!session->get_parse_result(path)) {
 		return _script_not_found(path);
 	}
@@ -674,11 +702,11 @@ Dictionary MCPGDScriptProvider::rename(const Dictionary &p_arguments, const Dict
 		return _invalid_arguments(new_name.is_empty() ? "newName must not be empty." : argument_error);
 	}
 	Ref<GDScriptAnalysisSession> session;
-	Array diagnostics;
 	Dictionary preparation_error;
-	if (!_prepare_document(p_context, path, session, diagnostics, preparation_error)) {
+	if (!_prepare_document(p_context, path, true, session, nullptr, preparation_error)) {
 		return preparation_error;
 	}
+	MCPGDScriptTransientParserCleanup cleanup(session);
 	if (!session->get_parse_result(path)) {
 		return _script_not_found(path);
 	}
@@ -711,7 +739,7 @@ Error MCPGDScriptProvider::register_tools(MCPToolRegistry *p_registry, String *r
 	};
 	register_tool("godot.gdscript.diagnostics", "Return diagnostics for a GDScript document.", MCPGDScriptToolUtils::diagnostics_schema(), callable_mp(this, &MCPGDScriptProvider::diagnostics));
 	register_tool("godot.gdscript.symbols", "Return document symbols for a GDScript document.", MCPGDScriptToolUtils::diagnostics_schema(), callable_mp(this, &MCPGDScriptProvider::symbols));
-	register_tool("godot.gdscript.completion", "Return UTF-16 positioned GDScript completions.", MCPGDScriptToolUtils::position_schema(), callable_mp(this, &MCPGDScriptProvider::completion));
+	register_tool("godot.gdscript.completion", "Return bounded UTF-16 positioned GDScript completions.", _completion_schema(), callable_mp(this, &MCPGDScriptProvider::completion));
 	register_tool("godot.gdscript.hover", "Return GDScript hover information at a position.", MCPGDScriptToolUtils::position_schema(), callable_mp(this, &MCPGDScriptProvider::hover));
 	register_tool("godot.gdscript.definition", "Resolve the GDScript definition at a position.", MCPGDScriptToolUtils::position_schema(), callable_mp(this, &MCPGDScriptProvider::definition));
 	register_tool("godot.gdscript.declaration", "Resolve the GDScript declaration at a position.", MCPGDScriptToolUtils::position_schema(), callable_mp(this, &MCPGDScriptProvider::declaration));

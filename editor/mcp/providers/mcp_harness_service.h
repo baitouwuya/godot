@@ -40,7 +40,7 @@ class MCPHarnessService {
 public:
 	static constexpr int MAX_ACTIVE_JOBS = 8;
 	static constexpr int MAX_SESSION_JOBS = 2;
-	static constexpr int MAX_TOOL_CALLS_PER_POLL = 4;
+	static constexpr int MAX_TOOL_CALLS_PER_POLL = 1;
 
 	void set_tool_registry(MCPToolRegistry *p_registry) { tool_registry = p_registry; }
 	void set_trace_service(MCPTraceService *p_service, const Dictionary &p_project_metadata = Dictionary(), const String &p_root_directory_override = String());

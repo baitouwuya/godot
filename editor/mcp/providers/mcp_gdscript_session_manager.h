@@ -36,12 +36,26 @@
 
 #include "modules/gdscript/language_server/gdscript_analysis_service.h"
 
+class MCPGDScriptTransientParserCleanup {
+	Ref<GDScriptAnalysisSession> session;
+
+public:
+	explicit MCPGDScriptTransientParserCleanup(const Ref<GDScriptAnalysisSession> &p_session) :
+			session(p_session) {}
+	~MCPGDScriptTransientParserCleanup() {
+		if (session.is_valid()) {
+			session->clear_transient_parsers();
+		}
+	}
+};
+
 class MCPGDScriptSessionManager : public RefCounted {
 	GDSOFTCLASS(MCPGDScriptSessionManager, RefCounted);
 
 	Ref<GDScriptAnalysisService> analysis_service;
 	Ref<GDScriptAnalysisSession> fallback_session;
 	HashMap<String, Ref<GDScriptAnalysisSession>> sessions;
+	HashMap<String, HashSet<String>> open_editor_paths_by_session;
 
 public:
 	MCPGDScriptSessionManager(const Ref<GDScriptAnalysisService> &p_service = Ref<GDScriptAnalysisService>(), const Ref<GDScriptAnalysisSession> &p_fallback_session = Ref<GDScriptAnalysisSession>());
@@ -57,6 +71,8 @@ public:
 	Ref<GDScriptAnalysisSession> get_session(const String &p_session_id) const;
 	Error resolve_context(const Dictionary &p_context, String &r_session_id, Ref<GDScriptAnalysisSession> &r_session, String *r_error = nullptr);
 	Error sync_document(const String &p_session_id, const String &p_path, const String &p_text, int64_t p_client_version, Array &r_diagnostics, String *r_error = nullptr);
+	Error sync_document(const String &p_session_id, const String &p_path, const String &p_text, const String &p_sha256, int64_t p_client_version, Array *r_diagnostics = nullptr, String *r_error = nullptr);
+	void track_open_editor_document(const String &p_session_id, const String &p_path);
 	Error reconcile_open_editor_documents(const String &p_session_id, const HashSet<String> &p_open_paths, String *r_error = nullptr);
 	bool release_session(const String &p_session_id);
 	void clear();

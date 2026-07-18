@@ -33,8 +33,10 @@
 #include "mcp_script_buffer.h"
 #include "mcp_tool_utils.h"
 
-Error MCPScriptAnalysisSync::sync_snapshot(const Ref<MCPGDScriptSessionManager> &p_session_manager, const String &p_session_id, const Dictionary &p_snapshot, Array &r_diagnostics, String *r_error) {
-	r_diagnostics.clear();
+Error MCPScriptAnalysisSync::sync_snapshot(const Ref<MCPGDScriptSessionManager> &p_session_manager, const String &p_session_id, const Dictionary &p_snapshot, Array *r_diagnostics, String *r_error) {
+	if (r_diagnostics) {
+		r_diagnostics->clear();
+	}
 	if (r_error) {
 		*r_error = String();
 	}
@@ -48,7 +50,9 @@ Error MCPScriptAnalysisSync::sync_snapshot(const Ref<MCPGDScriptSessionManager> 
 	const Variant path_value = p_snapshot.get("path", Variant());
 	const Variant text_value = p_snapshot.get("text", Variant());
 	const Variant revision_value = p_snapshot.get("revision", Variant());
-	if (path_value.get_type() != Variant::STRING || text_value.get_type() != Variant::STRING || revision_value.get_type() != Variant::INT) {
+	const Variant sha256_value = p_snapshot.get("sha256", Variant());
+	if (path_value.get_type() != Variant::STRING || text_value.get_type() != Variant::STRING || revision_value.get_type() != Variant::INT ||
+			(sha256_value.get_type() != Variant::NIL && sha256_value.get_type() != Variant::STRING)) {
 		if (r_error) {
 			*r_error = "The authoritative Script buffer snapshot is incomplete.";
 		}
@@ -57,13 +61,20 @@ Error MCPScriptAnalysisSync::sync_snapshot(const Ref<MCPGDScriptSessionManager> 
 
 	const String path = path_value;
 	const String text = text_value;
+	const String sha256 = sha256_value.get_type() == Variant::STRING ? String(sha256_value) : String();
 	const int64_t revision = revision_value;
-	return p_session_manager->sync_document(p_session_id, path, text, revision, r_diagnostics, r_error);
+	const Error error = p_session_manager->sync_document(p_session_id, path, text, sha256, revision, r_diagnostics, r_error);
+	if (error == OK && p_snapshot.get("sourceState", String()) == "editor") {
+		p_session_manager->track_open_editor_document(p_session_id, path);
+	}
+	return error;
 }
 
-Error MCPScriptAnalysisSync::sync_authoritative_path(const Ref<MCPGDScriptSessionManager> &p_session_manager, const String &p_session_id, const String &p_path, const String &p_project_root, Dictionary &r_snapshot, Array &r_diagnostics, String *r_error) {
+Error MCPScriptAnalysisSync::sync_authoritative_path(const Ref<MCPGDScriptSessionManager> &p_session_manager, const String &p_session_id, const String &p_path, const String &p_project_root, Dictionary &r_snapshot, Array *r_diagnostics, String *r_error) {
 	r_snapshot = Dictionary();
-	r_diagnostics.clear();
+	if (r_diagnostics) {
+		r_diagnostics->clear();
+	}
 	const Error read_error = MCPScriptBuffer::read_authoritative_snapshot_for_root(p_path, p_project_root, r_snapshot, r_error);
 	if (read_error != OK) {
 		return read_error;
@@ -87,8 +98,7 @@ Error MCPScriptAnalysisSync::sync_open_buffers(const Ref<MCPGDScriptSessionManag
 			}
 			return ERR_INVALID_DATA;
 		}
-		Array diagnostics;
-		const Error sync_error = sync_snapshot(p_session_manager, p_session_id, snapshot, diagnostics, r_error);
+		const Error sync_error = sync_snapshot(p_session_manager, p_session_id, snapshot, nullptr, r_error);
 		if (sync_error != OK) {
 			return sync_error;
 		}
@@ -107,7 +117,7 @@ Error MCPScriptAnalysisSync::sync_saved_snapshot(const Ref<MCPGDScriptSessionMan
 	}
 
 	Array diagnostics;
-	const Error sync_error = sync_snapshot(p_session_manager, p_session_id, r_snapshot, diagnostics, r_error);
+	const Error sync_error = sync_snapshot(p_session_manager, p_session_id, r_snapshot, &diagnostics, r_error);
 	if (sync_error != OK) {
 		return sync_error;
 	}

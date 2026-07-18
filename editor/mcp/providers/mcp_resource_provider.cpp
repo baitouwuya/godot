@@ -284,14 +284,10 @@ static void _track_new_paths(MCPResourceImportTransaction &p_transaction, const 
 static HashSet<String> _track_reported_dest_paths(MCPResourceImportTransaction &p_transaction, const HashMap<String, String> &p_transaction_paths_by_resource) {
 	HashSet<String> preexisting_unprotected_paths;
 	for (const KeyValue<String, String> &entry : p_transaction_paths_by_resource) {
-		if (p_transaction.is_path_protected(entry.value)) {
+		if (p_transaction.is_path_protected(entry.value) || p_transaction.is_path_tracked_created(entry.value)) {
 			continue;
 		}
-		if (!p_transaction.has_preimport_path_state(entry.value) || p_transaction.existed_before_import(entry.value)) {
-			preexisting_unprotected_paths.insert(entry.key);
-			continue;
-		}
-		p_transaction.track_created_path(entry.value);
+		preexisting_unprotected_paths.insert(entry.key);
 	}
 	return preexisting_unprotected_paths;
 }
@@ -368,7 +364,7 @@ Error MCPResourceProvider::register_tools(MCPToolRegistry *p_registry, String *r
 	}
 	if (error == OK) {
 		error = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.resource.import", "Copy an external asset into the project with rollback for target-owned import artifacts.", _resource_options_schema(true)),
+				MCPToolUtils::make_tool_definition("godot.resource.import", "Copy an external asset into the project, roll back known target-owned artifacts, and report unowned residuals.", _resource_options_schema(true)),
 				callable_mp(this, &MCPResourceProvider::import_resource), this, r_error);
 	}
 	if (error != OK) {
@@ -670,11 +666,6 @@ Dictionary MCPResourceProvider::import_resource(const Dictionary &p_arguments, c
 	if (error != OK) {
 		return MCPToolUtils::make_error_result("TRANSACTION_FAILED", transaction_error);
 	}
-	error = transaction.capture_existing_files(project_root.is_empty() ? String("res://") : project_root, &transaction_error);
-	if (error != OK) {
-		return MCPToolUtils::make_error_result("TRANSACTION_FAILED", transaction_error);
-	}
-
 	const String fixed_paths[] = {
 		target_absolute_path,
 		target_absolute_path + ".import",

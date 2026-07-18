@@ -36,6 +36,10 @@
 
 namespace MCPToolUtils {
 
+static constexpr uint64_t MAX_INLINE_STRUCTURED_TEXT_BYTES = 16 * 1024;
+static constexpr int MAX_SUMMARY_FIELDS = 24;
+static constexpr int MAX_SUMMARY_STRING_CHARACTERS = 512;
+
 static Array _make_text_content(const String &p_text) {
 	Dictionary text_content;
 	text_content["type"] = "text";
@@ -68,9 +72,38 @@ Dictionary make_property_description(const PropertyInfo &p_property) {
 
 Dictionary make_success_result(const Dictionary &p_structured_content) {
 	const Dictionary structured_content = p_structured_content.duplicate(true);
+	const String serialized = JSON::stringify(structured_content);
+	String text = serialized;
+	const uint64_t serialized_bytes = serialized.to_utf8_buffer().size();
+	if (serialized_bytes > MAX_INLINE_STRUCTURED_TEXT_BYTES) {
+		Dictionary summary;
+		summary["_truncated"] = true;
+		summary["structuredContentBytes"] = int64_t(serialized_bytes);
+		int fields = 0;
+		for (const KeyValue<Variant, Variant> &entry : structured_content) {
+			if (fields >= MAX_SUMMARY_FIELDS) {
+				break;
+			}
+			if (!entry.key.is_string()) {
+				continue;
+			}
+			const Variant::Type type = entry.value.get_type();
+			if (type == Variant::NIL || type == Variant::BOOL || type == Variant::INT || type == Variant::FLOAT) {
+				summary[entry.key] = entry.value;
+				fields++;
+			} else if (type == Variant::STRING || type == Variant::STRING_NAME) {
+				const String value = entry.value;
+				if (value.length() <= MAX_SUMMARY_STRING_CHARACTERS) {
+					summary[entry.key] = value;
+					fields++;
+				}
+			}
+		}
+		text = JSON::stringify(summary);
+	}
 
 	Dictionary result;
-	result["content"] = _make_text_content(JSON::stringify(structured_content));
+	result["content"] = _make_text_content(text);
 	result["structuredContent"] = structured_content;
 	return result;
 }

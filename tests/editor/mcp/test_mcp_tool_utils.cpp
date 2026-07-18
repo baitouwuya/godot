@@ -93,6 +93,24 @@ TEST_CASE("[MCP][Provider] Success results expose matching text and structured c
 	CHECK(int(Dictionary(result["structuredContent"]).get("count", 0)) == 3);
 }
 
+TEST_CASE("[MCP][Provider] Large success results avoid duplicating structured payloads as text") {
+	Dictionary structured_content;
+	structured_content["count"] = 1;
+	structured_content["payload"] = String("x").repeat(32 * 1024);
+
+	const Dictionary result = MCPToolUtils::make_success_result(structured_content);
+	CHECK(Dictionary(result.get("structuredContent", Dictionary())) == structured_content);
+	const Array content = result.get("content", Array());
+	REQUIRE(content.size() == 1);
+	const String text = Dictionary(content[0]).get("text", String());
+	CHECK_LT(text.to_utf8_buffer().size(), 1024);
+	const Dictionary summary = JSON::parse_string(text);
+	CHECK(bool(summary.get("_truncated", false)));
+	CHECK_GT(int64_t(summary.get("structuredContentBytes", 0)), int64_t(32 * 1024));
+	CHECK(int64_t(summary.get("count", 0)) == 1);
+	CHECK_FALSE(summary.has("payload"));
+}
+
 TEST_CASE("[MCP][Provider] Error results use a stable structured error shape") {
 	Dictionary details;
 	details["path"] = "res://example.txt";

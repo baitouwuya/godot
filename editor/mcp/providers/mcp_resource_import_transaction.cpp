@@ -29,18 +29,12 @@
 
 #include "mcp_resource_import_transaction.h"
 
-#include "core/config/project_settings.h"
 #include "core/io/file_access.h"
 
 namespace {
 
 static String _normalize_path(const String &p_path) {
 	return p_path.replace_char('\\', '/').simplify_path();
-}
-
-static bool _is_path_within_root(const String &p_path, const String &p_root) {
-	const String root_prefix = p_root.ends_with("/") ? p_root : p_root + "/";
-	return p_path == p_root || p_path.begins_with(root_prefix);
 }
 
 } // namespace
@@ -75,79 +69,7 @@ Error MCPResourceImportTransaction::begin(String *r_error) {
 
 	protected_paths.clear();
 	created_paths.clear();
-	existing_paths.clear();
-	excluded_snapshot_roots.clear();
-	snapshot_root = String();
-	snapshot_captured = false;
 	active = true;
-	return OK;
-}
-
-Error MCPResourceImportTransaction::capture_existing_files(const String &p_project_root, String *r_error) {
-	if (r_error) {
-		*r_error = String();
-	}
-	if (!active) {
-		_set_error(r_error, "Resource import transaction is not active.");
-		return ERR_UNCONFIGURED;
-	}
-	if (snapshot_captured) {
-		_set_error(r_error, "Resource import transaction already captured the project files.");
-		return ERR_ALREADY_IN_USE;
-	}
-
-	const String normalized_root = _normalize_path(p_project_root);
-	if (normalized_root.is_empty()) {
-		_set_error(r_error, "Cannot capture files for an empty project root.");
-		return ERR_INVALID_PARAMETER;
-	}
-
-	String project_data_directory = ProjectSettings::get_singleton()->get_project_data_dir_name();
-	if (project_data_directory.is_empty()) {
-		project_data_directory = ".godot";
-	}
-	excluded_snapshot_roots.insert(_normalize_path(normalized_root.path_join(project_data_directory)));
-
-	Vector<String> pending_directories;
-	HashSet<String> visited_directories;
-	pending_directories.push_back(normalized_root);
-	while (!pending_directories.is_empty()) {
-		const String directory_path = pending_directories[pending_directories.size() - 1];
-		pending_directories.resize(pending_directories.size() - 1);
-		if (visited_directories.has(directory_path)) {
-			continue;
-		}
-		visited_directories.insert(directory_path);
-
-		Error open_error = OK;
-		Ref<DirAccess> directory = DirAccess::open(directory_path, &open_error);
-		if (directory.is_null() || open_error != OK) {
-			existing_paths.clear();
-			_set_error(r_error, "Could not inspect project directory before resource import: " + directory_path);
-			return open_error == OK ? ERR_CANT_OPEN : open_error;
-		}
-
-		for (const String &file_name : directory->get_files()) {
-			const String file_path = _normalize_path(directory_path.path_join(file_name));
-			if (_is_path_within_root(file_path, normalized_root)) {
-				existing_paths.insert(file_path);
-			}
-		}
-		for (const String &directory_name : directory->get_directories()) {
-			const String child_path = _normalize_path(directory_path.path_join(directory_name));
-			if (!_is_path_within_root(child_path, normalized_root) || excluded_snapshot_roots.has(child_path)) {
-				continue;
-			}
-			if (directory->is_link(directory_name)) {
-				excluded_snapshot_roots.insert(child_path);
-				continue;
-			}
-			pending_directories.push_back(child_path);
-		}
-	}
-
-	snapshot_root = normalized_root;
-	snapshot_captured = true;
 	return OK;
 }
 
@@ -189,9 +111,6 @@ void MCPResourceImportTransaction::track_created_path(const String &p_path) {
 	if (!active || normalized_path.is_empty() || protected_paths.has(normalized_path)) {
 		return;
 	}
-	if (snapshot_captured && !_is_path_within_root(normalized_path, snapshot_root)) {
-		return;
-	}
 	created_paths.insert(normalized_path);
 }
 
@@ -199,32 +118,14 @@ bool MCPResourceImportTransaction::is_path_protected(const String &p_path) const
 	return protected_paths.has(_normalize_path(p_path));
 }
 
-bool MCPResourceImportTransaction::has_preimport_path_state(const String &p_path) const {
-	const String normalized_path = _normalize_path(p_path);
-	if (!snapshot_captured || !_is_path_within_root(normalized_path, snapshot_root)) {
-		return false;
-	}
-	for (const String &excluded_root : excluded_snapshot_roots) {
-		if (_is_path_within_root(normalized_path, excluded_root)) {
-			return false;
-		}
-	}
-	return true;
-}
-
-bool MCPResourceImportTransaction::existed_before_import(const String &p_path) const {
-	const String normalized_path = _normalize_path(p_path);
-	return has_preimport_path_state(normalized_path) && existing_paths.has(normalized_path);
+bool MCPResourceImportTransaction::is_path_tracked_created(const String &p_path) const {
+	return created_paths.has(_normalize_path(p_path));
 }
 
 void MCPResourceImportTransaction::commit() {
 	active = false;
 	created_paths.clear();
 	protected_paths.clear();
-	existing_paths.clear();
-	excluded_snapshot_roots.clear();
-	snapshot_root = String();
-	snapshot_captured = false;
 	backup_directory.unref();
 }
 
@@ -283,10 +184,6 @@ Error MCPResourceImportTransaction::rollback(String *r_error) {
 	active = false;
 	created_paths.clear();
 	protected_paths.clear();
-	existing_paths.clear();
-	excluded_snapshot_roots.clear();
-	snapshot_root = String();
-	snapshot_captured = false;
 	backup_directory.unref();
 	_set_error(r_error, first_error_message);
 	return first_error;

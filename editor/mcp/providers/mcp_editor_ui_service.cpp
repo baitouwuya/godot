@@ -669,13 +669,13 @@ Error MCPEditorUIService::perform(const String &p_session_id, const String &p_sn
 		return ERR_DOES_NOT_EXIST;
 	}
 	if (!target->actions.has(p_action)) {
-		clear();
+		release_session(p_session_id);
 		r_error_code = "UI_ACTION_UNAVAILABLE";
 		r_error_message = "The requested action was not advertised for this target.";
 		return ERR_UNAVAILABLE;
 	}
 	if (!_target_is_current(*target)) {
-		clear();
+		release_session(p_session_id);
 		r_error_code = "STALE_UI_SNAPSHOT";
 		r_error_message = "The target changed after the UI snapshot was captured.";
 		return ERR_DOES_NOT_EXIST;
@@ -684,7 +684,7 @@ Error MCPEditorUIService::perform(const String &p_session_id, const String &p_sn
 	if (error != OK) {
 		return error;
 	}
-	clear();
+	release_session(p_session_id);
 	r_result["performed"] = true;
 	r_result["action"] = p_action;
 	r_result["targetId"] = p_target_id;

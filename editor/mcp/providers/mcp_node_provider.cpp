@@ -105,6 +105,49 @@ static Dictionary _attach_script_schema() {
 	return _object_schema(properties, required);
 }
 
+static Dictionary _group_schema(bool p_add) {
+	Dictionary properties;
+	properties["path"] = _property_schema("string", "Node path relative to the edited scene root.");
+	properties["group"] = _property_schema("string", "Non-empty scene group name.");
+	if (p_add) {
+		properties["persistent"] = _property_schema("boolean", "Whether the group is saved with the scene. Defaults to true.");
+	}
+	PackedStringArray required;
+	required.push_back("path");
+	required.push_back("group");
+	return _object_schema(properties, required);
+}
+
+static Dictionary _signal_connections_schema() {
+	Dictionary properties;
+	properties["path"] = _property_schema("string", "Source node path relative to the edited scene root.");
+	properties["signal"] = _property_schema("string", "Optional source signal name to filter connections.");
+	PackedStringArray required;
+	required.push_back("path");
+	return _object_schema(properties, required);
+}
+
+static Dictionary _signal_mutation_schema(bool p_connect) {
+	Dictionary properties;
+	properties["path"] = _property_schema("string", "Source node path relative to the edited scene root.");
+	properties["signal"] = _property_schema("string", "Signal declared by the source node.");
+	properties["targetPath"] = _property_schema("string", "Target node path relative to the edited scene root.");
+	properties["method"] = _property_schema("string", "Target method name.");
+	if (p_connect) {
+		Dictionary flags = _property_schema("integer", "Optional Object connect flags. Only deferred (1) and one-shot (4) are accepted; persistence is automatic.");
+		flags["minimum"] = 0;
+		flags["maximum"] = Object::CONNECT_DEFERRED | Object::CONNECT_ONE_SHOT;
+		flags["default"] = 0;
+		properties["flags"] = flags;
+	}
+	PackedStringArray required;
+	required.push_back("path");
+	required.push_back("signal");
+	required.push_back("targetPath");
+	required.push_back("method");
+	return _object_schema(properties, required);
+}
+
 static Dictionary _unknown_argument_error(const String &p_name) {
 	return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "Unknown argument: " + p_name);
 }
@@ -228,6 +271,36 @@ Error MCPNodeProvider::register_tools(MCPToolRegistry *p_registry, String *r_err
 		err = p_registry->register_tool(
 				MCPToolUtils::make_tool_definition("godot.node.attach_script", "Attach a project script through editor undo/redo.", _attach_script_schema(), MCPToolUtils::TOOL_DESTRUCTIVE),
 				callable_mp(this, &MCPNodeProvider::attach_script), this, r_error);
+	}
+	if (err == OK) {
+		err = p_registry->register_tool(
+				MCPToolUtils::make_tool_definition("godot.node.get_groups", "List editable scene groups on a node.", _path_schema(), MCPToolUtils::TOOL_READ_ONLY),
+				callable_mp(this, &MCPNodeProvider::get_groups), this, r_error);
+	}
+	if (err == OK) {
+		err = p_registry->register_tool(
+				MCPToolUtils::make_tool_definition("godot.node.add_to_group", "Add a node to a persistent scene group through editor undo/redo.", _group_schema(true), MCPToolUtils::TOOL_ADDITIVE),
+				callable_mp(this, &MCPNodeProvider::add_to_group), this, r_error);
+	}
+	if (err == OK) {
+		err = p_registry->register_tool(
+				MCPToolUtils::make_tool_definition("godot.node.remove_from_group", "Remove a node from a scene group through editor undo/redo.", _group_schema(false), MCPToolUtils::TOOL_DESTRUCTIVE),
+				callable_mp(this, &MCPNodeProvider::remove_from_group), this, r_error);
+	}
+	if (err == OK) {
+		err = p_registry->register_tool(
+				MCPToolUtils::make_tool_definition("godot.node.get_signal_connections", "List persistent signal connections from an editable scene node.", _signal_connections_schema(), MCPToolUtils::TOOL_READ_ONLY),
+				callable_mp(this, &MCPNodeProvider::get_signal_connections), this, r_error);
+	}
+	if (err == OK) {
+		err = p_registry->register_tool(
+				MCPToolUtils::make_tool_definition("godot.node.connect_signal", "Create a persistent scene signal connection through editor undo/redo.", _signal_mutation_schema(true), MCPToolUtils::TOOL_ADDITIVE),
+				callable_mp(this, &MCPNodeProvider::connect_signal), this, r_error);
+	}
+	if (err == OK) {
+		err = p_registry->register_tool(
+				MCPToolUtils::make_tool_definition("godot.node.disconnect_signal", "Remove a persistent scene signal connection through editor undo/redo.", _signal_mutation_schema(false), MCPToolUtils::TOOL_DESTRUCTIVE),
+				callable_mp(this, &MCPNodeProvider::disconnect_signal), this, r_error);
 	}
 	if (err != OK) {
 		p_registry->unregister_tools_for_owner(this);
@@ -509,4 +582,209 @@ Dictionary MCPNodeProvider::attach_script(const Dictionary &p_arguments, const D
 	result["path"] = MCPSceneUtils::get_relative_path(scene_root, node);
 	result["scriptPath"] = script_path;
 	return MCPToolUtils::make_success_result(result);
+}
+
+Dictionary MCPNodeProvider::get_groups(const Dictionary &p_arguments, const Dictionary &) {
+	String unknown_argument;
+	if (!MCPToolUtils::has_only_arguments(p_arguments, PackedStringArray{ "path" }, unknown_argument)) {
+		return _unknown_argument_error(unknown_argument);
+	}
+	String path;
+	if (!_validate_string_argument(p_arguments, "path", path)) {
+		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "A non-empty string path is required.");
+	}
+	Node *scene_root = _get_scene_root();
+	if (!scene_root) {
+		return MCPToolUtils::make_error_result("NO_SCENE", "No edited scene is open.");
+	}
+	Node *node = MCPSceneUtils::find_node(scene_root, path);
+	if (!node) {
+		return MCPToolUtils::make_error_result("NODE_NOT_FOUND", "Node was not found: " + path);
+	}
+	List<Node::GroupInfo> groups;
+	node->get_groups(&groups);
+	Array result_groups;
+	for (const Node::GroupInfo &group : groups) {
+		Dictionary item;
+		item["name"] = String(group.name);
+		item["persistent"] = group.persistent;
+		result_groups.push_back(item);
+	}
+	Dictionary result = MCPSceneUtils::make_node_summary(scene_root, node);
+	result["groups"] = result_groups;
+	return MCPToolUtils::make_success_result(result);
+}
+
+Dictionary MCPNodeProvider::add_to_group(const Dictionary &p_arguments, const Dictionary &) {
+	String unknown_argument;
+	if (!MCPToolUtils::has_only_arguments(p_arguments, PackedStringArray{ "path", "group", "persistent" }, unknown_argument)) {
+		return _unknown_argument_error(unknown_argument);
+	}
+	String path;
+	String group;
+	if (!_validate_string_argument(p_arguments, "path", path) || !_validate_string_argument(p_arguments, "group", group)) {
+		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "Non-empty path and group strings are required.");
+	}
+	const Variant persistent_value = p_arguments.get("persistent", true);
+	if (persistent_value.get_type() != Variant::BOOL) {
+		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "persistent must be a boolean when provided.");
+	}
+	Node *scene_root = _get_scene_root();
+	if (!scene_root) {
+		return MCPToolUtils::make_error_result("NO_SCENE", "No edited scene is open.");
+	}
+	Node *node = MCPSceneUtils::find_node(scene_root, path);
+	if (!node) {
+		return MCPToolUtils::make_error_result("NODE_NOT_FOUND", "Node was not found: " + path);
+	}
+	String operation_error;
+	MCPEditorUndoRedoAction editor_undo_redo(EditorUndoRedoManager::get_singleton());
+	const Error err = MCPNodeOperations::add_to_group(scene_root, node, group, persistent_value,
+			undo_redo_override ? undo_redo_override : &editor_undo_redo, &operation_error);
+	if (err != OK) {
+		return MCPToolUtils::make_error_result("GROUP_ADD_FAILED", operation_error);
+	}
+	Dictionary result = MCPSceneUtils::make_node_summary(scene_root, node);
+	result["group"] = group;
+	result["persistent"] = persistent_value;
+	return MCPToolUtils::make_success_result(result);
+}
+
+Dictionary MCPNodeProvider::remove_from_group(const Dictionary &p_arguments, const Dictionary &) {
+	String unknown_argument;
+	if (!MCPToolUtils::has_only_arguments(p_arguments, PackedStringArray{ "path", "group" }, unknown_argument)) {
+		return _unknown_argument_error(unknown_argument);
+	}
+	String path;
+	String group;
+	if (!_validate_string_argument(p_arguments, "path", path) || !_validate_string_argument(p_arguments, "group", group)) {
+		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "Non-empty path and group strings are required.");
+	}
+	Node *scene_root = _get_scene_root();
+	if (!scene_root) {
+		return MCPToolUtils::make_error_result("NO_SCENE", "No edited scene is open.");
+	}
+	Node *node = MCPSceneUtils::find_node(scene_root, path);
+	if (!node) {
+		return MCPToolUtils::make_error_result("NODE_NOT_FOUND", "Node was not found: " + path);
+	}
+	String operation_error;
+	MCPEditorUndoRedoAction editor_undo_redo(EditorUndoRedoManager::get_singleton());
+	const Error err = MCPNodeOperations::remove_from_group(scene_root, node, group,
+			undo_redo_override ? undo_redo_override : &editor_undo_redo, &operation_error);
+	if (err != OK) {
+		return MCPToolUtils::make_error_result("GROUP_REMOVE_FAILED", operation_error);
+	}
+	Dictionary result = MCPSceneUtils::make_node_summary(scene_root, node);
+	result["group"] = group;
+	return MCPToolUtils::make_success_result(result);
+}
+
+Dictionary MCPNodeProvider::get_signal_connections(const Dictionary &p_arguments, const Dictionary &) {
+	String unknown_argument;
+	if (!MCPToolUtils::has_only_arguments(p_arguments, PackedStringArray{ "path", "signal" }, unknown_argument)) {
+		return _unknown_argument_error(unknown_argument);
+	}
+	String path;
+	if (!_validate_string_argument(p_arguments, "path", path)) {
+		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "A non-empty string path is required.");
+	}
+	String signal;
+	if (p_arguments.has("signal") && !_validate_string_argument(p_arguments, "signal", signal)) {
+		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "signal must be a non-empty string when provided.");
+	}
+	Node *scene_root = _get_scene_root();
+	if (!scene_root) {
+		return MCPToolUtils::make_error_result("NO_SCENE", "No edited scene is open.");
+	}
+	Node *node = MCPSceneUtils::find_node(scene_root, path);
+	if (!node) {
+		return MCPToolUtils::make_error_result("NODE_NOT_FOUND", "Node was not found: " + path);
+	}
+	List<Object::Connection> signal_connections;
+	if (signal.is_empty()) {
+		node->get_all_signal_connections(&signal_connections);
+	} else if (!node->has_signal(signal)) {
+		return MCPToolUtils::make_error_result("SIGNAL_NOT_FOUND", "Signal was not found on source node: " + signal);
+	} else {
+		node->get_signal_connection_list(signal, &signal_connections);
+	}
+	Array items;
+	for (const Object::Connection &connection : signal_connections) {
+		if (!(connection.flags & Object::CONNECT_PERSIST) || !connection.callable.is_standard()) {
+			continue;
+		}
+		Node *target = Object::cast_to<Node>(connection.callable.get_object());
+		if (!MCPSceneUtils::is_node_in_scene(scene_root, target)) {
+			continue;
+		}
+		Dictionary item;
+		item["signal"] = String(connection.signal.get_name());
+		item["targetPath"] = MCPSceneUtils::get_relative_path(scene_root, target);
+		item["method"] = String(connection.callable.get_method());
+		item["flags"] = int64_t(connection.flags & (Object::CONNECT_DEFERRED | Object::CONNECT_ONE_SHOT));
+		items.push_back(item);
+	}
+	Dictionary result = MCPSceneUtils::make_node_summary(scene_root, node);
+	result["connections"] = items;
+	return MCPToolUtils::make_success_result(result);
+}
+
+Dictionary MCPNodeProvider::_mutate_signal_connection(const Dictionary &p_arguments, bool p_connect) {
+	String unknown_argument;
+	const PackedStringArray allowed = p_connect ? PackedStringArray{ "path", "signal", "targetPath", "method", "flags" } : PackedStringArray{ "path", "signal", "targetPath", "method" };
+	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed, unknown_argument)) {
+		return _unknown_argument_error(unknown_argument);
+	}
+	String path;
+	String signal;
+	String target_path;
+	String method;
+	if (!_validate_string_argument(p_arguments, "path", path) || !_validate_string_argument(p_arguments, "signal", signal) ||
+			!_validate_string_argument(p_arguments, "targetPath", target_path) || !_validate_string_argument(p_arguments, "method", method)) {
+		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "Non-empty path, signal, targetPath, and method strings are required.");
+	}
+	uint32_t flags = 0;
+	if (p_connect && p_arguments.has("flags")) {
+		int64_t parsed_flags = 0;
+		if (!MCPToolUtils::try_get_json_integer(p_arguments["flags"], 0, Object::CONNECT_DEFERRED | Object::CONNECT_ONE_SHOT, parsed_flags)) {
+			return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "flags must contain only deferred (1) and one-shot (4) bits.");
+		}
+		flags = uint32_t(parsed_flags);
+	}
+	Node *scene_root = _get_scene_root();
+	if (!scene_root) {
+		return MCPToolUtils::make_error_result("NO_SCENE", "No edited scene is open.");
+	}
+	Node *source = MCPSceneUtils::find_node(scene_root, path);
+	Node *target = MCPSceneUtils::find_node(scene_root, target_path);
+	if (!source || !target) {
+		return MCPToolUtils::make_error_result("NODE_NOT_FOUND", !source ? "Source node was not found: " + path : "Target node was not found: " + target_path);
+	}
+	String operation_error;
+	MCPEditorUndoRedoAction editor_undo_redo(EditorUndoRedoManager::get_singleton());
+	const Error err = p_connect ? MCPNodeOperations::connect_signal(scene_root, source, signal, target, method, flags,
+			undo_redo_override ? undo_redo_override : &editor_undo_redo, &operation_error) :
+			MCPNodeOperations::disconnect_signal(scene_root, source, signal, target, method,
+					undo_redo_override ? undo_redo_override : &editor_undo_redo, &operation_error);
+	if (err != OK) {
+		return MCPToolUtils::make_error_result(p_connect ? "SIGNAL_CONNECT_FAILED" : "SIGNAL_DISCONNECT_FAILED", operation_error);
+	}
+	Dictionary result;
+	result["path"] = MCPSceneUtils::get_relative_path(scene_root, source);
+	result["signal"] = signal;
+	result["targetPath"] = MCPSceneUtils::get_relative_path(scene_root, target);
+	result["method"] = method;
+	if (p_connect) {
+		result["flags"] = int64_t(flags);
+	}
+	return MCPToolUtils::make_success_result(result);
+}
+
+Dictionary MCPNodeProvider::connect_signal(const Dictionary &p_arguments, const Dictionary &) {
+	return _mutate_signal_connection(p_arguments, true);
+}
+
+Dictionary MCPNodeProvider::disconnect_signal(const Dictionary &p_arguments, const Dictionary &) {
+	return _mutate_signal_connection(p_arguments, false);
 }

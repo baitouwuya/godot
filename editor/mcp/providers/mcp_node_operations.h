@@ -46,5 +46,13 @@ Error set_property(Node *p_scene_root, Node *p_node, const StringName &p_propert
 		MCPUndoRedoAction *p_undo_redo, String *r_error = nullptr);
 Error attach_script(Node *p_scene_root, Node *p_node, const Ref<Script> &p_script,
 		MCPUndoRedoAction *p_undo_redo, String *r_error = nullptr);
+Error add_to_group(Node *p_scene_root, Node *p_node, const StringName &p_group, bool p_persistent,
+		MCPUndoRedoAction *p_undo_redo, String *r_error = nullptr);
+Error remove_from_group(Node *p_scene_root, Node *p_node, const StringName &p_group,
+		MCPUndoRedoAction *p_undo_redo, String *r_error = nullptr);
+Error connect_signal(Node *p_scene_root, Node *p_source, const StringName &p_signal, Node *p_target,
+		const StringName &p_method, uint32_t p_flags, MCPUndoRedoAction *p_undo_redo, String *r_error = nullptr);
+Error disconnect_signal(Node *p_scene_root, Node *p_source, const StringName &p_signal, Node *p_target,
+		const StringName &p_method, MCPUndoRedoAction *p_undo_redo, String *r_error = nullptr);
 
 } // namespace MCPNodeOperations

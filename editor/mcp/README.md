@@ -107,6 +107,12 @@ Snapshots are isolated per MCP session. Targets are revalidated against the visi
 
 Only the edited scene root and nodes owned by it are editable. Operations reject foreign, inherited, and internal nodes, prevent root deletion or reparenting, and reject parent cycles. Rename, reparent, and delete reuse the Scene dock's path rewrite machinery so exported `NodePath` properties, resource properties, and animation paths stay aligned with the edited tree. Duplication uses the editor duplication path, and scene instantiation accepts only a project-local `PackedScene` while rejecting cyclic scene dependencies.
 
+## Edit Node Groups and Signals
+
+`godot.node.get_groups` lists a scene node's groups and whether each one is persisted. `godot.node.add_to_group` and `godot.node.remove_from_group` change those groups through the same editor Undo/Redo history as other scene edits; new groups are persistent by default.
+
+`godot.node.get_signal_connections` lists only persistent connections whose source and target are editable nodes in the active scene. `godot.node.connect_signal` creates a persistent connection, optionally with deferred or one-shot behavior, and `godot.node.disconnect_signal` removes one. Both endpoints and the target method are validated before an undoable change is made. Runtime-only, inherited, external, custom-callable, and non-persistent connections are deliberately excluded so MCP cannot silently alter connections that the edited scene does not own.
+
 ## Find Script Usages
 
 `godot.script.open` accepts the same external-script `path` or edited-scene `nodePath` selector as the other script tools. It opens the authoritative Script editor buffer without returning source text; built-in GDScripts are supported through their scene subresource or attached node.
@@ -179,4 +185,4 @@ pwsh -File tests/editor/mcp/test_mcp_cli_smoke.ps1 `
   -Binary bin/godot.windows.editor.dev.x86_64.console.exe
 ```
 
-Optional parameters are `-TimeoutSeconds <5-300>` and `-KeepTemporaryProjects`. The test creates two temporary projects and verifies explicit-path errors, CLI/editor conflicts, ordinary editor behavior, public discovery fields, independent multi-project routing, same-project Host exclusion, JSON-only stdio stdout, the complete 83-tool MCP surface, native class search/documentation, editor UI discovery, runtime tool discovery, compressed debug output and errors, cross-session dirty ScriptEditor revision/diagnostic/save/usage behavior, structural Node edits with `NodePath` rewrites, and explicit scene save. Temporary editor plugins request clean Host shutdown; forced termination is used only as a timeout fallback.
+Optional parameters are `-TimeoutSeconds <5-300>` and `-KeepTemporaryProjects`. The test creates two temporary projects and verifies explicit-path errors, CLI/editor conflicts, ordinary editor behavior, public discovery fields, independent multi-project routing, same-project Host exclusion, JSON-only stdio stdout, the complete 89-tool MCP surface, native class search/documentation, editor UI discovery, runtime tool discovery, compressed debug output and errors, cross-session dirty ScriptEditor revision/diagnostic/save/usage behavior, structural Node edits with `NodePath` rewrites, persistent node group and signal changes, and explicit scene save. Temporary editor plugins request clean Host shutdown; forced termination is used only as a timeout fallback.

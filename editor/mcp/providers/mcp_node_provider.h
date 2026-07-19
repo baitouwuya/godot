@@ -49,9 +49,16 @@ public:
 	Dictionary create(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary set_property(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary attach_script(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary get_groups(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary add_to_group(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary remove_from_group(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary get_signal_connections(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary connect_signal(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary disconnect_signal(const Dictionary &p_arguments, const Dictionary &p_context);
 
 private:
 	Node *_get_scene_root() const;
+	Dictionary _mutate_signal_connection(const Dictionary &p_arguments, bool p_connect);
 
 	MCPToolRegistry *tool_registry = nullptr;
 	Node *scene_root_override = nullptr;

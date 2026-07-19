@@ -31,6 +31,7 @@
 #include "core/io/dir_access.h"
 #include "core/mcp/mcp_tool_registry.h"
 #include "core/object/script_language.h"
+#include "core/variant/callable.h"
 #include "editor/mcp/providers/mcp_node_provider.h"
 #include "editor/mcp/providers/mcp_undo_redo_action.h"
 #include "editor/mcp/providers/mcp_variant_codec.h"
@@ -177,19 +178,27 @@ TEST_CASE("[MCP][Provider] Node tools expose encoded property and undoable mutat
 	CHECK(provider->register_tools(&registry) == ERR_ALREADY_IN_USE);
 
 	const PackedStringArray names = registry.get_tool_names();
-	REQUIRE(names.size() == 4);
+	REQUIRE(names.size() == 10);
 	CHECK(names[0] == "godot.node.get_properties");
 	CHECK(names[1] == "godot.node.create");
 	CHECK(names[2] == "godot.node.set_property");
 	CHECK(names[3] == "godot.node.attach_script");
+	CHECK(names[4] == "godot.node.get_groups");
+	CHECK(names[5] == "godot.node.add_to_group");
+	CHECK(names[6] == "godot.node.remove_from_group");
+	CHECK(names[7] == "godot.node.get_signal_connections");
+	CHECK(names[8] == "godot.node.connect_signal");
+	CHECK(names[9] == "godot.node.disconnect_signal");
 
 	const Array definitions = registry.get_tool_definitions();
-	REQUIRE(definitions.size() == 4);
+	REQUIRE(definitions.size() == 10);
 	const Dictionary set_schema = Dictionary(definitions[2]).get("inputSchema", Dictionary());
 	const PackedStringArray required = set_schema.get("required", PackedStringArray());
 	CHECK(required.has("path"));
 	CHECK(required.has("property"));
 	CHECK(required.has("value"));
+	const Dictionary connect_schema = Dictionary(definitions[8]).get("inputSchema", Dictionary());
+	CHECK(Dictionary(connect_schema.get("properties", Dictionary())).has("flags"));
 
 	MCPToolCallContext context;
 	const MCPToolRegistry::CallResult invalid_call = registry.call_tool("godot.node.create", Dictionary(), context);
@@ -199,6 +208,77 @@ TEST_CASE("[MCP][Provider] Node tools expose encoded property and undoable mutat
 	provider->unregister_tools();
 	CHECK(registry.get_tool_names().is_empty());
 	memdelete(provider);
+}
+
+TEST_CASE("[SceneTree][MCP][Provider] Node group and signal tools are persistent and undoable") {
+	NodeProviderFixture fixture;
+	Node *source = memnew(Node);
+	source->set_name("Source");
+	fixture.scene_root->add_child(source);
+	source->set_owner(fixture.scene_root);
+	Node *target = memnew(Node);
+	target->set_name("Target");
+	fixture.scene_root->add_child(target);
+	target->set_owner(fixture.scene_root);
+	REQUIRE(fixture.provider->register_tools(&fixture.registry) == OK);
+
+	Dictionary add_group;
+	add_group["path"] = "Source";
+	add_group["group"] = "mcp_test_group";
+	const MCPToolRegistry::CallResult group_result = _call_tool(fixture.registry, "godot.node.add_to_group", add_group);
+	REQUIRE(_check_tool_success(group_result));
+	CHECK(source->is_in_group("mcp_test_group"));
+	const bool group_undone = fixture.undo_redo.undo();
+	REQUIRE(group_undone);
+	CHECK_FALSE(source->is_in_group("mcp_test_group"));
+	const bool group_redone = fixture.undo_redo.redo();
+	REQUIRE(group_redone);
+	CHECK(source->is_in_group("mcp_test_group"));
+
+	Dictionary get_groups;
+	get_groups["path"] = "Source";
+	const MCPToolRegistry::CallResult groups_result = _call_tool(fixture.registry, "godot.node.get_groups", get_groups);
+	REQUIRE(_check_tool_success(groups_result));
+	const Array groups = Dictionary(groups_result.result.get("structuredContent", Dictionary())).get("groups", Array());
+	REQUIRE(groups.size() == 1);
+	CHECK(Dictionary(groups[0]).get("name", String()) == "mcp_test_group");
+	CHECK(bool(Dictionary(groups[0]).get("persistent", false)));
+
+	Dictionary connect;
+	connect["path"] = "Source";
+	connect["signal"] = "ready";
+	connect["targetPath"] = "Target";
+	connect["method"] = "queue_free";
+	connect["flags"] = Object::CONNECT_DEFERRED;
+	const MCPToolRegistry::CallResult connect_result = _call_tool(fixture.registry, "godot.node.connect_signal", connect);
+	REQUIRE(_check_tool_success(connect_result));
+	const Callable callable(target, "queue_free");
+	CHECK(source->is_connected("ready", callable));
+	const bool connect_undone = fixture.undo_redo.undo();
+	REQUIRE(connect_undone);
+	CHECK_FALSE(source->is_connected("ready", callable));
+	const bool connect_redone = fixture.undo_redo.redo();
+	REQUIRE(connect_redone);
+	CHECK(source->is_connected("ready", callable));
+
+	Dictionary connections;
+	connections["path"] = "Source";
+	const MCPToolRegistry::CallResult connections_result = _call_tool(fixture.registry, "godot.node.get_signal_connections", connections);
+	REQUIRE(_check_tool_success(connections_result));
+	const Array items = Dictionary(connections_result.result.get("structuredContent", Dictionary())).get("connections", Array());
+	REQUIRE(items.size() == 1);
+	CHECK(Dictionary(items[0]).get("signal", String()) == "ready");
+	CHECK(Dictionary(items[0]).get("targetPath", String()) == "Target");
+	CHECK(Dictionary(items[0]).get("method", String()) == "queue_free");
+
+	Dictionary disconnect = connect.duplicate();
+	disconnect.erase("flags");
+	const MCPToolRegistry::CallResult disconnect_result = _call_tool(fixture.registry, "godot.node.disconnect_signal", disconnect);
+	REQUIRE(_check_tool_success(disconnect_result));
+	CHECK_FALSE(source->is_connected("ready", callable));
+	const bool disconnect_undone = fixture.undo_redo.undo();
+	REQUIRE(disconnect_undone);
+	CHECK(source->is_connected("ready", callable));
 }
 
 TEST_CASE("[SceneTree][MCP][Provider] Node tools share undoable actions and leave the scene unsaved") {

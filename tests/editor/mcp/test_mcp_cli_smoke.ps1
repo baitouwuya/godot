@@ -598,6 +598,11 @@ try {
 		"godot.runtime.pause",
 		"godot.runtime.resume",
 		"godot.runtime.next_frame",
+		"godot.runtime.debug.break",
+		"godot.runtime.debug.continue",
+		"godot.runtime.debug.step_into",
+		"godot.runtime.debug.step_over",
+		"godot.runtime.debug.step_out",
 		"godot.runtime.get_tree",
 		"godot.runtime.node.get_properties",
 		"godot.runtime.node.set_property",
@@ -676,8 +681,8 @@ try {
 		"godot.gdscript.rename"
 	) | Sort-Object
 	$actualTools = @($responsesById["2"].result.tools | ForEach-Object { [string]$_.name } | Sort-Object)
-	Assert-Condition ($actualTools.Count -eq 89) "tools/list returned $($actualTools.Count) tools instead of 89."
-	Assert-Condition (($actualTools -join "`n") -ceq ($expectedTools -join "`n")) "tools/list did not expose the expected 89-tool surface."
+	Assert-Condition ($actualTools.Count -eq 94) "tools/list returned $($actualTools.Count) tools instead of 94."
+	Assert-Condition (($actualTools -join "`n") -ceq ($expectedTools -join "`n")) "tools/list did not expose the expected 94-tool surface."
 	foreach ($tool in @($responsesById["2"].result.tools)) {
 		Assert-Condition ($null -ne $tool.outputSchema) "Tool $($tool.name) is missing outputSchema."
 		Assert-Condition ([string]$tool.outputSchema.type -ceq "object") "Tool $($tool.name) outputSchema is not an object schema."

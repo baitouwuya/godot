@@ -46,6 +46,11 @@ class MCPRuntimeProvider : public Object {
 	Dictionary _pause(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary _resume(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary _next_frame(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary _debug_break(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary _debug_continue(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary _debug_step_into(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary _debug_step_over(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary _debug_step_out(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary _get_tree(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary _get_screenshot(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary _get_viewport_summary(const Dictionary &p_arguments, const Dictionary &p_context);

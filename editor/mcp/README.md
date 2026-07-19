@@ -144,6 +144,7 @@ Runtime tools reuse the editor's built-in run bar and remote debugger connection
 - `godot.runtime.get_state` lists the editor run state and active debugger sessions.
 - `godot.runtime.play` starts the main scene, current edited scene, or an explicit project `PackedScene`; `godot.runtime.stop` stops the editor-launched project.
 - `godot.runtime.pause`, `resume`, and `next_frame` use the existing SceneTree suspension protocol.
+- `godot.runtime.debug.break`, `continue`, `step_into`, `step_over`, and `step_out` use the built-in script debugger. They require the target `runtimeGeneration`; step operations require a debuggable paused breakpoint.
 - `godot.runtime.get_tree` returns a fresh remote scene tree. Runtime `objectId` values are decimal strings so JSON clients do not lose 64-bit precision.
 - `godot.runtime.node.get_properties` returns the remote Inspector property list, including script members, constants, and exported properties.
 - `godot.runtime.node.set_property` uses the remote Inspector setter and reads the object back to return the effective value.
@@ -185,4 +186,4 @@ pwsh -File tests/editor/mcp/test_mcp_cli_smoke.ps1 `
   -Binary bin/godot.windows.editor.dev.x86_64.console.exe
 ```
 
-Optional parameters are `-TimeoutSeconds <5-300>` and `-KeepTemporaryProjects`. The test creates two temporary projects and verifies explicit-path errors, CLI/editor conflicts, ordinary editor behavior, public discovery fields, independent multi-project routing, same-project Host exclusion, JSON-only stdio stdout, the complete 89-tool MCP surface, native class search/documentation, editor UI discovery, runtime tool discovery, compressed debug output and errors, cross-session dirty ScriptEditor revision/diagnostic/save/usage behavior, structural Node edits with `NodePath` rewrites, persistent node group and signal changes, and explicit scene save. Temporary editor plugins request clean Host shutdown; forced termination is used only as a timeout fallback.
+Optional parameters are `-TimeoutSeconds <5-300>` and `-KeepTemporaryProjects`. The test creates two temporary projects and verifies explicit-path errors, CLI/editor conflicts, ordinary editor behavior, public discovery fields, independent multi-project routing, same-project Host exclusion, JSON-only stdio stdout, the complete 94-tool MCP surface, native class search/documentation, editor UI discovery, runtime tool discovery, compressed debug output and errors, cross-session dirty ScriptEditor revision/diagnostic/save/usage behavior, structural Node edits with `NodePath` rewrites, persistent node group and signal changes, and explicit scene save. Temporary editor plugins request clean Host shutdown; forced termination is used only as a timeout fallback.

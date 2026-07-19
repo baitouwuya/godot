@@ -456,6 +456,44 @@ Dictionary MCPRuntimeDebugService::next_frame(const Dictionary &p_arguments) con
 	return MCPToolUtils::make_success_result(result);
 }
 
+Dictionary MCPRuntimeDebugService::debug_control(const Dictionary &p_arguments, const String &p_operation) const {
+	ScriptEditorDebugger *debugger = nullptr;
+	int debugger_session = -1;
+	uint64_t generation = 0;
+	const Dictionary error = _resolve_session(p_arguments, true, debugger, debugger_session, generation);
+	if (!error.is_empty()) {
+		return error;
+	}
+
+	const bool breaked = debugger->is_breaked();
+	if (p_operation == "break") {
+		if (breaked) {
+			return _error("RUNTIME_ALREADY_BREAKED", "The requested debugger session is already paused at a breakpoint.");
+		}
+		debugger->debug_break();
+	} else {
+		if (!breaked || !debugger->is_debuggable()) {
+			return _error("RUNTIME_NOT_BREAKED", "The requested debugger session is not paused at a debuggable breakpoint.");
+		}
+		if (p_operation == "continue") {
+			debugger->debug_continue();
+		} else if (p_operation == "step_into") {
+			debugger->debug_step();
+		} else if (p_operation == "step_over") {
+			debugger->debug_next();
+		} else if (p_operation == "step_out") {
+			debugger->debug_out();
+		} else {
+			return _error("INVALID_ARGUMENTS", "Unknown debugger control operation.");
+		}
+	}
+
+	Dictionary result = _make_session_identity(debugger_session, generation);
+	result["operation"] = p_operation;
+	result["dispatched"] = true;
+	return MCPToolUtils::make_success_result(result);
+}
+
 Dictionary MCPRuntimeDebugService::_refresh_tree(ScriptEditorDebugger *p_debugger, int p_timeout_msec) const {
 	const uint64_t previous_revision = p_debugger->get_remote_tree_revision();
 	p_debugger->request_remote_tree();

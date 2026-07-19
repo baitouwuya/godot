@@ -484,6 +484,16 @@ Error MCPRuntimeProvider::register_tools(MCPToolRegistry *p_registry, String *r_
 				_session_schema(true, false), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPRuntimeProvider::_resume) },
 		{ "godot.runtime.next_frame", "Advance one rendered frame while the running SceneTree is suspended.",
 				_session_schema(true, false), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPRuntimeProvider::_next_frame) },
+		{ "godot.runtime.debug.break", "Pause a running project at the next safe script-debugger point.",
+				_session_schema(true, false), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPRuntimeProvider::_debug_break) },
+		{ "godot.runtime.debug.continue", "Continue a project paused at a script breakpoint.",
+				_session_schema(true, false), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPRuntimeProvider::_debug_continue) },
+		{ "godot.runtime.debug.step_into", "Step into one GDScript statement from a paused debugger frame.",
+				_session_schema(true, false), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPRuntimeProvider::_debug_step_into) },
+		{ "godot.runtime.debug.step_over", "Step over one GDScript statement from a paused debugger frame.",
+				_session_schema(true, false), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPRuntimeProvider::_debug_step_over) },
+		{ "godot.runtime.debug.step_out", "Step out of the current GDScript frame from a paused debugger frame.",
+				_session_schema(true, false), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPRuntimeProvider::_debug_step_out) },
 		{ "godot.runtime.get_tree", "Get a fresh running-project scene tree using Godot's remote debugger.",
 				_tree_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPRuntimeProvider::_get_tree) },
 		{ "godot.runtime.get_screenshot", "Capture the running project's root viewport to a temporary PNG.",
@@ -587,6 +597,31 @@ Dictionary MCPRuntimeProvider::_resume(const Dictionary &p_arguments, const Dict
 Dictionary MCPRuntimeProvider::_next_frame(const Dictionary &p_arguments, const Dictionary &) {
 	Dictionary error;
 	return _has_only(p_arguments, PackedStringArray{ "debuggerSession", "runtimeGeneration" }, error) ? runtime_service->next_frame(p_arguments) : error;
+}
+
+Dictionary MCPRuntimeProvider::_debug_break(const Dictionary &p_arguments, const Dictionary &) {
+	Dictionary error;
+	return _has_only(p_arguments, PackedStringArray{ "debuggerSession", "runtimeGeneration" }, error) ? runtime_service->debug_control(p_arguments, "break") : error;
+}
+
+Dictionary MCPRuntimeProvider::_debug_continue(const Dictionary &p_arguments, const Dictionary &) {
+	Dictionary error;
+	return _has_only(p_arguments, PackedStringArray{ "debuggerSession", "runtimeGeneration" }, error) ? runtime_service->debug_control(p_arguments, "continue") : error;
+}
+
+Dictionary MCPRuntimeProvider::_debug_step_into(const Dictionary &p_arguments, const Dictionary &) {
+	Dictionary error;
+	return _has_only(p_arguments, PackedStringArray{ "debuggerSession", "runtimeGeneration" }, error) ? runtime_service->debug_control(p_arguments, "step_into") : error;
+}
+
+Dictionary MCPRuntimeProvider::_debug_step_over(const Dictionary &p_arguments, const Dictionary &) {
+	Dictionary error;
+	return _has_only(p_arguments, PackedStringArray{ "debuggerSession", "runtimeGeneration" }, error) ? runtime_service->debug_control(p_arguments, "step_over") : error;
+}
+
+Dictionary MCPRuntimeProvider::_debug_step_out(const Dictionary &p_arguments, const Dictionary &) {
+	Dictionary error;
+	return _has_only(p_arguments, PackedStringArray{ "debuggerSession", "runtimeGeneration" }, error) ? runtime_service->debug_control(p_arguments, "step_out") : error;
 }
 
 Dictionary MCPRuntimeProvider::_get_tree(const Dictionary &p_arguments, const Dictionary &) {

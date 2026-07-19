@@ -100,6 +100,7 @@ public:
 	Dictionary stop();
 	Dictionary set_suspended(const Dictionary &p_arguments, bool p_suspended) const;
 	Dictionary next_frame(const Dictionary &p_arguments) const;
+	Dictionary debug_control(const Dictionary &p_arguments, const String &p_operation) const;
 	Dictionary get_tree(const Dictionary &p_arguments) const;
 	Dictionary get_screenshot(const Dictionary &p_arguments) const;
 	Dictionary get_viewport_summary(const Dictionary &p_arguments) const;

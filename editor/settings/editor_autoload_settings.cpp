@@ -75,7 +75,7 @@ void EditorAutoloadSettings::_notification(int p_what) {
 	}
 }
 
-bool EditorAutoloadSettings::_autoload_name_is_valid(const String &p_name, String *r_error) {
+bool EditorAutoloadSettings::is_autoload_name_valid(const String &p_name, String *r_error) {
 	if (!p_name.is_valid_unicode_identifier()) {
 		if (r_error) {
 			*r_error = TTR("Must be a valid Unicode identifier.");
@@ -162,7 +162,7 @@ void EditorAutoloadSettings::_autoload_edited() {
 		}
 
 		String error;
-		if (!_autoload_name_is_valid(name, &error)) {
+		if (!is_autoload_name_valid(name, &error)) {
 			ti->set_text(0, old_name);
 			EditorNode::get_singleton()->show_warning(error);
 			return;
@@ -763,7 +763,7 @@ bool EditorAutoloadSettings::autoload_add(const String &p_name, const String &p_
 	String name = p_name;
 
 	String error;
-	if (!_autoload_name_is_valid(name, &error)) {
+	if (!is_autoload_name_valid(name, &error)) {
 		EditorNode::get_singleton()->show_warning(TTR("Can't add Autoload:") + "\n" + vformat(TTR("%s is an invalid name."), p_name) + " " + error);
 		return false;
 	}

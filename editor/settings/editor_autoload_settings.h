@@ -77,8 +77,6 @@ class EditorAutoloadSettings : public VBoxContainer {
 	ScriptCreateDialog *script_create_dialog = nullptr;
 	SceneCreateDialog *scene_create_dialog = nullptr;
 
-	bool _autoload_name_is_valid(const String &p_name, String *r_error = nullptr);
-
 	void _autoload_selected();
 	void _autoload_edited();
 	void _autoload_button_pressed(Object *p_item, int p_column, int p_button, MouseButton p_mouse_button);
@@ -104,6 +102,8 @@ protected:
 	static void _bind_methods();
 
 public:
+	static bool is_autoload_name_valid(const String &p_name, String *r_error = nullptr);
+
 	void init_autoloads();
 	void update_autoload();
 	bool autoload_add(const String &p_name, const String &p_path);

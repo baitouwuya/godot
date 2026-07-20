@@ -54,6 +54,7 @@ class MCPGDScriptSessionManager;
 class MCPHarnessProvider;
 class MCPNodeProvider;
 class MCPNodeStructureProvider;
+class MCPProjectProvider;
 class MCPResourceProvider;
 class MCPRuntimeDebugService;
 class MCPRuntimeProvider;
@@ -107,6 +108,7 @@ class MCPEditorPlugin : public EditorPlugin, public MCPHostSessionObserver {
 	MCPSceneProvider *scene_provider = nullptr;
 	MCPNodeProvider *node_provider = nullptr;
 	MCPNodeStructureProvider *node_structure_provider = nullptr;
+	MCPProjectProvider *project_provider = nullptr;
 	MCPScriptProvider *script_provider = nullptr;
 	MCPResourceProvider *resource_provider = nullptr;
 	MCPGDScriptProvider *gdscript_provider = nullptr;

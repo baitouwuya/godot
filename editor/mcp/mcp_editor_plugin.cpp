@@ -40,6 +40,7 @@
 #include "providers/mcp_harness_provider.h"
 #include "providers/mcp_node_provider.h"
 #include "providers/mcp_node_structure_provider.h"
+#include "providers/mcp_project_provider.h"
 #include "providers/mcp_resource_provider.h"
 #include "providers/mcp_runtime_debug_service.h"
 #include "providers/mcp_runtime_provider.h"
@@ -143,6 +144,11 @@ Error MCPEditorPlugin::_register_tools(String &r_error) {
 		_unregister_tools();
 		return error;
 	}
+	error = project_provider->register_tools(&tool_registry, &r_error);
+	if (error != OK) {
+		_unregister_tools();
+		return error;
+	}
 #if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
 	error = script_provider->register_tools(&tool_registry, &r_error);
 	if (error != OK) {
@@ -173,6 +179,7 @@ void MCPEditorPlugin::_unregister_tools() {
 #if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
 	script_provider->unregister_tools();
 #endif
+	project_provider->unregister_tools();
 	node_structure_provider->unregister_tools();
 	node_provider->unregister_tools();
 	scene_provider->unregister_tools();
@@ -452,6 +459,7 @@ MCPEditorPlugin::MCPEditorPlugin() {
 	scene_provider = memnew(MCPSceneProvider);
 	node_provider = memnew(MCPNodeProvider);
 	node_structure_provider = memnew(MCPNodeStructureProvider);
+	project_provider = memnew(MCPProjectProvider);
 #if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
 	script_provider = memnew(MCPScriptProvider(session_manager));
 #endif
@@ -471,6 +479,7 @@ MCPEditorPlugin::~MCPEditorPlugin() {
 #if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
 	memdelete(script_provider);
 #endif
+	memdelete(project_provider);
 	memdelete(node_structure_provider);
 	memdelete(node_provider);
 	memdelete(scene_provider);

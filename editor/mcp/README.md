@@ -94,6 +94,12 @@ Snapshots are isolated per MCP session. Targets are revalidated against the visi
 
 `godot.automation.batch` prevalidates and then invokes up to 64 MCP tools sequentially in the same session. It is fail-fast by default and rejects recursive batch calls. CLI clients obtain this capability only through the standard stdio bridge to the project's running MCP Host; there is no separate batch CLI implementation. Long-running runtime automation belongs in the asynchronous Harness instead of one synchronous batch.
 
+## Edit Project Settings And Autoloads
+
+`godot.project.get_settings` lists visible project settings with prefix filtering, a bounded result count, and values disabled by default to keep responses compact. `godot.project.get_setting` reads one exact setting with its `PropertyInfo` metadata and restricted JSON-native Variant value. `godot.project.set_setting` and `godot.project.erase_setting` use the global editor Undo/Redo history and deliberately leave `project.godot` unsaved; `godot.project.save` is the explicit persistence boundary.
+
+Special namespaces with live editor or runtime semantics are not writable through the generic setter. Autoloads use `godot.autoload.get_all`, `godot.autoload.add`, and `godot.autoload.remove`; these validate project-local Script or PackedScene resources, update the editor's live Autoload state, participate in Undo/Redo, and also remain unsaved until `godot.project.save` is called. Input Map, global groups, and global shader parameters remain reserved for dedicated providers.
+
 ## Edit Scene Structure
 
 `godot.scene.open` opens a project-local `.tscn` or `.scn` through the editor. Node structure changes use the current scene's `EditorUndoRedoManager` history and leave the scene unsaved until `godot.scene.save` is called. The structural tools are:
@@ -186,4 +192,4 @@ pwsh -File tests/editor/mcp/test_mcp_cli_smoke.ps1 `
   -Binary bin/godot.windows.editor.dev.x86_64.console.exe
 ```
 
-Optional parameters are `-TimeoutSeconds <5-300>` and `-KeepTemporaryProjects`. The test creates two temporary projects and verifies explicit-path errors, CLI/editor conflicts, ordinary editor behavior, public discovery fields, independent multi-project routing, same-project Host exclusion, JSON-only stdio stdout, the complete 94-tool MCP surface, native class search/documentation, editor UI discovery, runtime tool discovery, compressed debug output and errors, cross-session dirty ScriptEditor revision/diagnostic/save/usage behavior, structural Node edits with `NodePath` rewrites, persistent node group and signal changes, and explicit scene save. Temporary editor plugins request clean Host shutdown; forced termination is used only as a timeout fallback.
+Optional parameters are `-TimeoutSeconds <5-300>` and `-KeepTemporaryProjects`. The test creates two temporary projects and verifies explicit-path errors, CLI/editor conflicts, ordinary editor behavior, public discovery fields, independent multi-project routing, same-project Host exclusion, JSON-only stdio stdout, the complete 102-tool MCP surface, native class search/documentation, editor UI discovery, runtime tool discovery, compressed debug output and errors, cross-session dirty ScriptEditor revision/diagnostic/save/usage behavior, structural Node edits with `NodePath` rewrites, persistent node group and signal changes, and explicit scene save. Temporary editor plugins request clean Host shutdown; forced termination is used only as a timeout fallback.

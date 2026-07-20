@@ -1,9 +1,9 @@
 /**************************************************************************/
-/*  mcp_gdscript_tool_utils.h                                             */
+/*  mcp_workspace_edit_planner.h                                         */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
-/**************************************************************************/
+/*                        https://godotengine.org                         */
 /* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
 /* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
 /*                                                                        */
@@ -29,21 +29,10 @@
 
 #pragma once
 
-#include "core/object/script_language.h"
-#include "core/variant/dictionary.h"
+#include "core/error/error_list.h"
+#include "core/variant/array.h"
 
-namespace MCPGDScriptToolUtils {
-
-Dictionary diagnostics_schema();
-Dictionary position_schema();
-Dictionary references_schema();
-Dictionary rename_schema();
-Dictionary workspace_edit_schema();
-
-bool validate_arguments(const Dictionary &p_arguments, const PackedStringArray &p_allowed, String &r_error);
-bool get_string_argument(const Dictionary &p_arguments, const String &p_name, String &r_value, String &r_error);
-bool get_position_argument(const Dictionary &p_arguments, const String &p_name, int &r_value, String &r_error);
-
-int completion_kind(ScriptLanguage::CodeCompletionKind p_kind);
-
-} // namespace MCPGDScriptToolUtils
+class MCPWorkspaceEditPlanner {
+public:
+	static Error apply(const String &p_text, const Array &p_edits, String &r_text, String *r_error = nullptr);
+};

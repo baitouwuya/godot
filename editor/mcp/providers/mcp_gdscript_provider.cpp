@@ -34,6 +34,7 @@
 #include "mcp_script_analysis_sync.h"
 #include "mcp_script_buffer.h"
 #include "mcp_tool_utils.h"
+#include "mcp_workspace_edit_transaction.h"
 
 #include "core/config/project_settings.h"
 #include "core/mcp/mcp_tool_registry.h"
@@ -718,6 +719,38 @@ Dictionary MCPGDScriptProvider::rename(const Dictionary &p_arguments, const Dict
 	return MCPToolUtils::make_success_result(result);
 }
 
+Dictionary MCPGDScriptProvider::apply_workspace_edit(const Dictionary &p_arguments, const Dictionary &p_context) {
+	PackedStringArray allowed{ "edit", "documents" };
+	String argument_error;
+	Dictionary request_error;
+	if (!_validate_ready_arguments(p_arguments, allowed, argument_error, request_error)) {
+		return request_error;
+	}
+	const Variant edit_value = p_arguments.get("edit", Variant());
+	const Variant documents_value = p_arguments.get("documents", Variant());
+	if (edit_value.get_type() != Variant::DICTIONARY || documents_value.get_type() != Variant::ARRAY) {
+		return _invalid_arguments("edit must be a WorkspaceEdit object and documents must be an array.");
+	}
+
+	String session_id;
+	Ref<GDScriptAnalysisSession> session;
+	if (!_resolve_session(p_context, session_id, session, argument_error)) {
+		return _unavailable(argument_error);
+	}
+	MCPGDScriptTransientParserCleanup cleanup(session);
+	if (MCPScriptAnalysisSync::sync_open_buffers(session_manager, session_id, &argument_error) != OK) {
+		return _unavailable(argument_error);
+	}
+
+	Dictionary result;
+	String error_code;
+	const Error error = MCPWorkspaceEditTransaction::apply(edit_value, documents_value, _get_workspace(), session_manager, session_id, result, error_code, argument_error);
+	if (error != OK) {
+		return MCPToolUtils::make_error_result(error_code.is_empty() ? "WORKSPACE_EDIT_FAILED" : error_code, argument_error, result);
+	}
+	return MCPToolUtils::make_success_result(result);
+}
+
 Error MCPGDScriptProvider::register_tools(MCPToolRegistry *p_registry, String *r_error) {
 	if (r_error) {
 		*r_error = String();
@@ -732,9 +765,9 @@ Error MCPGDScriptProvider::register_tools(MCPToolRegistry *p_registry, String *r
 	}
 
 	Error error = OK;
-	auto register_tool = [&](const String &p_name, const String &p_description, const Dictionary &p_schema, const Callable &p_handler) {
+	auto register_tool = [&](const String &p_name, const String &p_description, const Dictionary &p_schema, const Callable &p_handler, MCPToolUtils::ToolBehavior p_behavior = MCPToolUtils::TOOL_READ_ONLY) {
 		if (error == OK) {
-			error = p_registry->register_tool(MCPToolUtils::make_tool_definition(p_name, p_description, p_schema, MCPToolUtils::TOOL_READ_ONLY), p_handler, this, r_error);
+			error = p_registry->register_tool(MCPToolUtils::make_tool_definition(p_name, p_description, p_schema, p_behavior), p_handler, this, r_error);
 		}
 	};
 	register_tool("godot.gdscript.diagnostics", "Return diagnostics for a GDScript document.", MCPGDScriptToolUtils::diagnostics_schema(), callable_mp(this, &MCPGDScriptProvider::diagnostics));
@@ -746,6 +779,7 @@ Error MCPGDScriptProvider::register_tools(MCPToolRegistry *p_registry, String *r
 	register_tool("godot.gdscript.references", "Find GDScript references at a position.", MCPGDScriptToolUtils::references_schema(), callable_mp(this, &MCPGDScriptProvider::references));
 	register_tool("godot.gdscript.signature_help", "Return GDScript signature help at a call site.", MCPGDScriptToolUtils::position_schema(), callable_mp(this, &MCPGDScriptProvider::signature_help));
 	register_tool("godot.gdscript.rename", "Return a UTF-16 GDScript workspace edit for a symbol.", MCPGDScriptToolUtils::rename_schema(), callable_mp(this, &MCPGDScriptProvider::rename));
+	register_tool("godot.gdscript.apply_workspace_edit", "Validate a UTF-16 WorkspaceEdit, then apply it to authoritative ScriptEditor buffers without saving.", MCPGDScriptToolUtils::workspace_edit_schema(), callable_mp(this, &MCPGDScriptProvider::apply_workspace_edit), MCPToolUtils::TOOL_DESTRUCTIVE);
 
 	if (error != OK) {
 		p_registry->unregister_tools_for_owner(this);

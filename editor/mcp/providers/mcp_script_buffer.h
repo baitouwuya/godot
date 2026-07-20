@@ -56,6 +56,8 @@ public:
 
 	bool is_valid() const;
 	Dictionary get_snapshot() const;
+	Error validate_expected_state(const Variant &p_expected_revision, const Variant &p_expected_sha256,
+			Dictionary &r_current_state, String *r_error = nullptr) const;
 	Error replace_text(const String &p_text, const Variant &p_expected_revision, const Variant &p_expected_sha256,
 			bool &r_changed, Dictionary &r_current_state, String *r_error = nullptr);
 	Error save(String *r_error = nullptr);

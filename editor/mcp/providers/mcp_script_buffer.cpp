@@ -480,6 +480,16 @@ Dictionary MCPScriptBuffer::get_snapshot() const {
 	return snapshot;
 }
 
+Error MCPScriptBuffer::validate_expected_state(const Variant &p_expected_revision, const Variant &p_expected_sha256,
+		Dictionary &r_current_state, String *r_error) const {
+	r_current_state = Dictionary();
+	if (!is_valid()) {
+		return _script_buffer_fail("The Script editor buffer is not available.", r_error, ERR_UNCONFIGURED);
+	}
+	return MCPScriptRevision::validate(code_edit->get_text(), code_edit->get_version(), p_expected_revision,
+			p_expected_sha256, r_current_state, r_error);
+}
+
 Error MCPScriptBuffer::replace_text(const String &p_text, const Variant &p_expected_revision,
 		const Variant &p_expected_sha256, bool &r_changed, Dictionary &r_current_state, String *r_error) {
 	r_changed = false;

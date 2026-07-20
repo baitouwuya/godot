@@ -73,6 +73,7 @@ public:
 	Dictionary references(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary signature_help(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary rename(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary apply_workspace_edit(const Dictionary &p_arguments, const Dictionary &p_context);
 
 private:
 	MCPToolRegistry *tool_registry = nullptr;

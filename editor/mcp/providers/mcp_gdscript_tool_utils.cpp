@@ -154,6 +154,32 @@ Dictionary rename_schema() {
 	return schema;
 }
 
+Dictionary workspace_edit_schema() {
+	Dictionary document_properties;
+	document_properties["path"] = _property_schema("string", "Project GDScript path changed by the WorkspaceEdit.");
+	Dictionary expected_revision = _property_schema("integer", "Expected ScriptEditor revision.");
+	expected_revision["minimum"] = 0;
+	expected_revision["maximum"] = uint64_t(UINT32_MAX);
+	document_properties["expected_revision"] = expected_revision;
+	document_properties["expected_sha256"] = _property_schema("string", "Expected authoritative SHA-256.");
+	Dictionary document = _object_schema(document_properties, PackedStringArray{ "path" });
+	Array expectation_options;
+	expectation_options.push_back(_required_schema(PackedStringArray{ "expected_revision" }));
+	expectation_options.push_back(_required_schema(PackedStringArray{ "expected_sha256" }));
+	document["anyOf"] = expectation_options;
+
+	Dictionary properties;
+	Dictionary edit = _property_schema("object", "LSP WorkspaceEdit containing a changes object.");
+	edit["additionalProperties"] = true;
+	properties["edit"] = edit;
+	Dictionary documents = _property_schema("array", "One optimistic revision expectation for every changed document.");
+	documents["minItems"] = 1;
+	documents["maxItems"] = 256;
+	documents["items"] = document;
+	properties["documents"] = documents;
+	return _object_schema(properties, PackedStringArray{ "edit", "documents" });
+}
+
 bool validate_arguments(const Dictionary &p_arguments, const PackedStringArray &p_allowed, String &r_error) {
 	String unknown;
 	if (!MCPToolUtils::has_only_arguments(p_arguments, p_allowed, unknown)) {

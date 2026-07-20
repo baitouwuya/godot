@@ -129,7 +129,7 @@ TEST_CASE("[MCP][Provider] GDScript semantic tools use injected analysis session
 	CHECK(provider->get_analysis_session() == session);
 
 	const PackedStringArray names = registry.get_tool_names();
-	REQUIRE(names.size() == 9);
+	REQUIRE(names.size() == 10);
 	CHECK(names[0] == "godot.gdscript.diagnostics");
 	CHECK(names[1] == "godot.gdscript.symbols");
 	CHECK(names[2] == "godot.gdscript.completion");
@@ -139,9 +139,10 @@ TEST_CASE("[MCP][Provider] GDScript semantic tools use injected analysis session
 	CHECK(names[6] == "godot.gdscript.references");
 	CHECK(names[7] == "godot.gdscript.signature_help");
 	CHECK(names[8] == "godot.gdscript.rename");
+	CHECK(names[9] == "godot.gdscript.apply_workspace_edit");
 
 	const Array definitions = registry.get_tool_definitions();
-	REQUIRE(definitions.size() == 9);
+	REQUIRE(definitions.size() == 10);
 	const Dictionary diagnostics_schema = Dictionary(definitions[0]).get("inputSchema", Dictionary());
 	CHECK(Array(diagnostics_schema.get("oneOf", Array())).size() == 2);
 	const Dictionary completion_schema = Dictionary(definitions[2]).get("inputSchema", Dictionary());
@@ -165,6 +166,12 @@ TEST_CASE("[MCP][Provider] GDScript semantic tools use injected analysis session
 	CHECK(Dictionary(rename_schema.get("properties", Dictionary())).has("newName"));
 	const PackedStringArray rename_required = rename_schema.get("required", PackedStringArray());
 	CHECK(rename_required.has("newName"));
+	const Dictionary workspace_edit_schema = Dictionary(definitions[9]).get("inputSchema", Dictionary());
+	const Dictionary workspace_edit_properties = workspace_edit_schema.get("properties", Dictionary());
+	CHECK(workspace_edit_properties.has("edit"));
+	CHECK(workspace_edit_properties.has("documents"));
+	const Dictionary workspace_edit_annotations = Dictionary(definitions[9]).get("annotations", Dictionary());
+	CHECK(bool(workspace_edit_annotations.get("destructiveHint", false)));
 
 	MCPToolCallContext context;
 	Dictionary missing_script;

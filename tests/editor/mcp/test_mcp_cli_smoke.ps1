@@ -689,11 +689,12 @@ try {
 		"godot.gdscript.declaration",
 		"godot.gdscript.references",
 		"godot.gdscript.signature_help",
-		"godot.gdscript.rename"
+		"godot.gdscript.rename",
+		"godot.gdscript.apply_workspace_edit"
 	) | Sort-Object
 	$actualTools = @($responsesById["2"].result.tools | ForEach-Object { [string]$_.name } | Sort-Object)
-	Assert-Condition ($actualTools.Count -eq 105) "tools/list returned $($actualTools.Count) tools instead of 105."
-	Assert-Condition (($actualTools -join "`n") -ceq ($expectedTools -join "`n")) "tools/list did not expose the expected 105-tool surface."
+	Assert-Condition ($actualTools.Count -eq 106) "tools/list returned $($actualTools.Count) tools instead of 106."
+	Assert-Condition (($actualTools -join "`n") -ceq ($expectedTools -join "`n")) "tools/list did not expose the expected 106-tool surface."
 	foreach ($tool in @($responsesById["2"].result.tools)) {
 		Assert-Condition ($null -ne $tool.outputSchema) "Tool $($tool.name) is missing outputSchema."
 		Assert-Condition ([string]$tool.outputSchema.type -ceq "object") "Tool $($tool.name) outputSchema is not an object schema."
@@ -734,6 +735,60 @@ try {
 	Assert-Condition ([string]$classDocumentationResult.source -ceq "native") "Node2D documentation was not classified as native."
 	Assert-Condition (@($classDocumentationResult.inheritance) -ccontains "CanvasItem") "Node2D documentation omitted its inheritance chain."
 	Assert-Condition ([int]$classDocumentationResult.counts.methods -gt 0) "Node2D documentation omitted its method count."
+
+	$renamePrepFlow = Invoke-Godot -Arguments @("--verbose", "--mcp-stdio", "--path", $projectA) -InputLines @(
+		$initializeRequest,
+		$initializedNotification,
+		(New-ToolCallRequest -Id 61 -Name "godot.script.get" -Arguments @{ path = "res://mcp_smoke_script.gd" }),
+		(New-ToolCallRequest -Id 62 -Name "godot.gdscript.rename" -Arguments @{
+			path = "res://mcp_smoke_script.gd"
+			line = 4
+			character = 5
+			newName = "renamed_value"
+		})
+	)
+	$renamePrepResponses = Convert-JsonRpcResponseMap -Result $renamePrepFlow -ExpectedCount 3 -Label "stdio rename preparation"
+	$renameSnapshot = $renamePrepResponses["61"].result.structuredContent
+	$renameResult = $renamePrepResponses["62"].result.structuredContent
+	Assert-Condition (-not (Test-ToolResultError -Result $renamePrepResponses["62"].result)) "gdscript/rename returned a tool error."
+	Assert-Condition ([bool]$renameResult.changed) "gdscript/rename returned an empty WorkspaceEdit."
+
+	$applyFlow = Invoke-Godot -Arguments @("--verbose", "--mcp-stdio", "--path", $projectA) -InputLines @(
+		$initializeRequest,
+		$initializedNotification,
+		(New-ToolCallRequest -Id 63 -Name "godot.gdscript.apply_workspace_edit" -Arguments @{
+			edit = $renameResult.edit
+			documents = @(@{
+				path = "res://mcp_smoke_script.gd"
+				expected_revision = [int64]$renameSnapshot.revision
+			})
+		})
+	)
+	$applyResponses = Convert-JsonRpcResponseMap -Result $applyFlow -ExpectedCount 2 -Label "stdio workspace edit apply"
+	$applyResult = $applyResponses["63"].result.structuredContent
+	Assert-Condition (-not (Test-ToolResultError -Result $applyResponses["63"].result)) "gdscript/apply_workspace_edit returned a tool error: $($applyResponses["63"].result | ConvertTo-Json -Depth 12 -Compress); edit: $($renameResult.edit | ConvertTo-Json -Depth 12 -Compress)"
+	Assert-Condition ([bool]$applyResult.applied -and -not [bool]$applyResult.saved) "workspace edit did not remain unsaved."
+	Assert-Condition ([int]$applyResult.documentCount -eq 1) "workspace edit changed an unexpected number of documents."
+	$diskAfterWorkspaceEdit = [System.IO.File]::ReadAllText((Join-Path $projectA "mcp_smoke_script.gd"), [System.Text.UTF8Encoding]::new($false))
+	Assert-Condition ($diskAfterWorkspaceEdit -ceq $initialScriptText) "workspace edit saved the script implicitly."
+
+	$restoreFlow = Invoke-Godot -Arguments @("--verbose", "--mcp-stdio", "--path", $projectA) -InputLines @(
+		$initializeRequest,
+		$initializedNotification,
+		(New-ToolCallRequest -Id 64 -Name "godot.script.get" -Arguments @{ path = "res://mcp_smoke_script.gd" }),
+		(New-ToolCallRequest -Id 65 -Name "godot.script.edit" -Arguments @{
+			path = "res://mcp_smoke_script.gd"
+			text = $initialScriptText
+			expected_sha256 = [string]$applyResult.documents[0].sha256
+		}),
+		(New-ToolCallRequest -Id 66 -Name "godot.script.save" -Arguments @{ path = "res://mcp_smoke_script.gd" })
+	)
+	$restoreResponses = Convert-JsonRpcResponseMap -Result $restoreFlow -ExpectedCount 4 -Label "stdio workspace edit restore"
+	$renamedDocument = $restoreResponses["64"].result.structuredContent
+	Assert-Condition ([string]$renamedDocument.properties[0].text -ceq "var renamed_value: int = 1") "workspace edit was not authoritative in ScriptEditor."
+	Assert-Condition (-not (Test-ToolResultError -Result $restoreResponses["65"].result)) "script/edit could not restore the workspace edit."
+	Assert-Condition (-not (Test-ToolResultError -Result $restoreResponses["66"].result)) "script/save could not persist the restored source."
+	Assert-Condition ([string]$restoreResponses["66"].result.structuredContent.sha256 -ceq $initialScriptSha) "workspace edit restore saved unexpected source."
 
 	Wait-ForHostFile -McpHost $hostA -RelativePath ".mcp-smoke-debug-ready" -Label "project A debug events"
 	$debugFlow = Invoke-Godot -Arguments @("--verbose", "--mcp-stdio", "--path", $projectA) -InputLines @(
@@ -785,7 +840,7 @@ try {
 		(New-ToolCallRequest -Id 12 -Name "godot.script.edit" -Arguments @{
 			path = "res://mcp_smoke_script.gd"
 			text = $dirtyScriptText
-			expected_revision = [int64]$createResult.revision
+			expected_revision = [int64]$restoreResponses["66"].result.structuredContent.revision
 		}),
 		(New-ToolCallRequest -Id 13 -Name "godot.gdscript.diagnostics" -Arguments @{ path = "res://mcp_smoke_script.gd" }),
 		(New-ToolCallRequest -Id 14 -Name "godot.script.edit" -Arguments @{

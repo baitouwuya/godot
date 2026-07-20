@@ -1,9 +1,9 @@
 /**************************************************************************/
-/*  mcp_gdscript_tool_utils.h                                             */
+/*  mcp_workspace_edit_transaction.h                                     */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
-/**************************************************************************/
+/*                        https://godotengine.org                         */
 /* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
 /* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
 /*                                                                        */
@@ -29,21 +29,13 @@
 
 #pragma once
 
-#include "core/object/script_language.h"
-#include "core/variant/dictionary.h"
+#include "mcp_gdscript_session_manager.h"
 
-namespace MCPGDScriptToolUtils {
+class GDScriptWorkspace;
 
-Dictionary diagnostics_schema();
-Dictionary position_schema();
-Dictionary references_schema();
-Dictionary rename_schema();
-Dictionary workspace_edit_schema();
-
-bool validate_arguments(const Dictionary &p_arguments, const PackedStringArray &p_allowed, String &r_error);
-bool get_string_argument(const Dictionary &p_arguments, const String &p_name, String &r_value, String &r_error);
-bool get_position_argument(const Dictionary &p_arguments, const String &p_name, int &r_value, String &r_error);
-
-int completion_kind(ScriptLanguage::CodeCompletionKind p_kind);
-
-} // namespace MCPGDScriptToolUtils
+class MCPWorkspaceEditTransaction {
+public:
+	static Error apply(const Dictionary &p_edit, const Array &p_expectations, const Ref<GDScriptWorkspace> &p_workspace,
+			const Ref<MCPGDScriptSessionManager> &p_session_manager, const String &p_session_id,
+			Dictionary &r_result, String &r_error_code, String &r_error);
+};

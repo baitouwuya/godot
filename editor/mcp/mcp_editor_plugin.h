@@ -52,6 +52,7 @@ class MCPFileProvider;
 class MCPGDScriptProvider;
 class MCPGDScriptSessionManager;
 class MCPHarnessProvider;
+class MCPInputMapProvider;
 class MCPNodeProvider;
 class MCPNodeStructureProvider;
 class MCPProjectProvider;
@@ -114,6 +115,7 @@ class MCPEditorPlugin : public EditorPlugin, public MCPHostSessionObserver {
 	MCPGDScriptProvider *gdscript_provider = nullptr;
 	MCPGDScriptSessionManager *gdscript_session_manager = nullptr;
 	MCPHarnessProvider *harness_provider = nullptr;
+	MCPInputMapProvider *input_map_provider = nullptr;
 	MCPTraceService *trace_service = nullptr;
 
 	void _notification(int p_what);

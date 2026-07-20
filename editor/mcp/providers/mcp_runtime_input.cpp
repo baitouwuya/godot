@@ -211,6 +211,7 @@ Error MCPRuntimeInput::encode(const Dictionary &p_input, EncodedEvent &r_event, 
 	if (type == "key") {
 		int64_t keycode = 0;
 		int64_t physical_keycode = 0;
+		int64_t key_label = 0;
 		int64_t unicode = 0;
 		int64_t location = 0;
 		bool pressed = true;
@@ -221,6 +222,7 @@ Error MCPRuntimeInput::encode(const Dictionary &p_input, EncodedEvent &r_event, 
 		}
 		if (!_read_integer(p_input, "keycode", 0, 0, UINT32_MAX, keycode, r_error) ||
 				!_read_integer(p_input, "physicalKeycode", 0, 0, UINT32_MAX, physical_keycode, r_error) ||
+				!_read_integer(p_input, "keyLabel", 0, 0, UINT32_MAX, key_label, r_error) ||
 				!_read_integer(p_input, "unicode", 0, 0, UINT32_MAX, unicode, r_error) ||
 				!_read_integer(p_input, "location", 0, 0, int64_t(KeyLocation::RIGHT), location, r_error) ||
 				!_read_bool(p_input, "pressed", true, pressed, r_error) || !_read_bool(p_input, "echo", false, echo, r_error)) {
@@ -230,6 +232,7 @@ Error MCPRuntimeInput::encode(const Dictionary &p_input, EncodedEvent &r_event, 
 		event.instantiate();
 		event->set_keycode(Key(keycode));
 		event->set_physical_keycode(Key(physical_keycode));
+		event->set_key_label(Key(key_label));
 		event->set_unicode(char32_t(unicode));
 		event->set_location(KeyLocation(location));
 		event->set_pressed(pressed);

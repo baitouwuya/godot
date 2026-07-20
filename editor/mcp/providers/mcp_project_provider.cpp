@@ -30,6 +30,7 @@
 #include "mcp_project_provider.h"
 
 #include "mcp_path_utils.h"
+#include "mcp_project_settings_mutation.h"
 #include "mcp_tool_utils.h"
 #include "mcp_variant_codec.h"
 
@@ -40,10 +41,7 @@
 #include "core/mcp/mcp_tool_registry.h"
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
-#include "editor/editor_node.h"
-#include "editor/editor_undo_redo_manager.h"
 #include "editor/settings/editor_autoload_settings.h"
-#include "editor/settings/project_settings_editor.h"
 
 namespace {
 
@@ -175,57 +173,6 @@ static PropertyInfo _find_setting_info(const String &p_name, bool &r_found) {
 		}
 	}
 	return PropertyInfo();
-}
-
-static EditorAutoloadSettings *_get_autoload_settings() {
-	EditorNode *editor_node = EditorNode::get_singleton();
-	if (!editor_node || !editor_node->get_project_settings()) {
-		return nullptr;
-	}
-	return editor_node->get_project_settings()->get_autoload_settings();
-}
-
-static void _apply_setting_direct(ProjectSettings *p_settings, const String &p_name, const Variant &p_value) {
-	if (p_value.get_type() == Variant::NIL) {
-		if (p_settings->has_setting(p_name)) {
-			p_settings->clear(p_name);
-		}
-	} else {
-		p_settings->set_setting(p_name, p_value);
-	}
-}
-
-static void _commit_setting_change(const String &p_action, const String &p_name, const Variant &p_new_value,
-		bool p_old_existed, const Variant &p_old_value, int p_old_order, bool p_refresh_autoload) {
-	ProjectSettings *settings = ProjectSettings::get_singleton();
-	EditorAutoloadSettings *autoload_settings = p_refresh_autoload ? _get_autoload_settings() : nullptr;
-	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
-	if (!undo_redo) {
-		_apply_setting_direct(settings, p_name, p_new_value);
-		if (autoload_settings) {
-			autoload_settings->update_autoload();
-		}
-		return;
-	}
-
-	undo_redo->create_action_for_history(p_action, EditorUndoRedoManager::GLOBAL_HISTORY);
-	undo_redo->force_fixed_history();
-	if (p_new_value.get_type() == Variant::NIL) {
-		undo_redo->add_do_method(settings, "clear", p_name);
-	} else {
-		undo_redo->add_do_method(settings, "set_setting", p_name, p_new_value);
-	}
-	if (p_old_existed) {
-		undo_redo->add_undo_method(settings, "set_setting", p_name, p_old_value);
-		undo_redo->add_undo_method(settings, "set_order", p_name, p_old_order);
-	} else {
-		undo_redo->add_undo_method(settings, "clear", p_name);
-	}
-	if (autoload_settings) {
-		undo_redo->add_do_method(autoload_settings, "update_autoload");
-		undo_redo->add_undo_method(autoload_settings, "update_autoload");
-	}
-	undo_redo->commit_action();
 }
 
 } // namespace
@@ -391,7 +338,7 @@ Dictionary MCPProjectProvider::set_setting(const Dictionary &p_arguments, const 
 	const bool old_existed = settings->has_setting(name);
 	const Variant old_value = old_existed ? settings->get_setting(name) : Variant();
 	const int old_order = old_existed ? settings->get_order(name) : -1;
-	_commit_setting_change("Set Project Setting", name, decoded, old_existed, old_value, old_order, false);
+	MCPProjectSettingsMutation::commit("Set Project Setting", name, decoded, old_existed, old_value, old_order, MCPProjectSettingsMutation::REFRESH_NONE);
 
 	Dictionary result;
 	result["name"] = name;
@@ -423,7 +370,7 @@ Dictionary MCPProjectProvider::erase_setting(const Dictionary &p_arguments, cons
 	}
 	const Variant old_value = settings->get_setting(name);
 	const int old_order = settings->get_order(name);
-	_commit_setting_change("Erase Project Setting", name, Variant(), true, old_value, old_order, false);
+	MCPProjectSettingsMutation::commit("Erase Project Setting", name, Variant(), true, old_value, old_order, MCPProjectSettingsMutation::REFRESH_NONE);
 
 	Dictionary result;
 	result["name"] = name;
@@ -519,7 +466,7 @@ Dictionary MCPProjectProvider::add_autoload(const Dictionary &p_arguments, const
 	if (bool(singleton_value)) {
 		stored_path = "*" + stored_path;
 	}
-	_commit_setting_change("Add Autoload", setting_name, stored_path, false, Variant(), -1, true);
+	MCPProjectSettingsMutation::commit("Add Autoload", setting_name, stored_path, false, Variant(), -1, MCPProjectSettingsMutation::REFRESH_AUTOLOAD);
 
 	Dictionary result;
 	result["name"] = name;
@@ -549,7 +496,7 @@ Dictionary MCPProjectProvider::remove_autoload(const Dictionary &p_arguments, co
 	}
 	const Variant old_value = settings->get_setting(setting_name);
 	const int old_order = settings->get_order(setting_name);
-	_commit_setting_change("Remove Autoload", setting_name, Variant(), true, old_value, old_order, true);
+	MCPProjectSettingsMutation::commit("Remove Autoload", setting_name, Variant(), true, old_value, old_order, MCPProjectSettingsMutation::REFRESH_AUTOLOAD);
 
 	Dictionary result;
 	result["name"] = name;

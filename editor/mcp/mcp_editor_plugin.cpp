@@ -38,6 +38,7 @@
 #include "providers/mcp_editor_ui_provider.h"
 #include "providers/mcp_file_provider.h"
 #include "providers/mcp_harness_provider.h"
+#include "providers/mcp_input_map_provider.h"
 #include "providers/mcp_node_provider.h"
 #include "providers/mcp_node_structure_provider.h"
 #include "providers/mcp_project_provider.h"
@@ -149,6 +150,11 @@ Error MCPEditorPlugin::_register_tools(String &r_error) {
 		_unregister_tools();
 		return error;
 	}
+	error = input_map_provider->register_tools(&tool_registry, &r_error);
+	if (error != OK) {
+		_unregister_tools();
+		return error;
+	}
 #if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
 	error = script_provider->register_tools(&tool_registry, &r_error);
 	if (error != OK) {
@@ -179,6 +185,7 @@ void MCPEditorPlugin::_unregister_tools() {
 #if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
 	script_provider->unregister_tools();
 #endif
+	input_map_provider->unregister_tools();
 	project_provider->unregister_tools();
 	node_structure_provider->unregister_tools();
 	node_provider->unregister_tools();
@@ -460,6 +467,7 @@ MCPEditorPlugin::MCPEditorPlugin() {
 	node_provider = memnew(MCPNodeProvider);
 	node_structure_provider = memnew(MCPNodeStructureProvider);
 	project_provider = memnew(MCPProjectProvider);
+	input_map_provider = memnew(MCPInputMapProvider);
 #if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
 	script_provider = memnew(MCPScriptProvider(session_manager));
 #endif
@@ -479,6 +487,7 @@ MCPEditorPlugin::~MCPEditorPlugin() {
 #if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
 	memdelete(script_provider);
 #endif
+	memdelete(input_map_provider);
 	memdelete(project_provider);
 	memdelete(node_structure_provider);
 	memdelete(node_provider);

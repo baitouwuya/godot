@@ -46,7 +46,8 @@ public:
 	StructuredTraceWriter() = default;
 	~StructuredTraceWriter();
 
-	Error open(const Dictionary &p_project_metadata, const Dictionary &p_process_metadata, const Options &p_options = Options(), String *r_error = nullptr);
+	Error open(const Dictionary &p_project_metadata, const Dictionary &p_process_metadata, String *r_error = nullptr);
+	Error open(const Dictionary &p_project_metadata, const Dictionary &p_process_metadata, const Options &p_options, String *r_error = nullptr);
 	Error record(const String &p_category, const String &p_event, const String &p_severity, const String &p_correlation_id, const Dictionary &p_data, const Dictionary &p_payloads = Dictionary(), const Dictionary &p_error = Dictionary(), String *r_error = nullptr);
 	void close();
 

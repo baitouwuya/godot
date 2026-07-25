@@ -516,6 +516,10 @@ static Dictionary _issue_dictionary(const FoldedUnit &p_folded) {
 
 } // namespace
 
+Dictionary MCPLogAnalyzer::analyze(const String &p_text) {
+	return analyze(p_text, Options());
+}
+
 Dictionary MCPLogAnalyzer::analyze(const String &p_text, const Options &p_options) {
 	Dictionary counts;
 	counts["error"] = 0;

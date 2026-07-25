@@ -18,5 +18,6 @@ public:
 		bool truncated = false;
 	};
 
-	static Dictionary analyze(const String &p_text, const Options &p_options = Options());
+	static Dictionary analyze(const String &p_text);
+	static Dictionary analyze(const String &p_text, const Options &p_options);
 };

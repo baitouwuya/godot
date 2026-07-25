@@ -253,6 +253,10 @@ Error StructuredTraceWriter::_open_next_event_file(String *r_error) {
 	return _write_manifest(r_error);
 }
 
+Error StructuredTraceWriter::open(const Dictionary &p_project_metadata, const Dictionary &p_process_metadata, String *r_error) {
+	return open(p_project_metadata, p_process_metadata, Options(), r_error);
+}
+
 Error StructuredTraceWriter::open(const Dictionary &p_project_metadata, const Dictionary &p_process_metadata, const Options &p_options, String *r_error) {
 	_set_error(r_error, String());
 	MutexLock lock(mutex);

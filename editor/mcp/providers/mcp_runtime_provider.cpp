@@ -406,19 +406,6 @@ bool _resolve_mcp_session(const Dictionary &p_context, String &r_session_id, Dic
 	return false;
 }
 
-Dictionary _unknown_argument(const String &p_name) {
-	return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "Unknown argument: " + p_name);
-}
-
-bool _has_only(const Dictionary &p_arguments, const PackedStringArray &p_allowed, Dictionary &r_error) {
-	String unknown;
-	if (MCPToolUtils::has_only_arguments(p_arguments, p_allowed, unknown)) {
-		return true;
-	}
-	r_error = _unknown_argument(unknown);
-	return false;
-}
-
 void _set_error(String *r_error, const String &p_message) {
 	if (r_error) {
 		*r_error = p_message;
@@ -553,264 +540,186 @@ void MCPRuntimeProvider::shutdown() {
 	runtime_service->shutdown_input();
 }
 
-Dictionary MCPRuntimeProvider::_get_state(const Dictionary &p_arguments, const Dictionary &) {
-	Dictionary error;
-	return _has_only(p_arguments, PackedStringArray(), error) ? runtime_service->get_state() : error;
+Dictionary MCPRuntimeProvider::_get_state(const Dictionary &, const Dictionary &) {
+	return runtime_service->get_state();
 }
 
 Dictionary MCPRuntimeProvider::_play(const Dictionary &p_arguments, const Dictionary &) {
-	Dictionary error;
-	return _has_only(p_arguments, PackedStringArray{ "mode", "path", "restart" }, error) ? runtime_service->play(p_arguments) : error;
+	return runtime_service->play(p_arguments);
 }
 
-Dictionary MCPRuntimeProvider::_stop(const Dictionary &p_arguments, const Dictionary &) {
-	Dictionary error;
-	return _has_only(p_arguments, PackedStringArray(), error) ? runtime_service->stop() : error;
+Dictionary MCPRuntimeProvider::_stop(const Dictionary &, const Dictionary &) {
+	return runtime_service->stop();
 }
 
 Dictionary MCPRuntimeProvider::_pause(const Dictionary &p_arguments, const Dictionary &) {
-	Dictionary error;
-	return _has_only(p_arguments, PackedStringArray{ "debuggerSession", "runtimeGeneration" }, error) ? runtime_service->set_suspended(p_arguments, true) : error;
+	return runtime_service->set_suspended(p_arguments, true);
 }
 
 Dictionary MCPRuntimeProvider::_resume(const Dictionary &p_arguments, const Dictionary &) {
-	Dictionary error;
-	return _has_only(p_arguments, PackedStringArray{ "debuggerSession", "runtimeGeneration" }, error) ? runtime_service->set_suspended(p_arguments, false) : error;
+	return runtime_service->set_suspended(p_arguments, false);
 }
 
 Dictionary MCPRuntimeProvider::_next_frame(const Dictionary &p_arguments, const Dictionary &) {
-	Dictionary error;
-	return _has_only(p_arguments, PackedStringArray{ "debuggerSession", "runtimeGeneration" }, error) ? runtime_service->next_frame(p_arguments) : error;
+	return runtime_service->next_frame(p_arguments);
 }
 
 Dictionary MCPRuntimeProvider::_debug_break(const Dictionary &p_arguments, const Dictionary &) {
-	Dictionary error;
-	return _has_only(p_arguments, PackedStringArray{ "debuggerSession", "runtimeGeneration" }, error) ? runtime_service->debug_control(p_arguments, "break") : error;
+	return runtime_service->debug_control(p_arguments, "break");
 }
 
 Dictionary MCPRuntimeProvider::_debug_continue(const Dictionary &p_arguments, const Dictionary &) {
-	Dictionary error;
-	return _has_only(p_arguments, PackedStringArray{ "debuggerSession", "runtimeGeneration" }, error) ? runtime_service->debug_control(p_arguments, "continue") : error;
+	return runtime_service->debug_control(p_arguments, "continue");
 }
 
 Dictionary MCPRuntimeProvider::_debug_step_into(const Dictionary &p_arguments, const Dictionary &) {
-	Dictionary error;
-	return _has_only(p_arguments, PackedStringArray{ "debuggerSession", "runtimeGeneration" }, error) ? runtime_service->debug_control(p_arguments, "step_into") : error;
+	return runtime_service->debug_control(p_arguments, "step_into");
 }
 
 Dictionary MCPRuntimeProvider::_debug_step_over(const Dictionary &p_arguments, const Dictionary &) {
-	Dictionary error;
-	return _has_only(p_arguments, PackedStringArray{ "debuggerSession", "runtimeGeneration" }, error) ? runtime_service->debug_control(p_arguments, "step_over") : error;
+	return runtime_service->debug_control(p_arguments, "step_over");
 }
 
 Dictionary MCPRuntimeProvider::_debug_step_out(const Dictionary &p_arguments, const Dictionary &) {
-	Dictionary error;
-	return _has_only(p_arguments, PackedStringArray{ "debuggerSession", "runtimeGeneration" }, error) ? runtime_service->debug_control(p_arguments, "step_out") : error;
+	return runtime_service->debug_control(p_arguments, "step_out");
 }
 
 Dictionary MCPRuntimeProvider::_get_tree(const Dictionary &p_arguments, const Dictionary &) {
-	Dictionary error;
-	return _has_only(p_arguments, PackedStringArray{ "debuggerSession", "timeoutMs" }, error) ? runtime_service->get_tree(p_arguments) : error;
+	return runtime_service->get_tree(p_arguments);
 }
 
 Dictionary MCPRuntimeProvider::_get_screenshot(const Dictionary &p_arguments, const Dictionary &) {
-	Dictionary error;
-	return _has_only(p_arguments, PackedStringArray{ "name", "crop", "debuggerSession", "timeoutMs" }, error) ? runtime_service->get_screenshot(p_arguments) : error;
+	return runtime_service->get_screenshot(p_arguments);
 }
 
 Dictionary MCPRuntimeProvider::_get_viewport_summary(const Dictionary &p_arguments, const Dictionary &) {
-	Dictionary error;
-	return _has_only(p_arguments, PackedStringArray{ "includeCounts", "debuggerSession", "timeoutMs" }, error) ? runtime_service->get_viewport_summary(p_arguments) : error;
+	return runtime_service->get_viewport_summary(p_arguments);
 }
 
 Dictionary MCPRuntimeProvider::_query_nodes(const Dictionary &p_arguments, const Dictionary &) {
-	Dictionary error;
-	return _has_only(p_arguments, PackedStringArray{ "filter", "maxResults", "debuggerSession", "timeoutMs" }, error) ? runtime_service->query_nodes(p_arguments) : error;
+	return runtime_service->query_nodes(p_arguments);
 }
 
 Dictionary MCPRuntimeProvider::_get_interactables(const Dictionary &p_arguments, const Dictionary &) {
-	Dictionary error;
-	return _has_only(p_arguments, PackedStringArray{ "filter", "maxResults", "debuggerSession", "timeoutMs" }, error) ? runtime_service->get_interactables(p_arguments) : error;
+	return runtime_service->get_interactables(p_arguments);
 }
 
 Dictionary MCPRuntimeProvider::_get_node_snapshot(const Dictionary &p_arguments, const Dictionary &) {
-	Dictionary error;
-	return _has_only(p_arguments, PackedStringArray{ "selector", "debuggerSession", "timeoutMs" }, error) ? runtime_service->get_node_snapshot(p_arguments) : error;
+	return runtime_service->get_node_snapshot(p_arguments);
 }
 
 Dictionary MCPRuntimeProvider::_click_target(const Dictionary &p_arguments, const Dictionary &p_context) {
 	Dictionary error;
-	if (!_has_only(p_arguments, PackedStringArray{ "selector", "button", "pressFrames", "debuggerSession", "runtimeGeneration", "timeoutMs" }, error)) {
-		return error;
-	}
 	String session_id;
 	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->click_target(p_arguments, session_id, false) : error;
 }
 
 Dictionary MCPRuntimeProvider::_double_click_target(const Dictionary &p_arguments, const Dictionary &p_context) {
 	Dictionary error;
-	const PackedStringArray allowed{ "selector", "button", "pressFrames", "gapFrames", "debuggerSession", "runtimeGeneration", "timeoutMs" };
-	if (!_has_only(p_arguments, allowed, error)) {
-		return error;
-	}
 	String session_id;
 	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->click_target(p_arguments, session_id, true) : error;
 }
 
 Dictionary MCPRuntimeProvider::_hover_target(const Dictionary &p_arguments, const Dictionary &p_context) {
 	Dictionary error;
-	if (!_has_only(p_arguments, PackedStringArray{ "selector", "debuggerSession", "runtimeGeneration", "timeoutMs" }, error)) {
-		return error;
-	}
 	String session_id;
 	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->hover_target(p_arguments, session_id) : error;
 }
 
 Dictionary MCPRuntimeProvider::_focus_target(const Dictionary &p_arguments, const Dictionary &p_context) {
 	Dictionary error;
-	if (!_has_only(p_arguments, PackedStringArray{ "selector", "debuggerSession", "runtimeGeneration", "timeoutMs" }, error)) {
-		return error;
-	}
 	String session_id;
 	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->focus_target(p_arguments, session_id) : error;
 }
 
 Dictionary MCPRuntimeProvider::_drag_target_to_target(const Dictionary &p_arguments, const Dictionary &p_context) {
 	Dictionary error;
-	const PackedStringArray allowed{ "fromSelector", "toSelector", "button", "frames", "debuggerSession", "runtimeGeneration", "timeoutMs" };
-	if (!_has_only(p_arguments, allowed, error)) {
-		return error;
-	}
 	String session_id;
 	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->drag_target_to_target(p_arguments, session_id) : error;
 }
 
 Dictionary MCPRuntimeProvider::_type_text(const Dictionary &p_arguments, const Dictionary &p_context) {
 	Dictionary error;
-	if (!_has_only(p_arguments, PackedStringArray{ "selector", "text", "debuggerSession", "runtimeGeneration", "timeoutMs" }, error)) {
-		return error;
-	}
 	String session_id;
 	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->type_text(p_arguments, session_id) : error;
 }
 
 Dictionary MCPRuntimeProvider::_scroll_view(const Dictionary &p_arguments, const Dictionary &p_context) {
 	Dictionary error;
-	const PackedStringArray allowed{ "selector", "direction", "steps", "debuggerSession", "runtimeGeneration", "timeoutMs" };
-	if (!_has_only(p_arguments, allowed, error)) {
-		return error;
-	}
 	String session_id;
 	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->scroll_view(p_arguments, session_id) : error;
 }
 
 Dictionary MCPRuntimeProvider::_start_wait(const Dictionary &p_arguments, const Dictionary &p_context) {
 	Dictionary error;
-	const PackedStringArray allowed{ "condition", "timeoutFrames", "pollEveryFrames", "debuggerSession", "runtimeGeneration", "timeoutMs" };
-	if (!_has_only(p_arguments, allowed, error)) {
-		return error;
-	}
 	String session_id;
 	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->start_wait(p_arguments, session_id) : error;
 }
 
 Dictionary MCPRuntimeProvider::_get_wait_status(const Dictionary &p_arguments, const Dictionary &p_context) {
 	Dictionary error;
-	if (!_has_only(p_arguments, PackedStringArray{ "jobId", "debuggerSession", "runtimeGeneration", "timeoutMs" }, error)) {
-		return error;
-	}
 	String session_id;
 	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->get_wait_status(p_arguments, session_id) : error;
 }
 
 Dictionary MCPRuntimeProvider::_cancel_wait(const Dictionary &p_arguments, const Dictionary &p_context) {
 	Dictionary error;
-	if (!_has_only(p_arguments, PackedStringArray{ "jobId", "debuggerSession", "runtimeGeneration", "timeoutMs" }, error)) {
-		return error;
-	}
 	String session_id;
 	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->cancel_wait(p_arguments, session_id) : error;
 }
 
 Dictionary MCPRuntimeProvider::_start_performance(const Dictionary &p_arguments, const Dictionary &p_context) {
 	Dictionary error;
-	if (!_has_only(p_arguments, PackedStringArray{ "name", "topFrames", "maxFrames", "debuggerSession", "runtimeGeneration", "timeoutMs" }, error)) {
-		return error;
-	}
 	String session_id;
 	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->start_performance(p_arguments, session_id) : error;
 }
 
 Dictionary MCPRuntimeProvider::_get_performance_status(const Dictionary &p_arguments, const Dictionary &p_context) {
 	Dictionary error;
-	if (!_has_only(p_arguments, PackedStringArray{ "jobId", "debuggerSession", "runtimeGeneration", "timeoutMs" }, error)) {
-		return error;
-	}
 	String session_id;
 	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->get_performance_status(p_arguments, session_id) : error;
 }
 
 Dictionary MCPRuntimeProvider::_stop_performance(const Dictionary &p_arguments, const Dictionary &p_context) {
 	Dictionary error;
-	if (!_has_only(p_arguments, PackedStringArray{ "jobId", "debuggerSession", "runtimeGeneration", "timeoutMs" }, error)) {
-		return error;
-	}
 	String session_id;
 	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->stop_performance(p_arguments, session_id) : error;
 }
 
 Dictionary MCPRuntimeProvider::_get_properties(const Dictionary &p_arguments, const Dictionary &) {
-	Dictionary error;
-	return _has_only(p_arguments, PackedStringArray{ "path", "debuggerSession", "timeoutMs" }, error) ? runtime_service->get_properties(p_arguments) : error;
+	return runtime_service->get_properties(p_arguments);
 }
 
 Dictionary MCPRuntimeProvider::_set_property(const Dictionary &p_arguments, const Dictionary &) {
-	Dictionary error;
-	const PackedStringArray allowed{ "path", "property", "value", "debuggerSession", "runtimeGeneration", "timeoutMs" };
-	return _has_only(p_arguments, allowed, error) ? runtime_service->set_property(p_arguments) : error;
+	return runtime_service->set_property(p_arguments);
 }
 
 Dictionary MCPRuntimeProvider::_send_input(const Dictionary &p_arguments, const Dictionary &p_context) {
 	Dictionary error;
-	if (!_has_only(p_arguments, PackedStringArray{ "events", "debuggerSession", "runtimeGeneration" }, error)) {
-		return error;
-	}
 	String session_id;
 	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->send_input(p_arguments, session_id) : error;
 }
 
 Dictionary MCPRuntimeProvider::_start_input_sequence(const Dictionary &p_arguments, const Dictionary &p_context) {
 	Dictionary error;
-	if (!_has_only(p_arguments, PackedStringArray{ "steps", "debuggerSession", "runtimeGeneration" }, error)) {
-		return error;
-	}
 	String session_id;
 	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->start_input_sequence(p_arguments, session_id) : error;
 }
 
 Dictionary MCPRuntimeProvider::_get_input_sequence(const Dictionary &p_arguments, const Dictionary &p_context) {
 	Dictionary error;
-	if (!_has_only(p_arguments, PackedStringArray{ "sequenceId" }, error)) {
-		return error;
-	}
 	String session_id;
 	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->get_input_sequence(p_arguments, session_id) : error;
 }
 
 Dictionary MCPRuntimeProvider::_cancel_input_sequence(const Dictionary &p_arguments, const Dictionary &p_context) {
 	Dictionary error;
-	if (!_has_only(p_arguments, PackedStringArray{ "sequenceId", "debuggerSession", "runtimeGeneration" }, error)) {
-		return error;
-	}
 	String session_id;
 	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->cancel_input_sequence(p_arguments, session_id) : error;
 }
 
 Dictionary MCPRuntimeProvider::_release_input(const Dictionary &p_arguments, const Dictionary &p_context) {
 	Dictionary error;
-	if (!_has_only(p_arguments, PackedStringArray{ "debuggerSession", "runtimeGeneration" }, error)) {
-		return error;
-	}
 	String session_id;
 	return _resolve_mcp_session(p_context, session_id, error) ? runtime_service->release_input(p_arguments, session_id) : error;
 }

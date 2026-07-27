@@ -77,15 +77,6 @@ static MCPToolCallContext _make_context(const Dictionary &p_context) {
 	return context;
 }
 
-static bool _has_only(const Dictionary &p_arguments, const PackedStringArray &p_allowed, Dictionary &r_error) {
-	String unknown;
-	if (MCPToolUtils::has_only_arguments(p_arguments, p_allowed, unknown)) {
-		return true;
-	}
-	r_error = MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "Unknown argument: " + unknown);
-	return false;
-}
-
 } // namespace
 
 MCPHarnessProvider::~MCPHarnessProvider() {
@@ -139,21 +130,17 @@ void MCPHarnessProvider::unregister_tools() {
 }
 
 Dictionary MCPHarnessProvider::start(const Dictionary &p_arguments, const Dictionary &p_context) {
-	Dictionary error;
-	return _has_only(p_arguments, PackedStringArray{ "script", "debuggerSession", "runtimeGeneration" }, error) ? service.start(p_arguments, _make_context(p_context)) : error;
+	return service.start(p_arguments, _make_context(p_context));
 }
 
 Dictionary MCPHarnessProvider::get_status(const Dictionary &p_arguments, const Dictionary &p_context) {
-	Dictionary error;
-	return _has_only(p_arguments, PackedStringArray{ "jobId", "debuggerSession", "runtimeGeneration" }, error) ? service.get_status(p_arguments, _make_context(p_context)) : error;
+	return service.get_status(p_arguments, _make_context(p_context));
 }
 
 Dictionary MCPHarnessProvider::cancel(const Dictionary &p_arguments, const Dictionary &p_context) {
-	Dictionary error;
-	return _has_only(p_arguments, PackedStringArray{ "jobId", "debuggerSession", "runtimeGeneration" }, error) ? service.cancel(p_arguments, _make_context(p_context)) : error;
+	return service.cancel(p_arguments, _make_context(p_context));
 }
 
 Dictionary MCPHarnessProvider::get_report(const Dictionary &p_arguments, const Dictionary &p_context) {
-	Dictionary error;
-	return _has_only(p_arguments, PackedStringArray{ "jobId", "debuggerSession", "runtimeGeneration" }, error) ? service.get_report(p_arguments, _make_context(p_context)) : error;
+	return service.get_report(p_arguments, _make_context(p_context));
 }

@@ -95,6 +95,37 @@ TEST_CASE("[MCP][ToolRegistry] Closed schemas reject unknown arguments with vali
 	memdelete(provider);
 }
 
+TEST_CASE("[MCP][ToolRegistry] Closed empty schemas explain that no arguments are accepted") {
+	MCPToolRegistry registry;
+	ToolProvider *provider = memnew(ToolProvider);
+	Dictionary input_schema;
+	input_schema["type"] = "object";
+	input_schema["properties"] = Dictionary();
+	input_schema["additionalProperties"] = false;
+	Dictionary definition = make_definition("empty");
+	definition["inputSchema"] = input_schema;
+	REQUIRE(registry.register_tool(definition, callable_mp(provider, &ToolProvider::echo), provider) == OK);
+
+	Dictionary arguments;
+	arguments["unexpected"] = true;
+	MCPToolCallContext context;
+	const MCPToolRegistry::CallResult result = registry.call_tool("empty", arguments, context);
+	REQUIRE(result.status == MCPToolRegistry::CALL_OK);
+	CHECK(provider->call_count == 0);
+	CHECK(bool(result.result.get("isError", false)));
+	const Dictionary structured = result.result.get("structuredContent", Dictionary());
+	const Dictionary error = structured.get("error", Dictionary());
+	CHECK(error.get("code", String()) == "INVALID_ARGUMENTS");
+	CHECK(String(error.get("message", String())).contains("This tool accepts no arguments."));
+	const Dictionary details = error.get("details", Dictionary());
+	CHECK(details.get("unknownArgument", String()) == "unexpected");
+	CHECK(PackedStringArray(details.get("validArguments", PackedStringArray())).is_empty());
+	CHECK(details.get("keyword", String()) == "additionalProperties");
+
+	registry.unregister_tools_for_owner(provider);
+	memdelete(provider);
+}
+
 TEST_CASE("[MCP][ToolRegistry] Registers in order and rejects duplicates") {
 	MCPToolRegistry registry;
 	ToolProvider *provider = memnew(ToolProvider);

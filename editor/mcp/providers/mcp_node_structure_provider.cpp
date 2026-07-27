@@ -153,15 +153,6 @@ static Dictionary _operation_error(Error p_error, const String &p_message) {
 	return MCPToolUtils::make_error_result(code, p_message);
 }
 
-static bool _validate_arguments(const Dictionary &p_arguments, const PackedStringArray &p_allowed, Dictionary &r_error) {
-	String unknown_argument;
-	if (!MCPToolUtils::has_only_arguments(p_arguments, p_allowed, unknown_argument)) {
-		r_error = _invalid_arguments("Unknown argument: " + unknown_argument);
-		return false;
-	}
-	return true;
-}
-
 static Dictionary _make_result(Node *p_scene_root, Node *p_node, const String &p_previous_path = String()) {
 	Dictionary result = MCPSceneUtils::make_node_summary(p_scene_root, p_node);
 	if (!p_previous_path.is_empty()) {
@@ -251,12 +242,7 @@ void MCPNodeStructureProvider::unregister_tools() {
 }
 
 Dictionary MCPNodeStructureProvider::delete_node(const Dictionary &p_arguments, const Dictionary &) {
-	PackedStringArray allowed;
-	allowed.push_back("path");
 	Dictionary validation_error;
-	if (!_validate_arguments(p_arguments, allowed, validation_error)) {
-		return validation_error;
-	}
 	String path;
 	if (!_get_required_string(p_arguments, "path", path)) {
 		return _invalid_arguments("A non-empty string path is required.");
@@ -284,13 +270,7 @@ Dictionary MCPNodeStructureProvider::delete_node(const Dictionary &p_arguments, 
 }
 
 Dictionary MCPNodeStructureProvider::rename_node(const Dictionary &p_arguments, const Dictionary &) {
-	PackedStringArray allowed;
-	allowed.push_back("path");
-	allowed.push_back("name");
 	Dictionary validation_error;
-	if (!_validate_arguments(p_arguments, allowed, validation_error)) {
-		return validation_error;
-	}
 	String path;
 	String name;
 	if (!_get_required_string(p_arguments, "path", path) || !_get_required_string(p_arguments, "name", name)) {
@@ -312,15 +292,7 @@ Dictionary MCPNodeStructureProvider::rename_node(const Dictionary &p_arguments, 
 }
 
 Dictionary MCPNodeStructureProvider::reparent_node(const Dictionary &p_arguments, const Dictionary &) {
-	PackedStringArray allowed;
-	allowed.push_back("path");
-	allowed.push_back("parentPath");
-	allowed.push_back("index");
-	allowed.push_back("keepGlobalTransform");
 	Dictionary validation_error;
-	if (!_validate_arguments(p_arguments, allowed, validation_error)) {
-		return validation_error;
-	}
 	String path;
 	String parent_path;
 	int index = -1;
@@ -350,13 +322,7 @@ Dictionary MCPNodeStructureProvider::reparent_node(const Dictionary &p_arguments
 }
 
 Dictionary MCPNodeStructureProvider::move_node(const Dictionary &p_arguments, const Dictionary &) {
-	PackedStringArray allowed;
-	allowed.push_back("path");
-	allowed.push_back("index");
 	Dictionary validation_error;
-	if (!_validate_arguments(p_arguments, allowed, validation_error)) {
-		return validation_error;
-	}
 	String path;
 	int index = -1;
 	if (!_get_required_string(p_arguments, "path", path) || !_get_index(p_arguments, index)) {
@@ -377,15 +343,7 @@ Dictionary MCPNodeStructureProvider::move_node(const Dictionary &p_arguments, co
 }
 
 Dictionary MCPNodeStructureProvider::duplicate_node(const Dictionary &p_arguments, const Dictionary &) {
-	PackedStringArray allowed;
-	allowed.push_back("path");
-	allowed.push_back("parentPath");
-	allowed.push_back("name");
-	allowed.push_back("index");
 	Dictionary validation_error;
-	if (!_validate_arguments(p_arguments, allowed, validation_error)) {
-		return validation_error;
-	}
 	String path;
 	String parent_path;
 	String name;
@@ -415,15 +373,7 @@ Dictionary MCPNodeStructureProvider::duplicate_node(const Dictionary &p_argument
 }
 
 Dictionary MCPNodeStructureProvider::instantiate_scene(const Dictionary &p_arguments, const Dictionary &) {
-	PackedStringArray allowed;
-	allowed.push_back("scenePath");
-	allowed.push_back("parentPath");
-	allowed.push_back("name");
-	allowed.push_back("index");
 	Dictionary validation_error;
-	if (!_validate_arguments(p_arguments, allowed, validation_error)) {
-		return validation_error;
-	}
 	String scene_path;
 	String parent_path;
 	String name;

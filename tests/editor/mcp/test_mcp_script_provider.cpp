@@ -51,6 +51,12 @@ static String _error_code(const Dictionary &p_result) {
 	return error.get("code", String());
 }
 
+static Dictionary _error_details(const Dictionary &p_result) {
+	const Dictionary structured = p_result.get("structuredContent", Dictionary());
+	const Dictionary error = structured.get("error", Dictionary());
+	return error.get("details", Dictionary());
+}
+
 TEST_CASE("[MCP][Provider] Script tools register with optimistic edit requirements") {
 	CHECK(String(MCPScriptProvider::STALE_REVISION_ERROR_CODE) == "stale_revision");
 
@@ -70,8 +76,16 @@ TEST_CASE("[MCP][Provider] Script tools register with optimistic edit requiremen
 
 	const Array definitions = registry.get_tool_definitions();
 	REQUIRE(definitions.size() == 6);
+	const Dictionary create_schema = Dictionary(definitions[0]).get("inputSchema", Dictionary());
+	CHECK(int(Dictionary(Dictionary(create_schema.get("properties", Dictionary())).get("path", Dictionary())).get("minLength", 0)) == 1);
+	const Dictionary create_output = Dictionary(definitions[0]).get("outputSchema", Dictionary());
+	CHECK(PackedStringArray(create_output.get("required", PackedStringArray())).has("diagnostics"));
 	const Dictionary open_schema = Dictionary(definitions[1]).get("inputSchema", Dictionary());
 	CHECK(Array(open_schema.get("oneOf", Array())).size() == 2);
+	const Dictionary open_properties = open_schema.get("properties", Dictionary());
+	CHECK(int(Dictionary(open_properties.get("path", Dictionary())).get("minLength", 0)) == 1);
+	const Dictionary open_output = Dictionary(definitions[1]).get("outputSchema", Dictionary());
+	CHECK(PackedStringArray(open_output.get("required", PackedStringArray())).has("opened"));
 	const Dictionary get_schema = Dictionary(definitions[2]).get("inputSchema", Dictionary());
 	const Dictionary get_properties = get_schema.get("properties", Dictionary());
 	CHECK(get_properties.has("path"));
@@ -89,6 +103,8 @@ TEST_CASE("[MCP][Provider] Script tools register with optimistic edit requiremen
 	CHECK(usages_properties.has("member"));
 	CHECK(usages_properties.has("includeDeclaration"));
 	CHECK(PackedStringArray(usages_schema.get("required", PackedStringArray())).has("member"));
+	const Dictionary usages_output = Dictionary(definitions[3]).get("outputSchema", Dictionary());
+	CHECK(PackedStringArray(usages_output.get("required", PackedStringArray())).has("locations"));
 	const Dictionary edit_schema = Dictionary(definitions[4]).get("inputSchema", Dictionary());
 	const Dictionary properties = edit_schema.get("properties", Dictionary());
 	CHECK(properties.has("nodePath"));
@@ -97,8 +113,19 @@ TEST_CASE("[MCP][Provider] Script tools register with optimistic edit requiremen
 	const Array edit_constraints = edit_schema.get("allOf", Array());
 	REQUIRE(edit_constraints.size() == 2);
 	CHECK(Array(Dictionary(edit_constraints[1]).get("anyOf", Array())).size() == 2);
+	const Dictionary edit_output = Dictionary(definitions[4]).get("outputSchema", Dictionary());
+	CHECK(PackedStringArray(edit_output.get("required", PackedStringArray())).has("changed"));
+	const Dictionary save_output = Dictionary(definitions[5]).get("outputSchema", Dictionary());
+	CHECK(PackedStringArray(save_output.get("required", PackedStringArray())).has("saved"));
 
 	MCPToolCallContext context;
+	Dictionary unexpected_arguments;
+	unexpected_arguments["path"] = "res://new.gd";
+	unexpected_arguments["text"] = String();
+	unexpected_arguments["unexpected"] = true;
+	const Dictionary unexpected_result = registry.call_tool("godot.script.create", unexpected_arguments, context).result;
+	CHECK(_error_code(unexpected_result) == "INVALID_ARGUMENTS");
+	CHECK(_error_details(unexpected_result).get("keyword", String()) == "additionalProperties");
 	const MCPToolRegistry::CallResult invalid_call = registry.call_tool("godot.script.create", Dictionary(), context);
 	REQUIRE(invalid_call.status == MCPToolRegistry::CALL_OK);
 	CHECK(bool(invalid_call.result.get("isError", false)));

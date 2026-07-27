@@ -40,7 +40,6 @@
 #include "core/config/project_settings.h"
 #include "core/io/resource_loader.h"
 #include "core/os/os.h"
-#include "core/templates/hash_set.h"
 #include "editor/debugger/editor_debugger_inspector.h"
 #include "editor/debugger/editor_debugger_node.h"
 #include "editor/debugger/script_editor_debugger.h"
@@ -242,10 +241,41 @@ bool _read_resolved_target(const Dictionary &p_resolution, int p_index, Dictiona
 	return true;
 }
 
+MCPRuntimeJobService::Config _condition_job_config() {
+	MCPRuntimeJobService::Config config;
+	config.id_prefix = "wait";
+	config.capture = "mcp_condition";
+	config.not_found_code = "WAIT_JOB_NOT_FOUND";
+	config.not_found_message = "Runtime wait job was not found for this MCP session.";
+	config.stale_code = "STALE_WAIT_JOB";
+	config.stale_message = "Runtime wait job belongs to a different runtime generation or debugger session.";
+	config.limit_code = "WAIT_JOB_LIMIT";
+	config.limit_message = "The editor wait job record limit is full.";
+	config.max_records = 256;
+	return config;
+}
+
+MCPRuntimeJobService::Config _performance_job_config() {
+	MCPRuntimeJobService::Config config;
+	config.id_prefix = "performance";
+	config.capture = "mcp_performance";
+	config.rollback_operation = "stop";
+	config.not_found_code = "PERFORMANCE_JOB_NOT_FOUND";
+	config.not_found_message = "Runtime performance job was not found for this MCP session.";
+	config.stale_code = "STALE_PERFORMANCE_JOB";
+	config.stale_message = "Runtime performance job belongs to a different runtime generation or debugger session.";
+	config.limit_code = "PERFORMANCE_JOB_LIMIT";
+	config.limit_message = "The editor performance job record limit is full.";
+	config.max_records = 32;
+	return config;
+}
+
 } // namespace
 
 MCPRuntimeDebugService::MCPRuntimeDebugService(MCPDebugCapture *p_debug_capture) :
 		runtime_gateway(p_debug_capture),
+		condition_jobs(&runtime_gateway, _condition_job_config()),
+		performance_jobs(&runtime_gateway, _performance_job_config()),
 		input_scheduler(p_debug_capture) {
 }
 
@@ -365,8 +395,8 @@ Dictionary MCPRuntimeDebugService::stop() {
 	}
 	const bool was_playing = run_bar->is_playing();
 	if (was_playing) {
-		_release_all_condition_jobs("The running project was stopped.");
-		_release_all_performance_jobs("The running project was stopped.");
+		condition_jobs.release_all("The running project was stopped.");
+		performance_jobs.release_all("The running project was stopped.");
 		input_scheduler.release_all();
 		run_bar->stop_playing();
 	}
@@ -493,16 +523,6 @@ Dictionary MCPRuntimeDebugService::_request_observation(const Dictionary &p_argu
 	return _request_debugger_message(p_arguments, "mcp_observation", p_operation, p_payload, p_require_generation);
 }
 
-Dictionary MCPRuntimeDebugService::_request_condition(const Dictionary &p_arguments, const String &p_operation,
-		const Dictionary &p_payload, bool p_require_generation) const {
-	return _request_debugger_message(p_arguments, "mcp_condition", p_operation, p_payload, p_require_generation);
-}
-
-Dictionary MCPRuntimeDebugService::_request_performance(const Dictionary &p_arguments, const String &p_operation,
-		const Dictionary &p_payload, bool p_require_generation) const {
-	return _request_debugger_message(p_arguments, "mcp_performance", p_operation, p_payload, p_require_generation);
-}
-
 Dictionary MCPRuntimeDebugService::get_screenshot(const Dictionary &p_arguments) const {
 	Dictionary payload;
 	if (p_arguments.has("name")) {
@@ -550,25 +570,6 @@ Dictionary MCPRuntimeDebugService::get_node_snapshot(const Dictionary &p_argumen
 	return _request_observation(p_arguments, "get_node_snapshot", payload);
 }
 
-void MCPRuntimeDebugService::_prune_condition_jobs() {
-	constexpr int MAX_EDITOR_CONDITION_JOBS = 256;
-	while (condition_jobs.size() >= MAX_EDITOR_CONDITION_JOBS) {
-		int remove_index = -1;
-		for (int i = 0; i < condition_job_order.size(); i++) {
-			const ConditionJobRecord *record = condition_jobs.getptr(condition_job_order[i]);
-			if (!record || String(record->state.get("state", String())) != "running") {
-				remove_index = i;
-				break;
-			}
-		}
-		if (remove_index < 0) {
-			return;
-		}
-		condition_jobs.erase(condition_job_order[remove_index]);
-		condition_job_order.remove_at(remove_index);
-	}
-}
-
 Dictionary MCPRuntimeDebugService::start_wait(const Dictionary &p_arguments, const String &p_mcp_session_id) {
 	const Variant condition_value = p_arguments.get("condition", Variant());
 	if (condition_value.get_type() != Variant::DICTIONARY) {
@@ -580,159 +581,19 @@ Dictionary MCPRuntimeDebugService::start_wait(const Dictionary &p_arguments, con
 			(p_arguments.has("pollEveryFrames") && !MCPToolUtils::try_get_json_integer(p_arguments["pollEveryFrames"], 1, 600, poll_frames))) {
 		return _error("INVALID_ARGUMENTS", "timeoutFrames or pollEveryFrames is outside its allowed range.");
 	}
-	ScriptEditorDebugger *debugger = nullptr;
-	int debugger_session = -1;
-	uint64_t generation = 0;
-	const Dictionary session_error = _resolve_session(p_arguments, true, debugger, debugger_session, generation);
-	if (!session_error.is_empty()) {
-		return session_error;
-	}
-	_prune_condition_jobs();
-	if (condition_jobs.size() >= 256) {
-		return _error("WAIT_JOB_LIMIT", "The editor wait job record limit is full.");
-	}
-	const String job_id = "wait-" + String::num_uint64(next_condition_job_id++);
 	Dictionary payload;
-	payload["jobId"] = job_id;
-	payload["mcpSessionId"] = p_mcp_session_id;
 	payload["condition"] = condition_value;
 	payload["timeoutFrames"] = timeout_frames;
 	payload["pollEveryFrames"] = poll_frames;
-	const Dictionary response = _request_condition(p_arguments, "start", payload, true);
-	if (_is_error_result(response)) {
-		return response;
-	}
-	ConditionJobRecord record;
-	record.mcp_session_id = p_mcp_session_id;
-	record.debugger_session = debugger_session;
-	record.runtime_generation = generation;
-	record.state = response.get("structuredContent", Dictionary());
-	condition_jobs.insert(job_id, record);
-	condition_job_order.push_back(job_id);
-	return response;
+	return condition_jobs.start(p_arguments, p_mcp_session_id, payload);
 }
 
 Dictionary MCPRuntimeDebugService::get_wait_status(const Dictionary &p_arguments, const String &p_mcp_session_id) {
-	const Variant job_value = p_arguments.get("jobId", Variant());
-	if (job_value.get_type() != Variant::STRING || String(job_value).is_empty()) {
-		return _error("INVALID_ARGUMENTS", "jobId must be a non-empty string.");
-	}
-	const String job_id = job_value;
-	ConditionJobRecord *record = condition_jobs.getptr(job_id);
-	if (!record || record->mcp_session_id != p_mcp_session_id) {
-		return _error("WAIT_JOB_NOT_FOUND", "Runtime wait job was not found for this MCP session.");
-	}
-	int64_t requested_generation = 0;
-	int64_t requested_debugger = record->debugger_session;
-	if (!MCPToolUtils::try_get_json_integer(p_arguments.get("runtimeGeneration", Variant()), 1, INT64_MAX, requested_generation) ||
-			(p_arguments.has("debuggerSession") && !MCPToolUtils::try_get_json_integer(p_arguments["debuggerSession"], 0, INT32_MAX, requested_debugger)) ||
-			uint64_t(requested_generation) != record->runtime_generation || int(requested_debugger) != record->debugger_session) {
-		return _error("STALE_WAIT_JOB", "Runtime wait job belongs to a different runtime generation or debugger session.");
-	}
-	const String state = record->state.get("state", String());
-	if (state != "running") {
-		return MCPToolUtils::make_success_result(record->state);
-	}
-	Dictionary payload;
-	payload["jobId"] = job_id;
-	payload["mcpSessionId"] = p_mcp_session_id;
-	const Dictionary response = _request_condition(p_arguments, "status", payload, true);
-	if (!_is_error_result(response)) {
-		record->state = response.get("structuredContent", Dictionary());
-	}
-	return response;
+	return condition_jobs.get_status(p_arguments, p_mcp_session_id);
 }
 
 Dictionary MCPRuntimeDebugService::cancel_wait(const Dictionary &p_arguments, const String &p_mcp_session_id) {
-	const Variant job_value = p_arguments.get("jobId", Variant());
-	if (job_value.get_type() != Variant::STRING || String(job_value).is_empty()) {
-		return _error("INVALID_ARGUMENTS", "jobId must be a non-empty string.");
-	}
-	const String job_id = job_value;
-	ConditionJobRecord *record = condition_jobs.getptr(job_id);
-	if (!record || record->mcp_session_id != p_mcp_session_id) {
-		return _error("WAIT_JOB_NOT_FOUND", "Runtime wait job was not found for this MCP session.");
-	}
-	int64_t requested_generation = 0;
-	int64_t requested_debugger = record->debugger_session;
-	if (!MCPToolUtils::try_get_json_integer(p_arguments.get("runtimeGeneration", Variant()), 1, INT64_MAX, requested_generation) ||
-			(p_arguments.has("debuggerSession") && !MCPToolUtils::try_get_json_integer(p_arguments["debuggerSession"], 0, INT32_MAX, requested_debugger)) ||
-			uint64_t(requested_generation) != record->runtime_generation || int(requested_debugger) != record->debugger_session) {
-		return _error("STALE_WAIT_JOB", "Runtime wait job belongs to a different runtime generation or debugger session.");
-	}
-	if (String(record->state.get("state", String())) != "running") {
-		return MCPToolUtils::make_success_result(record->state);
-	}
-	Dictionary payload;
-	payload["jobId"] = job_id;
-	payload["mcpSessionId"] = p_mcp_session_id;
-	const Dictionary response = _request_condition(p_arguments, "cancel", payload, true);
-	if (!_is_error_result(response)) {
-		record->state = response.get("structuredContent", Dictionary());
-	}
-	return response;
-}
-
-void MCPRuntimeDebugService::_release_condition_session(const String &p_mcp_session_id) {
-	HashSet<int> debugger_sessions;
-	for (const KeyValue<String, ConditionJobRecord> &entry : condition_jobs) {
-		if (entry.value.mcp_session_id == p_mcp_session_id && String(entry.value.state.get("state", String())) == "running") {
-			debugger_sessions.insert(entry.value.debugger_session);
-		}
-	}
-	EditorDebuggerNode *debugger_node = EditorDebuggerNode::get_singleton();
-	for (const int debugger_session : debugger_sessions) {
-		ScriptEditorDebugger *debugger = debugger_node ? debugger_node->get_debugger(debugger_session) : nullptr;
-		if (debugger && debugger->is_session_active()) {
-			Dictionary payload;
-			payload["mcpSessionId"] = p_mcp_session_id;
-			debugger->send_message("mcp_condition:release_session", Array{ String(), payload });
-		}
-	}
-	for (int i = condition_job_order.size() - 1; i >= 0; i--) {
-		const ConditionJobRecord *record = condition_jobs.getptr(condition_job_order[i]);
-		if (record && record->mcp_session_id == p_mcp_session_id) {
-			condition_jobs.erase(condition_job_order[i]);
-			condition_job_order.remove_at(i);
-		}
-	}
-}
-
-void MCPRuntimeDebugService::_release_all_condition_jobs(const String &p_reason) {
-	HashSet<int> debugger_sessions;
-	for (KeyValue<String, ConditionJobRecord> &entry : condition_jobs) {
-		if (String(entry.value.state.get("state", String())) == "running") {
-			debugger_sessions.insert(entry.value.debugger_session);
-			entry.value.state["state"] = "cancelled";
-			entry.value.state["failure"] = p_reason;
-		}
-	}
-	EditorDebuggerNode *debugger_node = EditorDebuggerNode::get_singleton();
-	for (const int debugger_session : debugger_sessions) {
-		ScriptEditorDebugger *debugger = debugger_node ? debugger_node->get_debugger(debugger_session) : nullptr;
-		if (debugger && debugger->is_session_active()) {
-			debugger->send_message("mcp_condition:release_all", Array{ String(), Dictionary() });
-		}
-	}
-}
-
-void MCPRuntimeDebugService::_prune_performance_jobs() {
-	constexpr int MAX_EDITOR_PERFORMANCE_JOBS = 32;
-	while (performance_jobs.size() >= MAX_EDITOR_PERFORMANCE_JOBS) {
-		int remove_index = -1;
-		for (int i = 0; i < performance_job_order.size(); i++) {
-			const PerformanceJobRecord *record = performance_jobs.getptr(performance_job_order[i]);
-			if (!record || String(record->state.get("state", String())) != "running") {
-				remove_index = i;
-				break;
-			}
-		}
-		if (remove_index < 0) {
-			return;
-		}
-		performance_jobs.erase(performance_job_order[remove_index]);
-		performance_job_order.remove_at(remove_index);
-	}
+	return condition_jobs.finish(p_arguments, p_mcp_session_id, "cancel");
 }
 
 Dictionary MCPRuntimeDebugService::start_performance(const Dictionary &p_arguments, const String &p_mcp_session_id) {
@@ -746,143 +607,19 @@ Dictionary MCPRuntimeDebugService::start_performance(const Dictionary &p_argumen
 			(p_arguments.has("maxFrames") && !MCPToolUtils::try_get_json_integer(p_arguments["maxFrames"], 1, 36000, max_frames))) {
 		return _error("INVALID_ARGUMENTS", "topFrames or maxFrames is outside its allowed range.");
 	}
-	ScriptEditorDebugger *debugger = nullptr;
-	int debugger_session = -1;
-	uint64_t generation = 0;
-	const Dictionary session_error = _resolve_session(p_arguments, true, debugger, debugger_session, generation);
-	if (!session_error.is_empty()) {
-		return session_error;
-	}
-	_prune_performance_jobs();
-	if (performance_jobs.size() >= 32) {
-		return _error("PERFORMANCE_JOB_LIMIT", "The editor performance job record limit is full.");
-	}
-	const String job_id = "performance-" + String::num_uint64(next_performance_job_id++);
 	Dictionary payload;
-	payload["jobId"] = job_id;
-	payload["mcpSessionId"] = p_mcp_session_id;
 	payload["name"] = name_value;
 	payload["topFrames"] = top_frames;
 	payload["maxFrames"] = max_frames;
-	const Dictionary response = _request_performance(p_arguments, "start", payload, true);
-	if (_is_error_result(response)) {
-		Dictionary stop_payload;
-		stop_payload["jobId"] = job_id;
-		stop_payload["mcpSessionId"] = p_mcp_session_id;
-		debugger->send_message("mcp_performance:stop", Array{ String(), stop_payload });
-		return response;
-	}
-	PerformanceJobRecord record;
-	record.mcp_session_id = p_mcp_session_id;
-	record.debugger_session = debugger_session;
-	record.runtime_generation = generation;
-	record.state = response.get("structuredContent", Dictionary());
-	performance_jobs.insert(job_id, record);
-	performance_job_order.push_back(job_id);
-	return response;
+	return performance_jobs.start(p_arguments, p_mcp_session_id, payload);
 }
 
 Dictionary MCPRuntimeDebugService::get_performance_status(const Dictionary &p_arguments, const String &p_mcp_session_id) {
-	const Variant job_value = p_arguments.get("jobId", Variant());
-	if (job_value.get_type() != Variant::STRING || String(job_value).is_empty()) {
-		return _error("INVALID_ARGUMENTS", "jobId must be a non-empty string.");
-	}
-	const String job_id = job_value;
-	PerformanceJobRecord *record = performance_jobs.getptr(job_id);
-	if (!record || record->mcp_session_id != p_mcp_session_id) {
-		return _error("PERFORMANCE_JOB_NOT_FOUND", "Runtime performance job was not found for this MCP session.");
-	}
-	int64_t requested_generation = 0;
-	int64_t requested_debugger = record->debugger_session;
-	if (!MCPToolUtils::try_get_json_integer(p_arguments.get("runtimeGeneration", Variant()), 1, INT64_MAX, requested_generation) ||
-			(p_arguments.has("debuggerSession") && !MCPToolUtils::try_get_json_integer(p_arguments["debuggerSession"], 0, INT32_MAX, requested_debugger)) ||
-			uint64_t(requested_generation) != record->runtime_generation || int(requested_debugger) != record->debugger_session) {
-		return _error("STALE_PERFORMANCE_JOB", "Runtime performance job belongs to a different runtime generation or debugger session.");
-	}
-	if (String(record->state.get("state", String())) != "running") {
-		return MCPToolUtils::make_success_result(record->state);
-	}
-	Dictionary payload;
-	payload["jobId"] = job_id;
-	payload["mcpSessionId"] = p_mcp_session_id;
-	const Dictionary response = _request_performance(p_arguments, "status", payload, true);
-	if (!_is_error_result(response)) {
-		record->state = response.get("structuredContent", Dictionary());
-	}
-	return response;
+	return performance_jobs.get_status(p_arguments, p_mcp_session_id);
 }
 
 Dictionary MCPRuntimeDebugService::stop_performance(const Dictionary &p_arguments, const String &p_mcp_session_id) {
-	const Variant job_value = p_arguments.get("jobId", Variant());
-	if (job_value.get_type() != Variant::STRING || String(job_value).is_empty()) {
-		return _error("INVALID_ARGUMENTS", "jobId must be a non-empty string.");
-	}
-	const String job_id = job_value;
-	PerformanceJobRecord *record = performance_jobs.getptr(job_id);
-	if (!record || record->mcp_session_id != p_mcp_session_id) {
-		return _error("PERFORMANCE_JOB_NOT_FOUND", "Runtime performance job was not found for this MCP session.");
-	}
-	int64_t requested_generation = 0;
-	int64_t requested_debugger = record->debugger_session;
-	if (!MCPToolUtils::try_get_json_integer(p_arguments.get("runtimeGeneration", Variant()), 1, INT64_MAX, requested_generation) ||
-			(p_arguments.has("debuggerSession") && !MCPToolUtils::try_get_json_integer(p_arguments["debuggerSession"], 0, INT32_MAX, requested_debugger)) ||
-			uint64_t(requested_generation) != record->runtime_generation || int(requested_debugger) != record->debugger_session) {
-		return _error("STALE_PERFORMANCE_JOB", "Runtime performance job belongs to a different runtime generation or debugger session.");
-	}
-	if (String(record->state.get("state", String())) != "running" && record->state.has("summary")) {
-		return MCPToolUtils::make_success_result(record->state);
-	}
-	Dictionary payload;
-	payload["jobId"] = job_id;
-	payload["mcpSessionId"] = p_mcp_session_id;
-	const Dictionary response = _request_performance(p_arguments, "stop", payload, true);
-	if (!_is_error_result(response)) {
-		record->state = response.get("structuredContent", Dictionary());
-	}
-	return response;
-}
-
-void MCPRuntimeDebugService::_release_performance_session(const String &p_mcp_session_id) {
-	HashSet<int> debugger_sessions;
-	for (const KeyValue<String, PerformanceJobRecord> &entry : performance_jobs) {
-		if (entry.value.mcp_session_id == p_mcp_session_id && String(entry.value.state.get("state", String())) == "running") {
-			debugger_sessions.insert(entry.value.debugger_session);
-		}
-	}
-	EditorDebuggerNode *debugger_node = EditorDebuggerNode::get_singleton();
-	for (const int debugger_session : debugger_sessions) {
-		ScriptEditorDebugger *debugger = debugger_node ? debugger_node->get_debugger(debugger_session) : nullptr;
-		if (debugger && debugger->is_session_active()) {
-			Dictionary payload;
-			payload["mcpSessionId"] = p_mcp_session_id;
-			debugger->send_message("mcp_performance:release_session", Array{ String(), payload });
-		}
-	}
-	for (int i = performance_job_order.size() - 1; i >= 0; i--) {
-		const PerformanceJobRecord *record = performance_jobs.getptr(performance_job_order[i]);
-		if (record && record->mcp_session_id == p_mcp_session_id) {
-			performance_jobs.erase(performance_job_order[i]);
-			performance_job_order.remove_at(i);
-		}
-	}
-}
-
-void MCPRuntimeDebugService::_release_all_performance_jobs(const String &p_reason) {
-	HashSet<int> debugger_sessions;
-	for (KeyValue<String, PerformanceJobRecord> &entry : performance_jobs) {
-		if (String(entry.value.state.get("state", String())) == "running") {
-			debugger_sessions.insert(entry.value.debugger_session);
-			entry.value.state["state"] = "cancelled";
-			entry.value.state["failure"] = p_reason;
-		}
-	}
-	EditorDebuggerNode *debugger_node = EditorDebuggerNode::get_singleton();
-	for (const int debugger_session : debugger_sessions) {
-		ScriptEditorDebugger *debugger = debugger_node ? debugger_node->get_debugger(debugger_session) : nullptr;
-		if (debugger && debugger->is_session_active()) {
-			debugger->send_message("mcp_performance:release_all", Array{ String(), Dictionary() });
-		}
-	}
+	return performance_jobs.finish(p_arguments, p_mcp_session_id, "stop", "summary");
 }
 
 Dictionary MCPRuntimeDebugService::_resolve_action_targets(const Dictionary &p_arguments, const String &p_kind, const Array &p_selectors) const {
@@ -1402,34 +1139,18 @@ Dictionary MCPRuntimeDebugService::release_input(const Dictionary &p_arguments, 
 
 void MCPRuntimeDebugService::process_input() {
 	input_scheduler.process();
-	for (KeyValue<String, ConditionJobRecord> &entry : condition_jobs) {
-		if (String(entry.value.state.get("state", String())) != "running") {
-			continue;
-		}
-		if (!runtime_gateway.is_runtime_current(entry.value.debugger_session, entry.value.runtime_generation)) {
-			entry.value.state["state"] = "cancelled";
-			entry.value.state["failure"] = "The running project disconnected or restarted.";
-		}
-	}
-	for (KeyValue<String, PerformanceJobRecord> &entry : performance_jobs) {
-		if (String(entry.value.state.get("state", String())) != "running") {
-			continue;
-		}
-		if (!runtime_gateway.is_runtime_current(entry.value.debugger_session, entry.value.runtime_generation)) {
-			entry.value.state["state"] = "cancelled";
-			entry.value.state["failure"] = "The running project disconnected or restarted.";
-		}
-	}
+	condition_jobs.process();
+	performance_jobs.process();
 }
 
 void MCPRuntimeDebugService::release_mcp_session(const String &p_mcp_session_id) {
-	_release_condition_session(p_mcp_session_id);
-	_release_performance_session(p_mcp_session_id);
+	condition_jobs.release_session(p_mcp_session_id);
+	performance_jobs.release_session(p_mcp_session_id);
 	input_scheduler.release_mcp_session(p_mcp_session_id);
 }
 
 void MCPRuntimeDebugService::shutdown_input() {
-	_release_all_condition_jobs("The MCP Host shut down.");
-	_release_all_performance_jobs("The MCP Host shut down.");
+	condition_jobs.release_all("The MCP Host shut down.");
+	performance_jobs.release_all("The MCP Host shut down.");
 	input_scheduler.release_all();
 }

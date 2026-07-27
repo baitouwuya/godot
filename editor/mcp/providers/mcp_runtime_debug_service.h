@@ -32,36 +32,18 @@
 
 #include "mcp_runtime_debugger_gateway.h"
 #include "mcp_runtime_input_scheduler.h"
+#include "mcp_runtime_job_service.h"
 
-#include "core/templates/hash_map.h"
-#include "core/templates/vector.h"
 #include "core/variant/dictionary.h"
 
 class MCPDebugCapture;
 class ScriptEditorDebugger;
 
 class MCPRuntimeDebugService {
-	struct ConditionJobRecord {
-		String mcp_session_id;
-		int debugger_session = -1;
-		uint64_t runtime_generation = 0;
-		Dictionary state;
-	};
-	struct PerformanceJobRecord {
-		String mcp_session_id;
-		int debugger_session = -1;
-		uint64_t runtime_generation = 0;
-		Dictionary state;
-	};
-
 	MCPRuntimeDebuggerGateway runtime_gateway;
+	MCPRuntimeJobService condition_jobs;
+	MCPRuntimeJobService performance_jobs;
 	MCPRuntimeInputScheduler input_scheduler;
-	uint64_t next_condition_job_id = 1;
-	HashMap<String, ConditionJobRecord> condition_jobs;
-	Vector<String> condition_job_order;
-	uint64_t next_performance_job_id = 1;
-	HashMap<String, PerformanceJobRecord> performance_jobs;
-	Vector<String> performance_job_order;
 
 	Dictionary _resolve_session(const Dictionary &p_arguments, bool p_require_generation, ScriptEditorDebugger *&r_debugger,
 			int &r_debugger_session, uint64_t &r_runtime_generation) const;
@@ -73,16 +55,6 @@ class MCPRuntimeDebugService {
 			const Dictionary &p_payload, bool p_require_generation) const;
 	Dictionary _request_observation(const Dictionary &p_arguments, const String &p_operation, const Dictionary &p_payload,
 			bool p_require_generation = false) const;
-	Dictionary _request_condition(const Dictionary &p_arguments, const String &p_operation, const Dictionary &p_payload,
-			bool p_require_generation = true) const;
-	Dictionary _request_performance(const Dictionary &p_arguments, const String &p_operation, const Dictionary &p_payload,
-			bool p_require_generation = true) const;
-	void _prune_condition_jobs();
-	void _release_condition_session(const String &p_mcp_session_id);
-	void _release_all_condition_jobs(const String &p_reason);
-	void _prune_performance_jobs();
-	void _release_performance_session(const String &p_mcp_session_id);
-	void _release_all_performance_jobs(const String &p_reason);
 	Dictionary _dispatch_action_events(const Dictionary &p_arguments, const String &p_mcp_session_id, const Array &p_events,
 			const Dictionary &p_metadata);
 	Dictionary _start_action_sequence(const Dictionary &p_arguments, const String &p_mcp_session_id, const Array &p_steps,

@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  mcp_tool_utils.h                                                      */
+/*  mcp_editor_tool_utils.cpp                                             */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,45 +28,41 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#pragma once
+#include "mcp_editor_tool_utils.h"
 
-#include "core/templates/local_vector.h"
-#include "core/variant/callable.h"
-#include "core/variant/dictionary.h"
-#include "core/variant/variant.h"
+#include "mcp_tool_utils.h"
 
-class MCPToolRegistry;
-class Object;
-struct PropertyInfo;
-struct MCPToolCallContext;
+namespace MCPEditorToolUtils {
 
-namespace MCPToolUtils {
+Dictionary empty_input_schema() {
+	return MCPToolUtils::make_object_schema();
+}
 
-enum ToolBehavior {
-	TOOL_READ_ONLY,
-	TOOL_ADDITIVE,
-	TOOL_DESTRUCTIVE,
-};
+Dictionary state_output_schema() {
+	Dictionary string_property = MCPToolUtils::make_property_schema("string", "Editor resource path.");
+	Dictionary string_array_property = MCPToolUtils::make_property_schema("array", "Editor resource paths.");
+	string_array_property["items"] = string_property;
 
-struct ToolDescriptor {
-	String name;
-	String description;
-	Dictionary input_schema;
-	ToolBehavior behavior = TOOL_READ_ONLY;
-	Callable handler;
-	Dictionary output_schema;
-};
+	Dictionary properties;
+	properties["currentScene"] = string_property;
+	properties["unsavedScenes"] = string_array_property;
+	properties["openScripts"] = string_array_property;
+	properties["unsavedScripts"] = string_array_property;
+	properties["canUndo"] = MCPToolUtils::make_property_schema("boolean", "Whether an editor undo action is available.");
+	properties["canRedo"] = MCPToolUtils::make_property_schema("boolean", "Whether an editor redo action is available.");
+	return MCPToolUtils::make_object_schema(properties,
+			PackedStringArray{ "currentScene", "unsavedScenes", "openScripts", "unsavedScripts", "canUndo", "canRedo" });
+}
 
-Dictionary make_tool_definition(const String &p_name, const String &p_description, const Dictionary &p_input_schema, ToolBehavior p_behavior, const Dictionary &p_output_schema = Dictionary());
-Error register_tools(MCPToolRegistry *p_registry, Object *p_owner, const LocalVector<ToolDescriptor> &p_tools, String *r_error = nullptr);
-Dictionary make_property_schema(const String &p_type, const String &p_description);
-Dictionary make_enum_schema(const PackedStringArray &p_values, const String &p_description, const String &p_default);
-Dictionary make_object_schema(const Dictionary &p_properties = Dictionary(), const PackedStringArray &p_required = PackedStringArray(), bool p_allow_additional_properties = false);
-Dictionary make_property_description(const PropertyInfo &p_property);
-Dictionary make_success_result(const Dictionary &p_structured_content);
-Dictionary make_error_result(const String &p_code, const String &p_message, const Dictionary &p_details = Dictionary());
-MCPToolCallContext make_tool_call_context(const Dictionary &p_context);
-bool has_only_arguments(const Dictionary &p_arguments, const PackedStringArray &p_allowed_names, String &r_unknown_name);
-bool try_get_json_integer(const Variant &p_value, int64_t p_minimum, int64_t p_maximum, int64_t &r_value);
+Dictionary history_output_schema() {
+	Dictionary action = MCPToolUtils::make_property_schema("string", "History action that was performed.");
+	action["enum"] = PackedStringArray{ "undo", "redo" };
+	Dictionary properties;
+	properties["action"] = action;
+	properties["performed"] = MCPToolUtils::make_property_schema("boolean", "Whether the history action completed.");
+	properties["canUndo"] = MCPToolUtils::make_property_schema("boolean", "Whether another undo is available.");
+	properties["canRedo"] = MCPToolUtils::make_property_schema("boolean", "Whether another redo is available.");
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "action", "performed", "canUndo", "canRedo" });
+}
 
-} // namespace MCPToolUtils
+} // namespace MCPEditorToolUtils

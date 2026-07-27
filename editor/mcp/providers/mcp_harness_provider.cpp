@@ -30,112 +30,10 @@
 
 #include "mcp_harness_provider.h"
 
+#include "mcp_harness_tool_utils.h"
 #include "mcp_tool_utils.h"
 
 #include "core/object/callable_mp.h"
-
-namespace {
-
-static Dictionary _start_schema() {
-	Dictionary properties;
-	Dictionary script = MCPToolUtils::make_property_schema("object", "Inline Harness script. Filesystem paths are not accepted.");
-	script["additionalProperties"] = true;
-	properties["script"] = script;
-	Dictionary debugger = MCPToolUtils::make_property_schema("integer", "Optional running-project debugger session index.");
-	debugger["minimum"] = 0;
-	properties["debuggerSession"] = debugger;
-	Dictionary generation = MCPToolUtils::make_property_schema("integer", "Runtime generation returned by godot.runtime.get_state.");
-	generation["minimum"] = 1;
-	properties["runtimeGeneration"] = generation;
-	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "script", "runtimeGeneration" });
-}
-
-static Dictionary _job_schema() {
-	Dictionary properties;
-	properties["jobId"] = MCPToolUtils::make_property_schema("string", "Opaque Harness job ID returned by godot.runtime.harness.start.");
-	Dictionary debugger = MCPToolUtils::make_property_schema("integer", "Optional running-project debugger session index.");
-	debugger["minimum"] = 0;
-	properties["debuggerSession"] = debugger;
-	Dictionary generation = MCPToolUtils::make_property_schema("integer", "Runtime generation that owns the Harness job.");
-	generation["minimum"] = 1;
-	properties["runtimeGeneration"] = generation;
-	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "jobId", "runtimeGeneration" });
-}
-
-static Dictionary _open_object_schema(const String &p_description) {
-	Dictionary schema = MCPToolUtils::make_property_schema("object", p_description);
-	schema["additionalProperties"] = true;
-	return schema;
-}
-
-static Dictionary _non_negative_integer_schema(const String &p_description) {
-	Dictionary schema = MCPToolUtils::make_property_schema("integer", p_description);
-	schema["minimum"] = 0;
-	return schema;
-}
-
-static Dictionary _summary_output_properties() {
-	Dictionary state = MCPToolUtils::make_property_schema("string", "Harness job lifecycle state.");
-	state["enum"] = PackedStringArray{ "running", "cancelling", "collecting_evidence", "completed", "failed", "cancelled" };
-	Dictionary debugger_session = MCPToolUtils::make_property_schema("integer", "Debugger session index, or -1 when auto-selected.");
-	debugger_session["minimum"] = -1;
-	Dictionary runtime_generation = MCPToolUtils::make_property_schema("integer", "Runtime generation that owns the job.");
-	runtime_generation["minimum"] = 1;
-	Dictionary properties;
-	properties["jobId"] = MCPToolUtils::make_property_schema("string", "Opaque Harness job ID.");
-	properties["state"] = state;
-	properties["name"] = MCPToolUtils::make_property_schema("string", "Harness plan name.");
-	properties["debuggerSession"] = debugger_session;
-	properties["runtimeGeneration"] = runtime_generation;
-	properties["currentStep"] = _non_negative_integer_schema("Current zero-based plan step index.");
-	properties["stepCount"] = _non_negative_integer_schema("Total number of plan steps.");
-	properties["completedStepCount"] = _non_negative_integer_schema("Number of completed plan steps.");
-	properties["sequenceId"] = MCPToolUtils::make_property_schema("string", "Active runtime input sequence ID.");
-	properties["waitJobId"] = MCPToolUtils::make_property_schema("string", "Active runtime condition job ID.");
-	properties["failure"] = _open_object_schema("Structured terminal failure when the job fails.");
-	return properties;
-}
-
-static PackedStringArray _summary_output_required() {
-	return PackedStringArray{ "jobId", "state", "name", "debuggerSession", "runtimeGeneration", "currentStep", "stepCount", "completedStepCount" };
-}
-
-static Dictionary _summary_output_schema() {
-	return MCPToolUtils::make_object_schema(_summary_output_properties(), _summary_output_required());
-}
-
-static Dictionary _report_output_schema() {
-	Dictionary item = _open_object_schema("Harness report entry.");
-	Dictionary steps = MCPToolUtils::make_property_schema("array", "Per-step execution reports.");
-	steps["items"] = item;
-	Dictionary assertions = MCPToolUtils::make_property_schema("array", "Harness assertion results.");
-	assertions["items"] = item;
-	Dictionary properties = _summary_output_properties();
-	properties["steps"] = steps;
-	properties["assertions"] = assertions;
-	properties["evidence"] = _open_object_schema("Collected evidence references.");
-	properties["evidencePolicy"] = _open_object_schema("Effective evidence collection policy.");
-	PackedStringArray required = _summary_output_required();
-	required.append_array(PackedStringArray{ "steps", "assertions", "evidence", "evidencePolicy" });
-	return MCPToolUtils::make_object_schema(properties, required);
-}
-
-static MCPToolCallContext _make_context(const Dictionary &p_context) {
-	MCPToolCallContext context;
-	context.request_id = p_context.get("requestId", Variant());
-	context.protocol_version = p_context.get("protocolVersion", String());
-	const Variant session = p_context.get("session", Dictionary());
-	const Variant project = p_context.get("project", Dictionary());
-	if (session.get_type() == Variant::DICTIONARY) {
-		context.session = session;
-	}
-	if (project.get_type() == Variant::DICTIONARY) {
-		context.project = project;
-	}
-	return context;
-}
-
-} // namespace
 
 MCPHarnessProvider::~MCPHarnessProvider() {
 	shutdown();
@@ -161,13 +59,13 @@ Error MCPHarnessProvider::register_tools(MCPToolRegistry *p_registry, String *r_
 
 	const LocalVector<MCPToolUtils::ToolDescriptor> tools{
 		{ "godot.runtime.harness.start", "Compile and start an asynchronous inline runtime Harness job.",
-				_start_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPHarnessProvider::start), _summary_output_schema() },
+				MCPHarnessToolUtils::start_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPHarnessProvider::start), MCPHarnessToolUtils::summary_output_schema() },
 		{ "godot.runtime.harness.status", "Get bounded progress for a runtime Harness job.",
-				_job_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPHarnessProvider::get_status), _summary_output_schema() },
+				MCPHarnessToolUtils::job_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPHarnessProvider::get_status), MCPHarnessToolUtils::summary_output_schema() },
 		{ "godot.runtime.harness.cancel", "Cancel a runtime Harness job and its active asynchronous child.",
-				_job_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPHarnessProvider::cancel), _summary_output_schema() },
+				MCPHarnessToolUtils::job_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPHarnessProvider::cancel), MCPHarnessToolUtils::summary_output_schema() },
 		{ "godot.runtime.harness.get_report", "Get the structured report accumulated by a runtime Harness job.",
-				_job_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPHarnessProvider::get_report), _report_output_schema() },
+				MCPHarnessToolUtils::job_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPHarnessProvider::get_report), MCPHarnessToolUtils::report_output_schema() },
 	};
 	const Error error = MCPToolUtils::register_tools(p_registry, this, tools, r_error);
 	if (error != OK) {
@@ -188,17 +86,17 @@ void MCPHarnessProvider::unregister_tools() {
 }
 
 Dictionary MCPHarnessProvider::start(const Dictionary &p_arguments, const Dictionary &p_context) {
-	return service.start(p_arguments, _make_context(p_context));
+	return service.start(p_arguments, MCPToolUtils::make_tool_call_context(p_context));
 }
 
 Dictionary MCPHarnessProvider::get_status(const Dictionary &p_arguments, const Dictionary &p_context) {
-	return service.get_status(p_arguments, _make_context(p_context));
+	return service.get_status(p_arguments, MCPToolUtils::make_tool_call_context(p_context));
 }
 
 Dictionary MCPHarnessProvider::cancel(const Dictionary &p_arguments, const Dictionary &p_context) {
-	return service.cancel(p_arguments, _make_context(p_context));
+	return service.cancel(p_arguments, MCPToolUtils::make_tool_call_context(p_context));
 }
 
 Dictionary MCPHarnessProvider::get_report(const Dictionary &p_arguments, const Dictionary &p_context) {
-	return service.get_report(p_arguments, _make_context(p_context));
+	return service.get_report(p_arguments, MCPToolUtils::make_tool_call_context(p_context));
 }

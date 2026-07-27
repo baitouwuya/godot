@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  mcp_tool_utils.h                                                      */
+/*  mcp_automation_tool_utils.h                                           */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,43 +30,19 @@
 
 #pragma once
 
-#include "core/templates/local_vector.h"
-#include "core/variant/callable.h"
-#include "core/variant/dictionary.h"
-#include "core/variant/variant.h"
+#include "core/mcp/mcp_tool_registry.h"
 
-class MCPToolRegistry;
-class Object;
-struct PropertyInfo;
-struct MCPToolCallContext;
+namespace MCPAutomationToolUtils {
 
-namespace MCPToolUtils {
-
-enum ToolBehavior {
-	TOOL_READ_ONLY,
-	TOOL_ADDITIVE,
-	TOOL_DESTRUCTIVE,
+struct BatchOptions {
+	Array calls;
+	bool stop_on_error = true;
 };
 
-struct ToolDescriptor {
-	String name;
-	String description;
-	Dictionary input_schema;
-	ToolBehavior behavior = TOOL_READ_ONLY;
-	Callable handler;
-	Dictionary output_schema;
-};
+String batch_tool_name();
+Dictionary batch_schema();
+Dictionary batch_output_schema();
+bool parse_batch_options(const Dictionary &p_arguments, BatchOptions &r_options, String &r_error_message);
+Dictionary make_call_result(int p_index, const String &p_name, const MCPToolRegistry::CallResult &p_call);
 
-Dictionary make_tool_definition(const String &p_name, const String &p_description, const Dictionary &p_input_schema, ToolBehavior p_behavior, const Dictionary &p_output_schema = Dictionary());
-Error register_tools(MCPToolRegistry *p_registry, Object *p_owner, const LocalVector<ToolDescriptor> &p_tools, String *r_error = nullptr);
-Dictionary make_property_schema(const String &p_type, const String &p_description);
-Dictionary make_enum_schema(const PackedStringArray &p_values, const String &p_description, const String &p_default);
-Dictionary make_object_schema(const Dictionary &p_properties = Dictionary(), const PackedStringArray &p_required = PackedStringArray(), bool p_allow_additional_properties = false);
-Dictionary make_property_description(const PropertyInfo &p_property);
-Dictionary make_success_result(const Dictionary &p_structured_content);
-Dictionary make_error_result(const String &p_code, const String &p_message, const Dictionary &p_details = Dictionary());
-MCPToolCallContext make_tool_call_context(const Dictionary &p_context);
-bool has_only_arguments(const Dictionary &p_arguments, const PackedStringArray &p_allowed_names, String &r_unknown_name);
-bool try_get_json_integer(const Variant &p_value, int64_t p_minimum, int64_t p_maximum, int64_t &r_value);
-
-} // namespace MCPToolUtils
+} // namespace MCPAutomationToolUtils

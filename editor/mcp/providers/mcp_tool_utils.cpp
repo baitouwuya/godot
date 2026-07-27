@@ -189,6 +189,21 @@ Dictionary make_error_result(const String &p_code, const String &p_message, cons
 	return result;
 }
 
+MCPToolCallContext make_tool_call_context(const Dictionary &p_context) {
+	MCPToolCallContext context;
+	context.request_id = p_context.get("requestId", Variant());
+	context.protocol_version = p_context.get("protocolVersion", String());
+	const Variant session = p_context.get("session", Dictionary());
+	const Variant project = p_context.get("project", Dictionary());
+	if (session.get_type() == Variant::DICTIONARY) {
+		context.session = session;
+	}
+	if (project.get_type() == Variant::DICTIONARY) {
+		context.project = project;
+	}
+	return context;
+}
+
 bool has_only_arguments(const Dictionary &p_arguments, const PackedStringArray &p_allowed_names, String &r_unknown_name) {
 	r_unknown_name = String();
 	for (const KeyValue<Variant, Variant> &entry : p_arguments) {

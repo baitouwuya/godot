@@ -30,6 +30,7 @@
 
 #include "mcp_editor_provider.h"
 
+#include "mcp_editor_tool_utils.h"
 #include "mcp_tool_utils.h"
 
 #include "core/mcp/mcp_tool_registry.h"
@@ -41,49 +42,6 @@
 #include "scene/main/node.h"
 
 namespace {
-
-static Dictionary _empty_input_schema() {
-	return MCPToolUtils::make_object_schema();
-}
-
-static Dictionary _state_output_schema() {
-	Dictionary string_property;
-	string_property["type"] = "string";
-	Dictionary boolean_property;
-	boolean_property["type"] = "boolean";
-	Dictionary string_array_property;
-	string_array_property["type"] = "array";
-	string_array_property["items"] = string_property;
-
-	Dictionary properties;
-	properties["currentScene"] = string_property;
-	properties["unsavedScenes"] = string_array_property;
-	properties["openScripts"] = string_array_property;
-	properties["unsavedScripts"] = string_array_property;
-	properties["canUndo"] = boolean_property;
-	properties["canRedo"] = boolean_property;
-
-	PackedStringArray required;
-	required.push_back("currentScene");
-	required.push_back("unsavedScenes");
-	required.push_back("openScripts");
-	required.push_back("unsavedScripts");
-	required.push_back("canUndo");
-	required.push_back("canRedo");
-
-	return MCPToolUtils::make_object_schema(properties, required);
-}
-
-static Dictionary _history_output_schema() {
-	Dictionary action = MCPToolUtils::make_property_schema("string", "History action that was performed.");
-	action["enum"] = PackedStringArray{ "undo", "redo" };
-	Dictionary properties;
-	properties["action"] = action;
-	properties["performed"] = MCPToolUtils::make_property_schema("boolean", "Whether the history action completed.");
-	properties["canUndo"] = MCPToolUtils::make_property_schema("boolean", "Whether another undo is available.");
-	properties["canRedo"] = MCPToolUtils::make_property_schema("boolean", "Whether another redo is available.");
-	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "action", "performed", "canUndo", "canRedo" });
-}
 
 static void _set_error(String *r_error, const String &p_message) {
 	if (r_error) {
@@ -110,14 +68,14 @@ Error MCPEditorProvider::register_tools(MCPToolRegistry *p_registry, String *r_e
 		return ERR_ALREADY_IN_USE;
 	}
 
-	const Dictionary schema = _empty_input_schema();
+	const Dictionary schema = MCPEditorToolUtils::empty_input_schema();
 	const LocalVector<MCPToolUtils::ToolDescriptor> tools{
 		{ "godot.editor.get_state", "Get the current scene, unsaved scenes, scripts, and undo state.",
-				schema, MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPEditorProvider::get_state), _state_output_schema() },
+				schema, MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPEditorProvider::get_state), MCPEditorToolUtils::state_output_schema() },
 		{ "godot.editor.undo", "Undo the latest editor action.",
-				schema, MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPEditorProvider::undo), _history_output_schema() },
+				schema, MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPEditorProvider::undo), MCPEditorToolUtils::history_output_schema() },
 		{ "godot.editor.redo", "Redo the latest editor action.",
-				schema, MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPEditorProvider::redo), _history_output_schema() },
+				schema, MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPEditorProvider::redo), MCPEditorToolUtils::history_output_schema() },
 	};
 	const Error err = MCPToolUtils::register_tools(p_registry, this, tools, r_error);
 	if (err != OK) {

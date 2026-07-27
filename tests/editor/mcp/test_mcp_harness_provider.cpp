@@ -31,8 +31,8 @@
 #include "core/mcp/mcp_tool_registry.h"
 #include "core/object/callable_mp.h"
 #include "editor/mcp/providers/mcp_harness_provider.h"
-#include "editor/mcp/providers/mcp_trace_service.h"
 #include "editor/mcp/providers/mcp_tool_utils.h"
+#include "editor/mcp/providers/mcp_trace_service.h"
 #include "tests/test_macros.h"
 
 TEST_FORCE_LINK(test_mcp_harness_provider);
@@ -191,6 +191,11 @@ TEST_CASE("[MCP][Harness] Provider registers four MCP tools") {
 	CHECK(names[2] == "godot.runtime.harness.cancel");
 	CHECK(names[3] == "godot.runtime.harness.get_report");
 	const Array definitions = registry.get_tool_definitions();
+	const Dictionary start_input = Dictionary(definitions[0]).get("inputSchema", Dictionary());
+	CHECK(PackedStringArray(start_input.get("required", PackedStringArray())).has("script"));
+	CHECK(PackedStringArray(start_input.get("required", PackedStringArray())).has("runtimeGeneration"));
+	const Dictionary job_input = Dictionary(definitions[1]).get("inputSchema", Dictionary());
+	CHECK(PackedStringArray(job_input.get("required", PackedStringArray())).has("jobId"));
 	const Dictionary summary_output = Dictionary(definitions[0]).get("outputSchema", Dictionary());
 	CHECK_FALSE(bool(summary_output.get("additionalProperties", true)));
 	const Dictionary summary_properties = summary_output.get("properties", Dictionary());

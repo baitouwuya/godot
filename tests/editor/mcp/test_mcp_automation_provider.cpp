@@ -31,6 +31,7 @@
 #include "core/mcp/mcp_tool_registry.h"
 #include "core/object/callable_mp.h"
 #include "editor/mcp/providers/mcp_automation_provider.h"
+#include "editor/mcp/providers/mcp_automation_tool_utils.h"
 #include "editor/mcp/providers/mcp_tool_utils.h"
 #include "tests/test_macros.h"
 
@@ -82,6 +83,10 @@ TEST_CASE("[MCP][Provider] Automation batch composes MCP tools in one session") 
 	CHECK(registry.has_tool("godot.automation.batch"));
 	const Array definitions = registry.get_tool_definitions();
 	REQUIRE(definitions.size() == 3);
+	const Dictionary input_schema = Dictionary(definitions[0]).get("inputSchema", Dictionary());
+	const Dictionary input_properties = input_schema.get("properties", Dictionary());
+	CHECK(PackedStringArray(input_schema.get("required", PackedStringArray())).has("calls"));
+	CHECK(bool(Dictionary(input_properties.get("stopOnError", Dictionary())).get("default", false)));
 	const Dictionary output_schema = Dictionary(definitions[0]).get("outputSchema", Dictionary());
 	const Dictionary output_properties = output_schema.get("properties", Dictionary());
 	CHECK(output_properties.has("results"));
@@ -112,6 +117,34 @@ TEST_CASE("[MCP][Provider] Automation batch composes MCP tools in one session") 
 	automation->unregister_tools();
 	memdelete(recording);
 	memdelete(automation);
+}
+
+TEST_CASE("[MCP][Provider] Automation batch contract normalizes calls before dispatch") {
+	MCPAutomationToolUtils::BatchOptions options;
+	String error_message;
+	Dictionary call;
+	call["name"] = "test.succeed";
+	Dictionary arguments;
+	arguments["calls"] = Array{ call };
+	CHECK(MCPAutomationToolUtils::parse_batch_options(arguments, options, error_message));
+	CHECK(options.calls.size() == 1);
+	CHECK(options.stop_on_error);
+	CHECK(error_message.is_empty());
+
+	arguments["stopOnError"] = false;
+	CHECK(MCPAutomationToolUtils::parse_batch_options(arguments, options, error_message));
+	CHECK_FALSE(options.stop_on_error);
+	arguments["stopOnError"] = "false";
+	CHECK_FALSE(MCPAutomationToolUtils::parse_batch_options(arguments, options, error_message));
+	CHECK(error_message.contains("stopOnError"));
+
+	call["name"] = MCPAutomationToolUtils::batch_tool_name();
+	arguments["calls"] = Array{ call };
+	arguments.erase("stopOnError");
+	CHECK_FALSE(MCPAutomationToolUtils::parse_batch_options(arguments, options, error_message));
+	CHECK(error_message.contains("Recursive"));
+	arguments["calls"] = Array();
+	CHECK_FALSE(MCPAutomationToolUtils::parse_batch_options(arguments, options, error_message));
 }
 
 TEST_CASE("[MCP][Provider] Automation batch validates before mutation and stops on tool errors") {

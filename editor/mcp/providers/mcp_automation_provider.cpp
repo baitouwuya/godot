@@ -30,107 +30,11 @@
 
 #include "mcp_automation_provider.h"
 
+#include "mcp_automation_tool_utils.h"
 #include "mcp_tool_utils.h"
 
 #include "core/mcp/mcp_tool_registry.h"
 #include "core/object/callable_mp.h"
-
-namespace {
-
-constexpr int MAX_BATCH_CALLS = 64;
-constexpr const char *BATCH_TOOL_NAME = "godot.automation.batch";
-
-static Dictionary _batch_schema() {
-	Dictionary call_properties;
-	call_properties["name"] = MCPToolUtils::make_property_schema("string", "Registered MCP tool name.");
-	call_properties["arguments"] = MCPToolUtils::make_property_schema("object", "Arguments passed to the tool.");
-
-	const Dictionary call_item = MCPToolUtils::make_object_schema(call_properties, PackedStringArray{ "name" });
-
-	Dictionary calls = MCPToolUtils::make_property_schema("array", "Ordered MCP tool calls executed in the current session.");
-	calls["items"] = call_item;
-	calls["minItems"] = 1;
-	calls["maxItems"] = MAX_BATCH_CALLS;
-
-	Dictionary stop_on_error = MCPToolUtils::make_property_schema("boolean", "Stop after the first tool error.");
-	stop_on_error["default"] = true;
-
-	Dictionary properties;
-	properties["calls"] = calls;
-	properties["stopOnError"] = stop_on_error;
-
-	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "calls" });
-}
-
-static Dictionary _batch_output_schema() {
-	Dictionary dispatch_error_properties;
-	dispatch_error_properties["code"] = MCPToolUtils::make_property_schema("string", "Stable dispatch error code.");
-	dispatch_error_properties["message"] = MCPToolUtils::make_property_schema("string", "Dispatch error message.");
-	const Dictionary dispatch_error = MCPToolUtils::make_object_schema(dispatch_error_properties, PackedStringArray{ "code", "message" });
-
-	Dictionary result_properties;
-	Dictionary result_index = MCPToolUtils::make_property_schema("integer", "Zero-based batch call index.");
-	result_index["minimum"] = 0;
-	result_properties["index"] = result_index;
-	result_properties["name"] = MCPToolUtils::make_property_schema("string", "Executed MCP tool name.");
-	result_properties["isError"] = MCPToolUtils::make_property_schema("boolean", "Whether the nested tool call failed.");
-	result_properties["structuredContent"] = MCPToolUtils::make_property_schema("object", "Nested tool structured content.");
-	result_properties["error"] = dispatch_error;
-	const Dictionary result_item = MCPToolUtils::make_object_schema(result_properties, PackedStringArray{ "index", "name", "isError" });
-
-	Dictionary results = MCPToolUtils::make_property_schema("array", "Ordered nested tool results.");
-	results["items"] = result_item;
-	results["maxItems"] = MAX_BATCH_CALLS;
-	Dictionary count = MCPToolUtils::make_property_schema("integer", "Batch call count.");
-	count["minimum"] = 0;
-	count["maximum"] = MAX_BATCH_CALLS;
-	Dictionary properties;
-	properties["callCount"] = count;
-	properties["completedCount"] = count;
-	properties["failedCount"] = count;
-	properties["results"] = results;
-	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "callCount", "completedCount", "failedCount", "results" });
-}
-
-static Dictionary _invalid_arguments(const String &p_message) {
-	return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", p_message);
-}
-
-static MCPToolCallContext _make_nested_context(const Dictionary &p_context) {
-	MCPToolCallContext context;
-	context.request_id = p_context.get("requestId", Variant());
-	context.protocol_version = p_context.get("protocolVersion", String());
-	const Variant session = p_context.get("session", Dictionary());
-	const Variant project = p_context.get("project", Dictionary());
-	if (session.get_type() == Variant::DICTIONARY) {
-		context.session = session;
-	}
-	if (project.get_type() == Variant::DICTIONARY) {
-		context.project = project;
-	}
-	return context;
-}
-
-static Dictionary _call_result(int p_index, const String &p_name, const MCPToolRegistry::CallResult &p_call) {
-	Dictionary result;
-	result["index"] = p_index;
-	result["name"] = p_name;
-	if (p_call.status != MCPToolRegistry::CALL_OK) {
-		result["isError"] = true;
-		Dictionary error;
-		error["code"] = "TOOL_DISPATCH_FAILED";
-		error["message"] = p_call.message;
-		result["error"] = error;
-		return result;
-	}
-
-	const bool is_error = bool(p_call.result.get("isError", false));
-	result["isError"] = is_error;
-	result["structuredContent"] = p_call.result.get("structuredContent", Dictionary());
-	return result;
-}
-
-} // namespace
 
 MCPAutomationProvider::~MCPAutomationProvider() {
 	unregister_tools();
@@ -154,8 +58,8 @@ Error MCPAutomationProvider::register_tools(MCPToolRegistry *p_registry, String 
 	}
 
 	const LocalVector<MCPToolUtils::ToolDescriptor> tools{
-		{ BATCH_TOOL_NAME, "Execute an ordered batch through the shared MCP Tool Registry.",
-				_batch_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPAutomationProvider::batch), _batch_output_schema() },
+		{ MCPAutomationToolUtils::batch_tool_name(), "Execute an ordered batch through the shared MCP Tool Registry.",
+				MCPAutomationToolUtils::batch_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPAutomationProvider::batch), MCPAutomationToolUtils::batch_output_schema() },
 	};
 	const Error error = MCPToolUtils::register_tools(p_registry, this, tools, r_error);
 	if (error != OK) {
@@ -178,52 +82,36 @@ Dictionary MCPAutomationProvider::batch(const Dictionary &p_arguments, const Dic
 		return MCPToolUtils::make_error_result("UNAVAILABLE", "The MCP Tool Registry is unavailable.");
 	}
 
-	const Variant calls_value = p_arguments.get("calls", Variant());
-	const Variant stop_value = p_arguments.get("stopOnError", true);
-	if (calls_value.get_type() != Variant::ARRAY || stop_value.get_type() != Variant::BOOL) {
-		return _invalid_arguments("calls must be an array and stopOnError must be boolean.");
-	}
-	const Array calls = calls_value;
-	if (calls.is_empty() || calls.size() > MAX_BATCH_CALLS) {
-		return _invalid_arguments(vformat("calls must contain from 1 to %d entries.", MAX_BATCH_CALLS));
+	MCPAutomationToolUtils::BatchOptions options;
+	String argument_error;
+	if (!MCPAutomationToolUtils::parse_batch_options(p_arguments, options, argument_error)) {
+		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", argument_error);
 	}
 
-	for (int i = 0; i < calls.size(); i++) {
-		if (calls[i].get_type() != Variant::DICTIONARY) {
-			return _invalid_arguments(vformat("calls[%d] must be an object.", i));
-		}
-		const Dictionary call = calls[i];
-		const Variant name_value = call.get("name", Variant());
-		const Variant arguments_value = call.get("arguments", Dictionary());
-		if (name_value.get_type() != Variant::STRING || String(name_value).is_empty() || arguments_value.get_type() != Variant::DICTIONARY) {
-			return _invalid_arguments(vformat("calls[%d] requires a non-empty name and optional arguments object.", i));
-		}
-		const String name = name_value;
-		if (name == BATCH_TOOL_NAME) {
-			return _invalid_arguments("Recursive automation batches are not allowed.");
-		}
+	for (int i = 0; i < options.calls.size(); i++) {
+		const Dictionary call = options.calls[i];
+		const String name = call["name"];
 		if (!tool_registry->has_tool(name)) {
-			return _invalid_arguments(vformat("calls[%d] references an unknown MCP tool: %s", i, name));
+			return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", vformat("calls[%d] references an unknown MCP tool: %s", i, name));
 		}
 	}
 
-	const bool stop_on_error = stop_value;
-	const MCPToolCallContext nested_context = _make_nested_context(p_context);
+	const MCPToolCallContext nested_context = MCPToolUtils::make_tool_call_context(p_context);
 	Array results;
 	int failed_count = 0;
-	for (int i = 0; i < calls.size(); i++) {
-		const Dictionary call = calls[i];
+	for (int i = 0; i < options.calls.size(); i++) {
+		const Dictionary call = options.calls[i];
 		const String name = call["name"];
 		const Dictionary arguments = call.get("arguments", Dictionary());
 		const MCPToolRegistry::CallResult call_result = tool_registry->call_tool(name, arguments, nested_context);
-		const Dictionary result = _call_result(i, name, call_result);
+		const Dictionary result = MCPAutomationToolUtils::make_call_result(i, name, call_result);
 		results.push_back(result);
 		if (!bool(result.get("isError", false))) {
 			continue;
 		}
 
 		failed_count++;
-		if (stop_on_error) {
+		if (options.stop_on_error) {
 			Dictionary details;
 			details["completedCount"] = i;
 			details["failedIndex"] = i;
@@ -234,8 +122,8 @@ Dictionary MCPAutomationProvider::batch(const Dictionary &p_arguments, const Dic
 	}
 
 	Dictionary content;
-	content["callCount"] = calls.size();
-	content["completedCount"] = calls.size();
+	content["callCount"] = options.calls.size();
+	content["completedCount"] = options.calls.size();
 	content["failedCount"] = failed_count;
 	content["results"] = results;
 	return MCPToolUtils::make_success_result(content);

@@ -58,8 +58,8 @@ TEST_CASE("[MCP][Provider] Tool descriptors register in order and roll back only
 	CHECK(registry.get_tool_names() == PackedStringArray{ "test.first", "test.second" });
 	CHECK(registry.unregister_tools_for_owner(provider) == 2);
 	REQUIRE(registry.register_tool(
-			MCPToolUtils::make_tool_definition("test.stable", "Stable tool.", schema, MCPToolUtils::TOOL_READ_ONLY),
-			descriptors[0].handler, provider) == OK);
+					MCPToolUtils::make_tool_definition("test.stable", "Stable tool.", schema, MCPToolUtils::TOOL_READ_ONLY),
+					descriptors[0].handler, provider) == OK);
 
 	const LocalVector<MCPToolUtils::ToolDescriptor> duplicate_batch{
 		{ "test.duplicate", "First duplicate.", schema, MCPToolUtils::TOOL_READ_ONLY, callable_mp(provider, &DescriptorProvider::echo) },
@@ -94,6 +94,25 @@ TEST_CASE("[MCP][Provider] Shared schema builders preserve closed object contrac
 	CHECK_FALSE(bool(empty_schema.get("additionalProperties", true)));
 	const Dictionary open_schema = MCPToolUtils::make_object_schema(Dictionary(), PackedStringArray(), true);
 	CHECK(bool(open_schema.get("additionalProperties", false)));
+}
+
+TEST_CASE("[MCP][Provider] Tool call contexts preserve protocol and scoped metadata") {
+	Dictionary source;
+	source["requestId"] = 42;
+	source["protocolVersion"] = "2025-06-18";
+	source["session"] = Dictionary{ { "sessionId", "session-a" } };
+	source["project"] = Dictionary{ { "projectId", "project-a" } };
+	const MCPToolCallContext context = MCPToolUtils::make_tool_call_context(source);
+	CHECK(int(context.request_id) == 42);
+	CHECK(context.protocol_version == "2025-06-18");
+	CHECK(context.session.get("sessionId", String()) == "session-a");
+	CHECK(context.project.get("projectId", String()) == "project-a");
+
+	source["session"] = "invalid";
+	source["project"] = 1;
+	const MCPToolCallContext sanitized = MCPToolUtils::make_tool_call_context(source);
+	CHECK(sanitized.session.is_empty());
+	CHECK(sanitized.project.is_empty());
 }
 
 TEST_CASE("[MCP][Provider] Tool definitions expose output schemas and standard behavior annotations") {

@@ -45,50 +45,35 @@
 
 namespace {
 
-static Dictionary _property_schema(const String &p_type, const String &p_description) {
-	Dictionary property;
-	property["type"] = p_type;
-	property["description"] = p_description;
-	return property;
-}
-
-static Dictionary _object_schema(const Dictionary &p_properties = Dictionary()) {
-	Dictionary schema;
-	schema["type"] = "object";
-	schema["properties"] = p_properties;
-	schema["additionalProperties"] = false;
-	return schema;
-}
-
 static Dictionary _tree_schema() {
-	Dictionary root_path = _property_schema("string", "Optional node path used as the returned tree root.");
+	Dictionary root_path = MCPToolUtils::make_property_schema("string", "Optional node path used as the returned tree root.");
 	root_path["default"] = ".";
-	Dictionary max_depth = _property_schema("integer", "Maximum descendant depth. -1 uses the safety limit of 64.");
+	Dictionary max_depth = MCPToolUtils::make_property_schema("integer", "Maximum descendant depth. -1 uses the safety limit of 64.");
 	max_depth["minimum"] = -1;
 	max_depth["maximum"] = 64;
 	max_depth["default"] = -1;
-	Dictionary include_internal = _property_schema("boolean", "Include editor-internal child nodes.");
+	Dictionary include_internal = MCPToolUtils::make_property_schema("boolean", "Include editor-internal child nodes.");
 	include_internal["default"] = false;
 
 	Dictionary properties;
 	properties["rootPath"] = root_path;
 	properties["maxDepth"] = max_depth;
 	properties["includeInternal"] = include_internal;
-	return _object_schema(properties);
+	return MCPToolUtils::make_object_schema(properties);
 }
 
 static Dictionary _save_schema() {
-	Dictionary path = _property_schema("string", "Optional res:// path for Save As. Existing scene path is used when omitted.");
+	Dictionary path = MCPToolUtils::make_property_schema("string", "Optional res:// path for Save As. Existing scene path is used when omitted.");
 	Dictionary properties;
 	properties["path"] = path;
-	return _object_schema(properties);
+	return MCPToolUtils::make_object_schema(properties);
 }
 
 static Dictionary _open_schema() {
-	Dictionary path = _property_schema("string", "Project scene path beginning with res://.");
+	Dictionary path = MCPToolUtils::make_property_schema("string", "Project scene path beginning with res://.");
 	Dictionary properties;
 	properties["path"] = path;
-	Dictionary schema = _object_schema(properties);
+	Dictionary schema = MCPToolUtils::make_object_schema(properties);
 	PackedStringArray required;
 	required.push_back("path");
 	schema["required"] = required;
@@ -142,7 +127,7 @@ Error MCPSceneProvider::register_tools(MCPToolRegistry *p_registry, String *r_er
 	}
 	if (err == OK) {
 		err = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.scene.get_selection", "Get nodes selected in the editor.", _object_schema(), MCPToolUtils::TOOL_READ_ONLY),
+				MCPToolUtils::make_tool_definition("godot.scene.get_selection", "Get nodes selected in the editor.", MCPToolUtils::make_object_schema(), MCPToolUtils::TOOL_READ_ONLY),
 				callable_mp(this, &MCPSceneProvider::get_selection), this, r_error);
 	}
 	if (err == OK) {

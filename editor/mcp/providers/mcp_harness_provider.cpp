@@ -36,46 +36,30 @@
 
 namespace {
 
-static Dictionary _property_schema(const String &p_type, const String &p_description) {
-	Dictionary property;
-	property["type"] = p_type;
-	property["description"] = p_description;
-	return property;
-}
-
-static Dictionary _object_schema(const Dictionary &p_properties, const PackedStringArray &p_required) {
-	Dictionary schema;
-	schema["type"] = "object";
-	schema["properties"] = p_properties;
-	schema["required"] = p_required;
-	schema["additionalProperties"] = false;
-	return schema;
-}
-
 static Dictionary _start_schema() {
 	Dictionary properties;
-	Dictionary script = _property_schema("object", "Inline Harness script. Filesystem paths are not accepted.");
+	Dictionary script = MCPToolUtils::make_property_schema("object", "Inline Harness script. Filesystem paths are not accepted.");
 	script["additionalProperties"] = true;
 	properties["script"] = script;
-	Dictionary debugger = _property_schema("integer", "Optional running-project debugger session index.");
+	Dictionary debugger = MCPToolUtils::make_property_schema("integer", "Optional running-project debugger session index.");
 	debugger["minimum"] = 0;
 	properties["debuggerSession"] = debugger;
-	Dictionary generation = _property_schema("integer", "Runtime generation returned by godot.runtime.get_state.");
+	Dictionary generation = MCPToolUtils::make_property_schema("integer", "Runtime generation returned by godot.runtime.get_state.");
 	generation["minimum"] = 1;
 	properties["runtimeGeneration"] = generation;
-	return _object_schema(properties, PackedStringArray{ "script", "runtimeGeneration" });
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "script", "runtimeGeneration" });
 }
 
 static Dictionary _job_schema() {
 	Dictionary properties;
-	properties["jobId"] = _property_schema("string", "Opaque Harness job ID returned by godot.runtime.harness.start.");
-	Dictionary debugger = _property_schema("integer", "Optional running-project debugger session index.");
+	properties["jobId"] = MCPToolUtils::make_property_schema("string", "Opaque Harness job ID returned by godot.runtime.harness.start.");
+	Dictionary debugger = MCPToolUtils::make_property_schema("integer", "Optional running-project debugger session index.");
 	debugger["minimum"] = 0;
 	properties["debuggerSession"] = debugger;
-	Dictionary generation = _property_schema("integer", "Runtime generation that owns the Harness job.");
+	Dictionary generation = MCPToolUtils::make_property_schema("integer", "Runtime generation that owns the Harness job.");
 	generation["minimum"] = 1;
 	properties["runtimeGeneration"] = generation;
-	return _object_schema(properties, PackedStringArray{ "jobId", "runtimeGeneration" });
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "jobId", "runtimeGeneration" });
 }
 
 static MCPToolCallContext _make_context(const Dictionary &p_context) {

@@ -39,6 +39,29 @@ TEST_FORCE_LINK(test_mcp_tool_utils);
 
 namespace TestMCPToolUtils {
 
+TEST_CASE("[MCP][Provider] Shared schema builders preserve closed object contracts") {
+	Dictionary properties;
+	properties["mode"] = MCPToolUtils::make_enum_schema(PackedStringArray{ "summary", "full" }, "Result detail.", "summary");
+	properties["limit"] = MCPToolUtils::make_property_schema("integer", "Maximum results.");
+
+	const Dictionary schema = MCPToolUtils::make_object_schema(properties, PackedStringArray{ "mode" });
+	CHECK(schema.get("type", String()) == "object");
+	CHECK_FALSE(bool(schema.get("additionalProperties", true)));
+	CHECK(PackedStringArray(schema.get("required", PackedStringArray())) == PackedStringArray{ "mode" });
+	const Dictionary stored_properties = schema.get("properties", Dictionary());
+	const Dictionary mode = stored_properties.get("mode", Dictionary());
+	CHECK(mode.get("type", String()) == "string");
+	CHECK(PackedStringArray(mode.get("enum", PackedStringArray())) == PackedStringArray{ "summary", "full" });
+	CHECK(mode.get("default", String()) == "summary");
+	CHECK(mode.get("description", String()) == "Result detail.");
+
+	const Dictionary empty_schema = MCPToolUtils::make_object_schema();
+	CHECK_FALSE(empty_schema.has("required"));
+	CHECK_FALSE(bool(empty_schema.get("additionalProperties", true)));
+	const Dictionary open_schema = MCPToolUtils::make_object_schema(Dictionary(), PackedStringArray(), true);
+	CHECK(bool(open_schema.get("additionalProperties", false)));
+}
+
 TEST_CASE("[MCP][Provider] Tool definitions expose output schemas and standard behavior annotations") {
 	Dictionary input_schema;
 	input_schema["type"] = "object";

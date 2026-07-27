@@ -47,44 +47,28 @@
 
 namespace {
 
-static Dictionary _property_schema(const String &p_type, const String &p_description) {
-	Dictionary property;
-	property["type"] = p_type;
-	property["description"] = p_description;
-	return property;
-}
-
-static Dictionary _object_schema(const Dictionary &p_properties, const PackedStringArray &p_required) {
-	Dictionary schema;
-	schema["type"] = "object";
-	schema["properties"] = p_properties;
-	schema["required"] = p_required;
-	schema["additionalProperties"] = false;
-	return schema;
-}
-
 static Dictionary _path_schema() {
 	Dictionary properties;
-	properties["path"] = _property_schema("string", "Node path relative to the edited scene root. Use '.' for the root.");
+	properties["path"] = MCPToolUtils::make_property_schema("string", "Node path relative to the edited scene root. Use '.' for the root.");
 	PackedStringArray required;
 	required.push_back("path");
-	return _object_schema(properties, required);
+	return MCPToolUtils::make_object_schema(properties, required);
 }
 
 static Dictionary _create_schema() {
 	Dictionary properties;
-	properties["type"] = _property_schema("string", "Instantiable Godot Node class name.");
-	properties["name"] = _property_schema("string", "Optional node name.");
-	properties["parentPath"] = _property_schema("string", "Optional parent path. Defaults to the edited scene root.");
+	properties["type"] = MCPToolUtils::make_property_schema("string", "Instantiable Godot Node class name.");
+	properties["name"] = MCPToolUtils::make_property_schema("string", "Optional node name.");
+	properties["parentPath"] = MCPToolUtils::make_property_schema("string", "Optional parent path. Defaults to the edited scene root.");
 	PackedStringArray required;
 	required.push_back("type");
-	return _object_schema(properties, required);
+	return MCPToolUtils::make_object_schema(properties, required);
 }
 
 static Dictionary _set_property_schema() {
 	Dictionary properties;
-	properties["path"] = _property_schema("string", "Node path relative to the edited scene root.");
-	properties["property"] = _property_schema("string", "Node property name.");
+	properties["path"] = MCPToolUtils::make_property_schema("string", "Node path relative to the edited scene root.");
+	properties["property"] = MCPToolUtils::make_property_schema("string", "Node property name.");
 	Dictionary value;
 	value["description"] = "JSON-native Variant value returned by godot.node.get_properties.";
 	properties["value"] = value;
@@ -92,49 +76,49 @@ static Dictionary _set_property_schema() {
 	required.push_back("path");
 	required.push_back("property");
 	required.push_back("value");
-	return _object_schema(properties, required);
+	return MCPToolUtils::make_object_schema(properties, required);
 }
 
 static Dictionary _attach_script_schema() {
 	Dictionary properties;
-	properties["path"] = _property_schema("string", "Node path relative to the edited scene root.");
-	properties["scriptPath"] = _property_schema("string", "Project script path beginning with res://.");
+	properties["path"] = MCPToolUtils::make_property_schema("string", "Node path relative to the edited scene root.");
+	properties["scriptPath"] = MCPToolUtils::make_property_schema("string", "Project script path beginning with res://.");
 	PackedStringArray required;
 	required.push_back("path");
 	required.push_back("scriptPath");
-	return _object_schema(properties, required);
+	return MCPToolUtils::make_object_schema(properties, required);
 }
 
 static Dictionary _group_schema(bool p_add) {
 	Dictionary properties;
-	properties["path"] = _property_schema("string", "Node path relative to the edited scene root.");
-	properties["group"] = _property_schema("string", "Non-empty scene group name.");
+	properties["path"] = MCPToolUtils::make_property_schema("string", "Node path relative to the edited scene root.");
+	properties["group"] = MCPToolUtils::make_property_schema("string", "Non-empty scene group name.");
 	if (p_add) {
-		properties["persistent"] = _property_schema("boolean", "Whether the group is saved with the scene. Defaults to true.");
+		properties["persistent"] = MCPToolUtils::make_property_schema("boolean", "Whether the group is saved with the scene. Defaults to true.");
 	}
 	PackedStringArray required;
 	required.push_back("path");
 	required.push_back("group");
-	return _object_schema(properties, required);
+	return MCPToolUtils::make_object_schema(properties, required);
 }
 
 static Dictionary _signal_connections_schema() {
 	Dictionary properties;
-	properties["path"] = _property_schema("string", "Source node path relative to the edited scene root.");
-	properties["signal"] = _property_schema("string", "Optional source signal name to filter connections.");
+	properties["path"] = MCPToolUtils::make_property_schema("string", "Source node path relative to the edited scene root.");
+	properties["signal"] = MCPToolUtils::make_property_schema("string", "Optional source signal name to filter connections.");
 	PackedStringArray required;
 	required.push_back("path");
-	return _object_schema(properties, required);
+	return MCPToolUtils::make_object_schema(properties, required);
 }
 
 static Dictionary _signal_mutation_schema(bool p_connect) {
 	Dictionary properties;
-	properties["path"] = _property_schema("string", "Source node path relative to the edited scene root.");
-	properties["signal"] = _property_schema("string", "Signal declared by the source node.");
-	properties["targetPath"] = _property_schema("string", "Target node path relative to the edited scene root.");
-	properties["method"] = _property_schema("string", "Target method name.");
+	properties["path"] = MCPToolUtils::make_property_schema("string", "Source node path relative to the edited scene root.");
+	properties["signal"] = MCPToolUtils::make_property_schema("string", "Signal declared by the source node.");
+	properties["targetPath"] = MCPToolUtils::make_property_schema("string", "Target node path relative to the edited scene root.");
+	properties["method"] = MCPToolUtils::make_property_schema("string", "Target method name.");
 	if (p_connect) {
-		Dictionary flags = _property_schema("integer", "Optional Object connect flags. Only deferred (1) and one-shot (4) are accepted; persistence is automatic.");
+		Dictionary flags = MCPToolUtils::make_property_schema("integer", "Optional Object connect flags. Only deferred (1) and one-shot (4) are accepted; persistence is automatic.");
 		flags["minimum"] = 0;
 		flags["maximum"] = Object::CONNECT_DEFERRED | Object::CONNECT_ONE_SHOT;
 		flags["default"] = 0;
@@ -145,7 +129,7 @@ static Dictionary _signal_mutation_schema(bool p_connect) {
 	required.push_back("signal");
 	required.push_back("targetPath");
 	required.push_back("method");
-	return _object_schema(properties, required);
+	return MCPToolUtils::make_object_schema(properties, required);
 }
 
 static Dictionary _unknown_argument_error(const String &p_name) {

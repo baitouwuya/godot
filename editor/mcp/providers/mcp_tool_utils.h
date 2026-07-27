@@ -44,6 +44,9 @@ enum ToolBehavior {
 };
 
 Dictionary make_tool_definition(const String &p_name, const String &p_description, const Dictionary &p_input_schema, ToolBehavior p_behavior, const Dictionary &p_output_schema = Dictionary());
+Dictionary make_property_schema(const String &p_type, const String &p_description);
+Dictionary make_enum_schema(const PackedStringArray &p_values, const String &p_description, const String &p_default);
+Dictionary make_object_schema(const Dictionary &p_properties = Dictionary(), const PackedStringArray &p_required = PackedStringArray(), bool p_allow_additional_properties = false);
 Dictionary make_property_description(const PropertyInfo &p_property);
 Dictionary make_success_result(const Dictionary &p_structured_content);
 Dictionary make_error_result(const String &p_code, const String &p_message, const Dictionary &p_details = Dictionary());

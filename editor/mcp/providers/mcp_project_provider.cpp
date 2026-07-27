@@ -45,59 +45,43 @@
 
 namespace {
 
-static Dictionary _property_schema(const String &p_type, const String &p_description) {
-	Dictionary property;
-	property["type"] = p_type;
-	property["description"] = p_description;
-	return property;
-}
-
-static Dictionary _object_schema(const Dictionary &p_properties = Dictionary(), const PackedStringArray &p_required = PackedStringArray()) {
-	Dictionary schema;
-	schema["type"] = "object";
-	schema["properties"] = p_properties;
-	schema["required"] = p_required;
-	schema["additionalProperties"] = false;
-	return schema;
-}
-
 static Dictionary _settings_schema() {
 	Dictionary properties;
-	properties["prefix"] = _property_schema("string", "Optional project-setting name prefix.");
-	Dictionary include_values = _property_schema("boolean", "Include safely encodable current values. Defaults to false.");
+	properties["prefix"] = MCPToolUtils::make_property_schema("string", "Optional project-setting name prefix.");
+	Dictionary include_values = MCPToolUtils::make_property_schema("boolean", "Include safely encodable current values. Defaults to false.");
 	include_values["default"] = false;
 	properties["includeValues"] = include_values;
-	Dictionary limit = _property_schema("integer", "Maximum matching settings returned.");
+	Dictionary limit = MCPToolUtils::make_property_schema("integer", "Maximum matching settings returned.");
 	limit["minimum"] = 1;
 	limit["maximum"] = 1024;
 	limit["default"] = 256;
 	properties["limit"] = limit;
-	return _object_schema(properties);
+	return MCPToolUtils::make_object_schema(properties);
 }
 
 static Dictionary _setting_name_schema() {
 	Dictionary properties;
-	properties["name"] = _property_schema("string", "Exact project-setting name.");
-	return _object_schema(properties, PackedStringArray{ "name" });
+	properties["name"] = MCPToolUtils::make_property_schema("string", "Exact project-setting name.");
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "name" });
 }
 
 static Dictionary _set_setting_schema() {
 	Dictionary properties;
-	properties["name"] = _property_schema("string", "Exact project-setting name outside special managed namespaces.");
+	properties["name"] = MCPToolUtils::make_property_schema("string", "Exact project-setting name outside special managed namespaces.");
 	Dictionary value;
 	value["description"] = "JSON-native Variant value.";
 	properties["value"] = value;
-	return _object_schema(properties, PackedStringArray{ "name", "value" });
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "name", "value" });
 }
 
 static Dictionary _autoload_add_schema() {
 	Dictionary properties;
-	properties["name"] = _property_schema("string", "Valid autoload identifier.");
-	properties["path"] = _property_schema("string", "Existing project-local Script or PackedScene path.");
-	Dictionary singleton = _property_schema("boolean", "Expose the autoload as a global singleton. Defaults to true.");
+	properties["name"] = MCPToolUtils::make_property_schema("string", "Valid autoload identifier.");
+	properties["path"] = MCPToolUtils::make_property_schema("string", "Existing project-local Script or PackedScene path.");
+	Dictionary singleton = MCPToolUtils::make_property_schema("boolean", "Expose the autoload as a global singleton. Defaults to true.");
 	singleton["default"] = true;
 	properties["singleton"] = singleton;
-	return _object_schema(properties, PackedStringArray{ "name", "path" });
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "name", "path" });
 }
 
 static void _set_error(String *r_error, const String &p_message) {
@@ -218,12 +202,12 @@ Error MCPProjectProvider::register_tools(MCPToolRegistry *p_registry, String *r_
 	}
 	if (error == OK) {
 		error = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.project.save", "Explicitly save current project settings to project.godot.", _object_schema(), MCPToolUtils::TOOL_DESTRUCTIVE),
+				MCPToolUtils::make_tool_definition("godot.project.save", "Explicitly save current project settings to project.godot.", MCPToolUtils::make_object_schema(), MCPToolUtils::TOOL_DESTRUCTIVE),
 				callable_mp(this, &MCPProjectProvider::save), this, r_error);
 	}
 	if (error == OK) {
 		error = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.autoload.get_all", "List project Autoload entries in load order.", _object_schema(), MCPToolUtils::TOOL_READ_ONLY),
+				MCPToolUtils::make_tool_definition("godot.autoload.get_all", "List project Autoload entries in load order.", MCPToolUtils::make_object_schema(), MCPToolUtils::TOOL_READ_ONLY),
 				callable_mp(this, &MCPProjectProvider::get_autoloads), this, r_error);
 	}
 	if (error == OK) {

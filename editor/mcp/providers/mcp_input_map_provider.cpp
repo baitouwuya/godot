@@ -40,57 +40,41 @@
 
 namespace {
 
-static Dictionary _property_schema(const String &p_type, const String &p_description) {
-	Dictionary property;
-	property["type"] = p_type;
-	property["description"] = p_description;
-	return property;
-}
-
-static Dictionary _object_schema(const Dictionary &p_properties = Dictionary(), const PackedStringArray &p_required = PackedStringArray()) {
-	Dictionary schema;
-	schema["type"] = "object";
-	schema["properties"] = p_properties;
-	schema["required"] = p_required;
-	schema["additionalProperties"] = false;
-	return schema;
-}
-
 static Dictionary _get_actions_schema() {
 	Dictionary properties;
-	properties["prefix"] = _property_schema("string", "Optional action-name prefix.");
-	Dictionary include_builtin = _property_schema("boolean", "Include built-in UI actions. Defaults to false.");
+	properties["prefix"] = MCPToolUtils::make_property_schema("string", "Optional action-name prefix.");
+	Dictionary include_builtin = MCPToolUtils::make_property_schema("boolean", "Include built-in UI actions. Defaults to false.");
 	include_builtin["default"] = false;
 	properties["includeBuiltin"] = include_builtin;
-	Dictionary limit = _property_schema("integer", "Maximum number of actions returned.");
+	Dictionary limit = MCPToolUtils::make_property_schema("integer", "Maximum number of actions returned.");
 	limit["minimum"] = 1;
 	limit["maximum"] = 512;
 	limit["default"] = 128;
 	properties["limit"] = limit;
-	return _object_schema(properties);
+	return MCPToolUtils::make_object_schema(properties);
 }
 
 static Dictionary _set_action_schema() {
 	Dictionary properties;
-	properties["name"] = _property_schema("string", "Project input action name.");
-	Dictionary deadzone = _property_schema("number", "Optional action deadzone between 0 and 1.");
+	properties["name"] = MCPToolUtils::make_property_schema("string", "Project input action name.");
+	Dictionary deadzone = MCPToolUtils::make_property_schema("number", "Optional action deadzone between 0 and 1.");
 	deadzone["minimum"] = 0.0;
 	deadzone["maximum"] = 1.0;
 	properties["deadzone"] = deadzone;
-	Dictionary events = _property_schema("array", "Optional complete event list using the semantic event objects returned by get_actions.");
+	Dictionary events = MCPToolUtils::make_property_schema("array", "Optional complete event list using the semantic event objects returned by get_actions.");
 	events["maxItems"] = 64;
 	Dictionary event_item;
 	event_item["type"] = "object";
 	event_item["additionalProperties"] = true;
 	events["items"] = event_item;
 	properties["events"] = events;
-	return _object_schema(properties, PackedStringArray{ "name" });
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "name" });
 }
 
 static Dictionary _name_schema() {
 	Dictionary properties;
-	properties["name"] = _property_schema("string", "Project input action name.");
-	return _object_schema(properties, PackedStringArray{ "name" });
+	properties["name"] = MCPToolUtils::make_property_schema("string", "Project input action name.");
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "name" });
 }
 
 static void _set_error(String *r_error, const String &p_message) {

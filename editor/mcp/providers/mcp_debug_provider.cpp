@@ -62,51 +62,37 @@ struct Group {
 	uint64_t last_timestamp_usec = 0;
 };
 
-static Dictionary _property_schema(const String &p_type, const String &p_description) {
-	Dictionary property;
-	property["type"] = p_type;
-	property["description"] = p_description;
-	return property;
-}
-
-static Dictionary _enum_schema(const PackedStringArray &p_values, const String &p_description, const String &p_default) {
-	Dictionary property = _property_schema("string", p_description);
-	property["enum"] = p_values;
-	property["default"] = p_default;
-	return property;
-}
-
 static Dictionary _query_schema(bool p_errors_only) {
 	Dictionary properties;
 	PackedStringArray sources;
 	sources.push_back("all");
 	sources.push_back("editor");
 	sources.push_back("runtime");
-	properties["source"] = _enum_schema(sources, "Filter editor or running-project events.", "all");
-	properties["query"] = _property_schema("string", "Optional case-insensitive text filter.");
-	Dictionary since = _property_schema("integer", "Only include events after this sequence.");
+	properties["source"] = MCPToolUtils::make_enum_schema(sources, "Filter editor or running-project events.", "all");
+	properties["query"] = MCPToolUtils::make_property_schema("string", "Optional case-insensitive text filter.");
+	Dictionary since = MCPToolUtils::make_property_schema("integer", "Only include events after this sequence.");
 	since["minimum"] = 0;
 	since["default"] = 0;
 	properties["sinceSequence"] = since;
-	Dictionary limit = _property_schema("integer", "Maximum number of returned groups.");
+	Dictionary limit = MCPToolUtils::make_property_schema("integer", "Maximum number of returned groups.");
 	limit["minimum"] = 1;
 	limit["maximum"] = 500;
 	limit["default"] = p_errors_only ? 50 : 100;
 	properties["limit"] = limit;
-	Dictionary debugger = _property_schema("integer", "Optional running-project debugger session index.");
+	Dictionary debugger = MCPToolUtils::make_property_schema("integer", "Optional running-project debugger session index.");
 	debugger["minimum"] = 0;
 	properties["debuggerSession"] = debugger;
-	Dictionary generation = _property_schema("integer", "Optional running-project generation returned by a previous result.");
+	Dictionary generation = MCPToolUtils::make_property_schema("integer", "Optional running-project generation returned by a previous result.");
 	generation["minimum"] = 1;
 	properties["runtimeGeneration"] = generation;
-	Dictionary deduplicate = _property_schema("boolean", "Group identical non-adjacent events and return occurrence counts.");
+	Dictionary deduplicate = MCPToolUtils::make_property_schema("boolean", "Group identical non-adjacent events and return occurrence counts.");
 	deduplicate["default"] = true;
 	properties["deduplicate"] = deduplicate;
-	Dictionary include_stack = _property_schema("boolean", "Include representative stack frames inline.");
+	Dictionary include_stack = MCPToolUtils::make_property_schema("boolean", "Include representative stack frames inline.");
 	include_stack["default"] = false;
 	properties["includeStack"] = include_stack;
 	if (!p_errors_only) {
-		Dictionary levels = _property_schema("array", "Optional severity filter.");
+		Dictionary levels = MCPToolUtils::make_property_schema("array", "Optional severity filter.");
 		PackedStringArray severity_values;
 		severity_values.push_back("debug");
 		severity_values.push_back("info");
@@ -118,7 +104,7 @@ static Dictionary _query_schema(bool p_errors_only) {
 		levels["items"] = item;
 		properties["levels"] = levels;
 	} else {
-		Dictionary include_warnings = _property_schema("boolean", "Include warnings as well as errors.");
+		Dictionary include_warnings = MCPToolUtils::make_property_schema("boolean", "Include warnings as well as errors.");
 		include_warnings["default"] = true;
 		properties["includeWarnings"] = include_warnings;
 	}
@@ -132,14 +118,14 @@ static Dictionary _query_schema(bool p_errors_only) {
 
 static Dictionary _stack_schema() {
 	Dictionary properties;
-	properties["errorId"] = _property_schema("string", "Stable ID returned by get_logs or get_errors.");
-	Dictionary debugger = _property_schema("integer", "Debugger session index for the latest paused stack.");
+	properties["errorId"] = MCPToolUtils::make_property_schema("string", "Stable ID returned by get_logs or get_errors.");
+	Dictionary debugger = MCPToolUtils::make_property_schema("integer", "Debugger session index for the latest paused stack.");
 	debugger["minimum"] = 0;
 	properties["debuggerSession"] = debugger;
-	Dictionary thread = _property_schema("integer", "Optional paused thread ID within the debugger session.");
+	Dictionary thread = MCPToolUtils::make_property_schema("integer", "Optional paused thread ID within the debugger session.");
 	thread["minimum"] = 0;
 	properties["threadId"] = thread;
-	Dictionary max_frames = _property_schema("integer", "Maximum stack frame count.");
+	Dictionary max_frames = MCPToolUtils::make_property_schema("integer", "Maximum stack frame count.");
 	max_frames["minimum"] = 1;
 	max_frames["maximum"] = 256;
 	max_frames["default"] = 64;
@@ -153,7 +139,7 @@ static Dictionary _stack_schema() {
 
 static Dictionary _latest_log_schema() {
 	Dictionary properties;
-	Dictionary max_lines = _property_schema("integer", "Maximum number of lines read from the latest configured project log.");
+	Dictionary max_lines = MCPToolUtils::make_property_schema("integer", "Maximum number of lines read from the latest configured project log.");
 	max_lines["minimum"] = 1;
 	max_lines["maximum"] = 10000;
 	max_lines["default"] = 200;
@@ -161,7 +147,7 @@ static Dictionary _latest_log_schema() {
 	PackedStringArray views;
 	views.push_back("summary");
 	views.push_back("raw");
-	properties["view"] = _enum_schema(views, "Return a compressed analysis or the bounded raw log tail.", "summary");
+	properties["view"] = MCPToolUtils::make_enum_schema(views, "Return a compressed analysis or the bounded raw log tail.", "summary");
 	Dictionary schema;
 	schema["type"] = "object";
 	schema["properties"] = properties;

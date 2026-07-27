@@ -35,24 +35,6 @@
 
 namespace {
 
-static Dictionary _property_schema(const String &p_type, const String &p_description) {
-	Dictionary property;
-	property["type"] = p_type;
-	property["description"] = p_description;
-	return property;
-}
-
-static Dictionary _object_schema(const Dictionary &p_properties = Dictionary(), const PackedStringArray &p_required = PackedStringArray()) {
-	Dictionary schema;
-	schema["type"] = "object";
-	schema["properties"] = p_properties;
-	if (!p_required.is_empty()) {
-		schema["required"] = p_required;
-	}
-	schema["additionalProperties"] = false;
-	return schema;
-}
-
 static Dictionary _required_schema(const PackedStringArray &p_required) {
 	Dictionary schema;
 	schema["required"] = p_required;
@@ -72,7 +54,7 @@ static Array _document_selector_options() {
 }
 
 static Dictionary _position_integer_schema(const String &p_description) {
-	Dictionary property = _property_schema("integer", p_description);
+	Dictionary property = MCPToolUtils::make_property_schema("integer", p_description);
 	property["minimum"] = 0;
 	property["maximum"] = INT32_MAX;
 	return property;
@@ -80,8 +62,8 @@ static Dictionary _position_integer_schema(const String &p_description) {
 
 static Dictionary _document_properties() {
 	Dictionary properties;
-	properties["path"] = _property_schema("string", "Project res:// path or an absolute .gd path inside the project.");
-	properties["uri"] = _property_schema("string", "File URI resolving to a .gd file inside the project. Use path or uri, not both.");
+	properties["path"] = MCPToolUtils::make_property_schema("string", "Project res:// path or an absolute .gd path inside the project.");
+	properties["uri"] = MCPToolUtils::make_property_schema("string", "File URI resolving to a .gd file inside the project. Use path or uri, not both.");
 	return properties;
 }
 
@@ -96,7 +78,7 @@ static Dictionary _position_properties(bool p_include_position = true) {
 		PackedStringArray position_required;
 		position_required.push_back("line");
 		position_required.push_back("character");
-		properties["position"] = _object_schema(position_properties, position_required);
+		properties["position"] = MCPToolUtils::make_object_schema(position_properties, position_required);
 	}
 	return properties;
 }
@@ -119,7 +101,7 @@ static Dictionary _position_schema(const Dictionary &p_properties) {
 	constraints.push_back(document_constraint);
 	constraints.push_back(position_constraint);
 
-	Dictionary schema = _object_schema(p_properties);
+	Dictionary schema = MCPToolUtils::make_object_schema(p_properties);
 	schema["allOf"] = constraints;
 	return schema;
 }
@@ -129,7 +111,7 @@ static Dictionary _position_schema(const Dictionary &p_properties) {
 namespace MCPGDScriptToolUtils {
 
 Dictionary diagnostics_schema() {
-	Dictionary schema = _object_schema(_document_properties());
+	Dictionary schema = MCPToolUtils::make_object_schema(_document_properties());
 	schema["oneOf"] = _document_selector_options();
 	return schema;
 }
@@ -140,13 +122,13 @@ Dictionary position_schema() {
 
 Dictionary references_schema() {
 	Dictionary properties = _position_properties();
-	properties["includeDeclaration"] = _property_schema("boolean", "Include the declaration in the returned references.");
+	properties["includeDeclaration"] = MCPToolUtils::make_property_schema("boolean", "Include the declaration in the returned references.");
 	return _position_schema(properties);
 }
 
 Dictionary rename_schema() {
 	Dictionary properties = _position_properties();
-	properties["newName"] = _property_schema("string", "The replacement identifier.");
+	properties["newName"] = MCPToolUtils::make_property_schema("string", "The replacement identifier.");
 	Dictionary schema = _position_schema(properties);
 	PackedStringArray required;
 	required.push_back("newName");
@@ -156,28 +138,28 @@ Dictionary rename_schema() {
 
 Dictionary workspace_edit_schema() {
 	Dictionary document_properties;
-	document_properties["path"] = _property_schema("string", "Project GDScript path changed by the WorkspaceEdit.");
-	Dictionary expected_revision = _property_schema("integer", "Expected ScriptEditor revision.");
+	document_properties["path"] = MCPToolUtils::make_property_schema("string", "Project GDScript path changed by the WorkspaceEdit.");
+	Dictionary expected_revision = MCPToolUtils::make_property_schema("integer", "Expected ScriptEditor revision.");
 	expected_revision["minimum"] = 0;
 	expected_revision["maximum"] = uint64_t(UINT32_MAX);
 	document_properties["expected_revision"] = expected_revision;
-	document_properties["expected_sha256"] = _property_schema("string", "Expected authoritative SHA-256.");
-	Dictionary document = _object_schema(document_properties, PackedStringArray{ "path" });
+	document_properties["expected_sha256"] = MCPToolUtils::make_property_schema("string", "Expected authoritative SHA-256.");
+	Dictionary document = MCPToolUtils::make_object_schema(document_properties, PackedStringArray{ "path" });
 	Array expectation_options;
 	expectation_options.push_back(_required_schema(PackedStringArray{ "expected_revision" }));
 	expectation_options.push_back(_required_schema(PackedStringArray{ "expected_sha256" }));
 	document["anyOf"] = expectation_options;
 
 	Dictionary properties;
-	Dictionary edit = _property_schema("object", "LSP WorkspaceEdit containing a changes object.");
+	Dictionary edit = MCPToolUtils::make_property_schema("object", "LSP WorkspaceEdit containing a changes object.");
 	edit["additionalProperties"] = true;
 	properties["edit"] = edit;
-	Dictionary documents = _property_schema("array", "One optimistic revision expectation for every changed document.");
+	Dictionary documents = MCPToolUtils::make_property_schema("array", "One optimistic revision expectation for every changed document.");
 	documents["minItems"] = 1;
 	documents["maxItems"] = 256;
 	documents["items"] = document;
 	properties["documents"] = documents;
-	return _object_schema(properties, PackedStringArray{ "edit", "documents" });
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "edit", "documents" });
 }
 
 bool validate_arguments(const Dictionary &p_arguments, const PackedStringArray &p_allowed, String &r_error) {

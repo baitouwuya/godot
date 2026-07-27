@@ -46,82 +46,66 @@
 
 namespace {
 
-static Dictionary _property_schema(const String &p_type, const String &p_description) {
-	Dictionary property;
-	property["type"] = p_type;
-	property["description"] = p_description;
-	return property;
-}
-
-static Dictionary _object_schema(const Dictionary &p_properties, const PackedStringArray &p_required) {
-	Dictionary schema;
-	schema["type"] = "object";
-	schema["properties"] = p_properties;
-	schema["required"] = p_required;
-	schema["additionalProperties"] = false;
-	return schema;
-}
-
 static Dictionary _path_schema() {
 	Dictionary properties;
-	properties["path"] = _property_schema("string", "Node path relative to the edited scene root.");
+	properties["path"] = MCPToolUtils::make_property_schema("string", "Node path relative to the edited scene root.");
 	PackedStringArray required;
 	required.push_back("path");
-	return _object_schema(properties, required);
+	return MCPToolUtils::make_object_schema(properties, required);
 }
 
 static Dictionary _rename_schema() {
 	Dictionary properties;
-	properties["path"] = _property_schema("string", "Node path relative to the edited scene root.");
-	properties["name"] = _property_schema("string", "New node name.");
+	properties["path"] = MCPToolUtils::make_property_schema("string", "Node path relative to the edited scene root.");
+	properties["name"] = MCPToolUtils::make_property_schema("string", "New node name.");
 	PackedStringArray required;
 	required.push_back("path");
 	required.push_back("name");
-	return _object_schema(properties, required);
+	return MCPToolUtils::make_object_schema(properties, required);
 }
 
 static Dictionary _reparent_schema() {
 	Dictionary properties;
-	properties["path"] = _property_schema("string", "Node path relative to the edited scene root.");
-	properties["parentPath"] = _property_schema("string", "New parent path relative to the edited scene root.");
-	properties["index"] = _property_schema("integer", "Optional 0-based child index. -1 appends the node.");
-	properties["keepGlobalTransform"] = _property_schema("boolean", "Preserve the global transform when supported. Defaults to true.");
+	properties["path"] = MCPToolUtils::make_property_schema("string", "Node path relative to the edited scene root.");
+	properties["parentPath"] = MCPToolUtils::make_property_schema("string", "New parent path relative to the edited scene root.");
+	properties["index"] = MCPToolUtils::make_property_schema("integer", "Optional 0-based child index. -1 appends the node.");
+	properties["keepGlobalTransform"] = MCPToolUtils::make_property_schema("boolean", "Preserve the global transform when supported. Defaults to true.");
 	PackedStringArray required;
 	required.push_back("path");
 	required.push_back("parentPath");
-	return _object_schema(properties, required);
+	return MCPToolUtils::make_object_schema(properties, required);
 }
 
 static Dictionary _move_schema() {
 	Dictionary properties;
-	properties["path"] = _property_schema("string", "Node path relative to the edited scene root.");
-	properties["index"] = _property_schema("integer", "0-based child index. -1 moves the node to the end.");
+	properties["path"] = MCPToolUtils::make_property_schema("string", "Node path relative to the edited scene root.");
+	properties["index"] = MCPToolUtils::make_property_schema("integer", "0-based child index. -1 moves the node to the end.");
 	PackedStringArray required;
 	required.push_back("path");
 	required.push_back("index");
-	return _object_schema(properties, required);
+	return MCPToolUtils::make_object_schema(properties, required);
 }
 
 static Dictionary _duplicate_schema() {
 	Dictionary properties;
-	properties["path"] = _property_schema("string", "Node path to duplicate.");
-	properties["parentPath"] = _property_schema("string", "Optional destination parent. Defaults to the source parent.");
-	properties["name"] = _property_schema("string", "Optional name for the duplicate.");
-	properties["index"] = _property_schema("integer", "Optional 0-based child index. -1 appends the duplicate.");
+	properties["path"] = MCPToolUtils::make_property_schema("string", "Node path to duplicate.");
+	properties["parentPath"] = MCPToolUtils::make_property_schema("string", "Optional destination parent. Defaults to the source parent.");
+	properties["name"] = MCPToolUtils::make_property_schema("string", "Optional name for the duplicate.");
+	properties["index"] = MCPToolUtils::make_property_schema("integer", "Optional 0-based child index. -1 appends the duplicate.");
 	PackedStringArray required;
 	required.push_back("path");
-	return _object_schema(properties, required);
+	return MCPToolUtils::make_object_schema(properties, required);
 }
 
 static Dictionary _instantiate_schema() {
 	Dictionary properties;
-	properties["scenePath"] = _property_schema("string", "PackedScene path beginning with res://.");
-	properties["parentPath"] = _property_schema("string", "Optional destination parent. Defaults to the edited scene root.");
-	properties["name"] = _property_schema("string", "Optional name for the instantiated scene root.");
-	properties["index"] = _property_schema("integer", "Optional 0-based child index. -1 appends the instance.");
+	properties["scenePath"] = MCPToolUtils::make_property_schema("string", "PackedScene path beginning with res://.");
+	properties["parentPath"] = MCPToolUtils::make_property_schema("string", "Optional destination parent. Defaults to the edited scene root.");
+	properties["name"] = MCPToolUtils::make_property_schema("string", "Optional name for the instantiated scene root.");
+	properties["index"] = MCPToolUtils::make_property_schema("integer", "Optional 0-based child index. -1 appends the instance.");
 	PackedStringArray required;
 	required.push_back("scenePath");
-	return _object_schema(properties, required);
+	return MCPToolUtils::make_object_schema(properties, required);
 }
 
 static bool _get_required_string(const Dictionary &p_arguments, const StringName &p_name, String &r_value) {

@@ -40,17 +40,10 @@ namespace {
 constexpr int MAX_BATCH_CALLS = 64;
 constexpr const char *BATCH_TOOL_NAME = "godot.automation.batch";
 
-static Dictionary _property_schema(const String &p_type, const String &p_description) {
-	Dictionary property;
-	property["type"] = p_type;
-	property["description"] = p_description;
-	return property;
-}
-
 static Dictionary _batch_schema() {
 	Dictionary call_properties;
-	call_properties["name"] = _property_schema("string", "Registered MCP tool name.");
-	call_properties["arguments"] = _property_schema("object", "Arguments passed to the tool.");
+	call_properties["name"] = MCPToolUtils::make_property_schema("string", "Registered MCP tool name.");
+	call_properties["arguments"] = MCPToolUtils::make_property_schema("object", "Arguments passed to the tool.");
 
 	PackedStringArray call_required;
 	call_required.push_back("name");
@@ -60,12 +53,12 @@ static Dictionary _batch_schema() {
 	call_item["required"] = call_required;
 	call_item["additionalProperties"] = false;
 
-	Dictionary calls = _property_schema("array", "Ordered MCP tool calls executed in the current session.");
+	Dictionary calls = MCPToolUtils::make_property_schema("array", "Ordered MCP tool calls executed in the current session.");
 	calls["items"] = call_item;
 	calls["minItems"] = 1;
 	calls["maxItems"] = MAX_BATCH_CALLS;
 
-	Dictionary stop_on_error = _property_schema("boolean", "Stop after the first tool error.");
+	Dictionary stop_on_error = MCPToolUtils::make_property_schema("boolean", "Stop after the first tool error.");
 	stop_on_error["default"] = true;
 
 	Dictionary properties;

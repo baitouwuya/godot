@@ -52,19 +52,12 @@
 
 namespace {
 
-static Dictionary _property_schema(const String &p_type, const String &p_description) {
-	Dictionary property;
-	property["type"] = p_type;
-	property["description"] = p_description;
-	return property;
-}
-
 static Dictionary _resource_options_schema(bool p_include_target) {
 	Dictionary properties;
-	properties["source"] = _property_schema("string", "Absolute read-only filesystem path to the source asset.");
-	properties["importer"] = _property_schema("string", "Optional ResourceImporter name.");
+	properties["source"] = MCPToolUtils::make_property_schema("string", "Absolute read-only filesystem path to the source asset.");
+	properties["importer"] = MCPToolUtils::make_property_schema("string", "Optional ResourceImporter name.");
 
-	Dictionary preset = _property_schema("integer", "Optional zero-based importer preset index.");
+	Dictionary preset = MCPToolUtils::make_property_schema("integer", "Optional zero-based importer preset index.");
 	preset["minimum"] = 0;
 	properties["preset"] = preset;
 
@@ -77,8 +70,8 @@ static Dictionary _resource_options_schema(bool p_include_target) {
 	PackedStringArray required;
 	required.push_back("source");
 	if (p_include_target) {
-		properties["target"] = _property_schema("string", "Destination source asset path beginning with res://.");
-		Dictionary overwrite = _property_schema("boolean", "Allow replacing an existing target and its import metadata.");
+		properties["target"] = MCPToolUtils::make_property_schema("string", "Destination source asset path beginning with res://.");
+		Dictionary overwrite = MCPToolUtils::make_property_schema("boolean", "Allow replacing an existing target and its import metadata.");
 		overwrite["default"] = false;
 		properties["overwrite"] = overwrite;
 		required.push_back("target");
@@ -94,7 +87,7 @@ static Dictionary _resource_options_schema(bool p_include_target) {
 
 static Dictionary _resource_path_schema() {
 	Dictionary properties;
-	properties["path"] = _property_schema("string", "Project resource path beginning with res://.");
+	properties["path"] = MCPToolUtils::make_property_schema("string", "Project resource path beginning with res://.");
 	PackedStringArray required;
 	required.push_back("path");
 	Dictionary schema;
@@ -108,7 +101,7 @@ static Dictionary _resource_path_schema() {
 static Dictionary _resource_set_property_schema() {
 	Dictionary schema = _resource_path_schema();
 	Dictionary properties = schema["properties"];
-	properties["property"] = _property_schema("string", "Editable Resource property name.");
+	properties["property"] = MCPToolUtils::make_property_schema("string", "Editable Resource property name.");
 	Dictionary value;
 	value["description"] = "JSON-native Variant value returned by godot.resource.get_properties.";
 	properties["value"] = value;

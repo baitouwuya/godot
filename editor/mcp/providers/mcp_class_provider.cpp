@@ -41,56 +41,33 @@
 
 namespace {
 
-static Dictionary _property_schema(const String &p_type, const String &p_description) {
-	Dictionary property;
-	property["type"] = p_type;
-	property["description"] = p_description;
-	return property;
-}
-
-static Dictionary _enum_schema(const PackedStringArray &p_values, const String &p_description, const String &p_default) {
-	Dictionary property = _property_schema("string", p_description);
-	property["enum"] = p_values;
-	property["default"] = p_default;
-	return property;
-}
-
-static Dictionary _object_schema(const Dictionary &p_properties, const PackedStringArray &p_required) {
-	Dictionary schema;
-	schema["type"] = "object";
-	schema["properties"] = p_properties;
-	schema["required"] = p_required;
-	schema["additionalProperties"] = false;
-	return schema;
-}
-
 static Dictionary _search_schema() {
 	Dictionary properties;
-	properties["query"] = _property_schema("string", "Optional fuzzy class-name query. Empty lists classes alphabetically.");
+	properties["query"] = MCPToolUtils::make_property_schema("string", "Optional fuzzy class-name query. Empty lists classes alphabetically.");
 	PackedStringArray sources;
 	sources.push_back("all");
 	sources.push_back("native");
 	sources.push_back("script");
-	properties["source"] = _enum_schema(sources, "Filter native or script documentation.", "all");
-	properties["inherits"] = _property_schema("string", "Optional base class; matches descendants at any depth.");
-	Dictionary include_deprecated = _property_schema("boolean", "Include deprecated classes.");
+	properties["source"] = MCPToolUtils::make_enum_schema(sources, "Filter native or script documentation.", "all");
+	properties["inherits"] = MCPToolUtils::make_property_schema("string", "Optional base class; matches descendants at any depth.");
+	Dictionary include_deprecated = MCPToolUtils::make_property_schema("boolean", "Include deprecated classes.");
 	include_deprecated["default"] = false;
 	properties["includeDeprecated"] = include_deprecated;
-	Dictionary limit = _property_schema("integer", "Maximum result count from 1 to 100.");
+	Dictionary limit = MCPToolUtils::make_property_schema("integer", "Maximum result count from 1 to 100.");
 	limit["minimum"] = 1;
 	limit["maximum"] = 100;
 	limit["default"] = 20;
 	properties["limit"] = limit;
-	return _object_schema(properties, PackedStringArray());
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray());
 }
 
 static Dictionary _documentation_schema() {
 	Dictionary properties;
-	properties["name"] = _property_schema("string", "Exact documented class name.");
+	properties["name"] = MCPToolUtils::make_property_schema("string", "Exact documented class name.");
 	PackedStringArray views;
 	views.push_back("summary");
 	views.push_back("full");
-	properties["view"] = _enum_schema(views, "full includes member descriptions; summary keeps compact signatures.", "summary");
+	properties["view"] = MCPToolUtils::make_enum_schema(views, "full includes member descriptions; summary keeps compact signatures.", "summary");
 	PackedStringArray sections;
 	sections.push_back("overview");
 	sections.push_back("all");
@@ -103,11 +80,11 @@ static Dictionary _documentation_schema() {
 	sections.push_back("enums");
 	sections.push_back("themeItems");
 	sections.push_back("annotations");
-	properties["section"] = _enum_schema(sections, "Class documentation section.", "overview");
-	properties["member"] = _property_schema("string", "Optional exact member name within the selected section.");
+	properties["section"] = MCPToolUtils::make_enum_schema(sections, "Class documentation section.", "overview");
+	properties["member"] = MCPToolUtils::make_property_schema("string", "Optional exact member name within the selected section.");
 	PackedStringArray required;
 	required.push_back("name");
-	return _object_schema(properties, required);
+	return MCPToolUtils::make_object_schema(properties, required);
 }
 
 static bool _get_string(const Dictionary &p_arguments, const StringName &p_name, const String &p_default,

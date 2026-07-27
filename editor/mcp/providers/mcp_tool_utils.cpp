@@ -73,6 +73,31 @@ Dictionary make_tool_definition(const String &p_name, const String &p_descriptio
 	return definition;
 }
 
+Dictionary make_property_schema(const String &p_type, const String &p_description) {
+	Dictionary property;
+	property["type"] = p_type;
+	property["description"] = p_description;
+	return property;
+}
+
+Dictionary make_enum_schema(const PackedStringArray &p_values, const String &p_description, const String &p_default) {
+	Dictionary property = make_property_schema("string", p_description);
+	property["enum"] = p_values;
+	property["default"] = p_default;
+	return property;
+}
+
+Dictionary make_object_schema(const Dictionary &p_properties, const PackedStringArray &p_required, bool p_allow_additional_properties) {
+	Dictionary schema;
+	schema["type"] = "object";
+	schema["properties"] = p_properties;
+	if (!p_required.is_empty()) {
+		schema["required"] = p_required;
+	}
+	schema["additionalProperties"] = p_allow_additional_properties;
+	return schema;
+}
+
 Dictionary make_property_description(const PropertyInfo &p_property) {
 	Dictionary description;
 	description["name"] = p_property.name;

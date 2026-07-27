@@ -48,30 +48,14 @@
 
 namespace {
 
-static Dictionary _property_schema(const String &p_type, const String &p_description) {
-	Dictionary property;
-	property["type"] = p_type;
-	property["description"] = p_description;
-	return property;
-}
-
-static Dictionary _object_schema(const Dictionary &p_properties, const PackedStringArray &p_required) {
-	Dictionary schema;
-	schema["type"] = "object";
-	schema["properties"] = p_properties;
-	schema["required"] = p_required;
-	schema["additionalProperties"] = false;
-	return schema;
-}
-
 static Dictionary _script_selector_schema(const Dictionary &p_extra_properties = Dictionary()) {
 	Dictionary properties;
-	properties["path"] = _property_schema("string", "External GDScript or built-in res:// resource path.");
-	properties["nodePath"] = _property_schema("string", "Node path in the edited scene whose attached GDScript should be used.");
+	properties["path"] = MCPToolUtils::make_property_schema("string", "External GDScript or built-in res:// resource path.");
+	properties["nodePath"] = MCPToolUtils::make_property_schema("string", "Node path in the edited scene whose attached GDScript should be used.");
 	for (const KeyValue<Variant, Variant> &property : p_extra_properties) {
 		properties[property.key] = property.value;
 	}
-	Dictionary schema = _object_schema(properties, PackedStringArray());
+	Dictionary schema = MCPToolUtils::make_object_schema(properties, PackedStringArray());
 	Dictionary path_required;
 	PackedStringArray path_names;
 	path_names.push_back("path");
@@ -89,17 +73,17 @@ static Dictionary _script_selector_schema(const Dictionary &p_extra_properties =
 
 static Dictionary _create_schema() {
 	Dictionary properties;
-	properties["path"] = _property_schema("string", "New external .gd path beginning with res://.");
-	properties["text"] = _property_schema("string", "Initial UTF-8 GDScript source text.");
+	properties["path"] = MCPToolUtils::make_property_schema("string", "New external .gd path beginning with res://.");
+	properties["text"] = MCPToolUtils::make_property_schema("string", "Initial UTF-8 GDScript source text.");
 	PackedStringArray required;
 	required.push_back("path");
 	required.push_back("text");
-	return _object_schema(properties, required);
+	return MCPToolUtils::make_object_schema(properties, required);
 }
 
 static Dictionary _member_schema() {
 	Dictionary properties;
-	Dictionary kind = _property_schema("string", "Member kind to read.");
+	Dictionary kind = MCPToolUtils::make_property_schema("string", "Member kind to read.");
 	PackedStringArray kinds;
 	kinds.push_back("class");
 	kinds.push_back("property");
@@ -112,25 +96,25 @@ static Dictionary _member_schema() {
 	kinds.push_back("parameter");
 	kind["enum"] = kinds;
 	properties["kind"] = kind;
-	properties["name"] = _property_schema("string", "Exact member name.");
-	properties["owner"] = _property_schema("string", "Optional qualified inner class path, or required method/signal name for a parameter.");
-	properties["classPath"] = _property_schema("string", "Optional qualified inner class path for a parameter, such as Outer.Inner.");
+	properties["name"] = MCPToolUtils::make_property_schema("string", "Exact member name.");
+	properties["owner"] = MCPToolUtils::make_property_schema("string", "Optional qualified inner class path, or required method/signal name for a parameter.");
+	properties["classPath"] = MCPToolUtils::make_property_schema("string", "Optional qualified inner class path for a parameter, such as Outer.Inner.");
 	PackedStringArray required;
 	required.push_back("kind");
 	required.push_back("name");
-	return _object_schema(properties, required);
+	return MCPToolUtils::make_object_schema(properties, required);
 }
 
 static Dictionary _get_schema() {
 	Dictionary properties;
-	Dictionary view = _property_schema("string", "documentation omits implementations; full returns authoritative source lines.");
+	Dictionary view = MCPToolUtils::make_property_schema("string", "documentation omits implementations; full returns authoritative source lines.");
 	PackedStringArray views;
 	views.push_back("documentation");
 	views.push_back("full");
 	view["enum"] = views;
 	view["default"] = "documentation";
 	properties["view"] = view;
-	Dictionary include_comments = _property_schema("boolean", "Include documentation or source comments.");
+	Dictionary include_comments = MCPToolUtils::make_property_schema("boolean", "Include documentation or source comments.");
 	include_comments["default"] = true;
 	properties["includeComments"] = include_comments;
 	properties["member"] = _member_schema();
@@ -140,7 +124,7 @@ static Dictionary _get_schema() {
 static Dictionary _usages_schema() {
 	Dictionary properties;
 	properties["member"] = _member_schema();
-	Dictionary include_declaration = _property_schema("boolean", "Include the selected member declaration in the returned LSP locations.");
+	Dictionary include_declaration = MCPToolUtils::make_property_schema("boolean", "Include the selected member declaration in the returned LSP locations.");
 	include_declaration["default"] = false;
 	properties["includeDeclaration"] = include_declaration;
 	Dictionary schema = _script_selector_schema(properties);
@@ -152,14 +136,14 @@ static Dictionary _usages_schema() {
 
 static Dictionary _edit_schema() {
 	Dictionary properties;
-	properties["text"] = _property_schema("string", "Complete replacement source text.");
+	properties["text"] = MCPToolUtils::make_property_schema("string", "Complete replacement source text.");
 
-	Dictionary expected_revision = _property_schema("integer", "TextEdit revision returned by godot.script.get.");
+	Dictionary expected_revision = MCPToolUtils::make_property_schema("integer", "TextEdit revision returned by godot.script.get.");
 	expected_revision["minimum"] = 0;
 	expected_revision["maximum"] = int64_t(0xFFFFFFFFLL);
 	properties["expected_revision"] = expected_revision;
 
-	Dictionary expected_sha256 = _property_schema("string", "SHA-256 returned by godot.script.get.");
+	Dictionary expected_sha256 = MCPToolUtils::make_property_schema("string", "SHA-256 returned by godot.script.get.");
 	expected_sha256["pattern"] = "^[0-9a-fA-F]{64}$";
 	properties["expected_sha256"] = expected_sha256;
 

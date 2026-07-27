@@ -29,13 +29,9 @@
 
 #include "mcp_input_map_provider.h"
 
-#include "mcp_input_map_event_codec.h"
 #include "mcp_input_map_tool_utils.h"
-#include "mcp_project_settings_mutation.h"
 #include "mcp_tool_utils.h"
 
-#include "core/config/project_settings.h"
-#include "core/input/input_map.h"
 #include "core/mcp/mcp_tool_registry.h"
 #include "core/object/callable_mp.h"
 
@@ -45,57 +41,6 @@ static void _set_error(String *r_error, const String &p_message) {
 	if (r_error) {
 		*r_error = p_message;
 	}
-}
-
-static Dictionary _error(const String &p_code, const String &p_message) {
-	return MCPToolUtils::make_error_result(p_code, p_message);
-}
-
-static Dictionary _make_action(const String &p_setting_name, const Dictionary &p_action) {
-	ProjectSettings *settings = ProjectSettings::get_singleton();
-	Dictionary result;
-	result["name"] = p_setting_name.trim_prefix("input/");
-	result["builtin"] = settings->is_builtin_setting(p_setting_name);
-	result["deadzone"] = p_action.get("deadzone", InputMap::DEFAULT_DEADZONE);
-
-	Array encoded_events;
-	const Array events = p_action.get("events", Array());
-	for (int i = 0; i < events.size(); i++) {
-		const Ref<InputEvent> event = events[i];
-		if (event.is_null()) {
-			continue;
-		}
-		bool supported = false;
-		const Dictionary encoded = MCPInputMapEventCodec::encode(event, supported);
-		Dictionary entry;
-		entry["index"] = i;
-		entry["class"] = event->get_class();
-		entry["display"] = event->as_text();
-		entry["supported"] = supported;
-		if (supported) {
-			for (const KeyValue<Variant, Variant> &field : encoded) {
-				entry[field.key] = field.value;
-			}
-		}
-		encoded_events.push_back(entry);
-	}
-	result["eventCount"] = events.size();
-	result["events"] = encoded_events;
-	return result;
-}
-
-static bool _find_action(const String &p_name, String &r_setting_name, Dictionary &r_action) {
-	r_setting_name = "input/" + p_name;
-	ProjectSettings *settings = ProjectSettings::get_singleton();
-	if (!settings->has_setting(r_setting_name)) {
-		return false;
-	}
-	const Variant value = settings->get_setting(r_setting_name);
-	if (value.get_type() != Variant::DICTIONARY) {
-		return false;
-	}
-	r_action = value;
-	return true;
 }
 
 } // namespace
@@ -142,131 +87,13 @@ void MCPInputMapProvider::unregister_tools() {
 }
 
 Dictionary MCPInputMapProvider::get_actions(const Dictionary &p_arguments, const Dictionary &) {
-	const Variant prefix_value = p_arguments.get("prefix", String());
-	const Variant include_builtin_value = p_arguments.get("includeBuiltin", false);
-	if (prefix_value.get_type() != Variant::STRING || include_builtin_value.get_type() != Variant::BOOL) {
-		return _error("INVALID_ARGUMENTS", "prefix must be a string and includeBuiltin must be boolean.");
-	}
-	int64_t limit = 128;
-	if (!MCPToolUtils::try_get_json_integer(p_arguments.get("limit", 128), 1, 512, limit)) {
-		return _error("INVALID_ARGUMENTS", "limit must be an integer between 1 and 512.");
-	}
-
-	ProjectSettings *settings = ProjectSettings::get_singleton();
-	const String prefix = prefix_value;
-	const bool include_builtin = include_builtin_value;
-	Array actions;
-	int matched_count = 0;
-	List<PropertyInfo> properties;
-	settings->get_property_list(&properties, true);
-	for (const PropertyInfo &property : properties) {
-		const String setting_name = property.name;
-		if (!setting_name.begins_with("input/")) {
-			continue;
-		}
-		const String action_name = setting_name.trim_prefix("input/");
-		if ((!prefix.is_empty() && !action_name.begins_with(prefix)) || (!include_builtin && settings->is_builtin_setting(setting_name))) {
-			continue;
-		}
-		const Variant value = settings->get_setting(setting_name);
-		if (value.get_type() != Variant::DICTIONARY) {
-			continue;
-		}
-		matched_count++;
-		if (actions.size() < limit) {
-			actions.push_back(_make_action(setting_name, value));
-		}
-	}
-
-	Dictionary result;
-	result["prefix"] = prefix;
-	result["includeBuiltin"] = include_builtin;
-	result["matchedCount"] = matched_count;
-	result["returnedCount"] = actions.size();
-	result["truncated"] = matched_count > actions.size();
-	result["actions"] = actions;
-	return MCPToolUtils::make_success_result(result);
+	return input_map_service.get_actions(p_arguments);
 }
 
 Dictionary MCPInputMapProvider::set_action(const Dictionary &p_arguments, const Dictionary &) {
-	String name;
-	if (!MCPInputMapToolUtils::read_name(p_arguments, name)) {
-		return _error("INVALID_ARGUMENTS", "name must be a non-empty action name without '/'.");
-	}
-
-	String setting_name;
-	Dictionary old_action;
-	const bool existed = _find_action(name, setting_name, old_action);
-	ProjectSettings *settings = ProjectSettings::get_singleton();
-	if (existed && settings->is_builtin_setting(setting_name)) {
-		return _error("BUILTIN_ACTION", "Built-in Input Map actions are read-only through MCP: " + name);
-	}
-
-	Dictionary action = existed ? old_action.duplicate(true) : Dictionary();
-	const Variant default_deadzone = existed ? action.get("deadzone", Variant(InputMap::DEFAULT_DEADZONE)) : Variant(InputMap::DEFAULT_DEADZONE);
-	const Variant deadzone_value = p_arguments.get("deadzone", default_deadzone);
-	if (deadzone_value.get_type() != Variant::INT && deadzone_value.get_type() != Variant::FLOAT) {
-		return _error("INVALID_DEADZONE", "deadzone must be numeric.");
-	}
-	const double deadzone = deadzone_value;
-	if (!Math::is_finite(deadzone) || deadzone < 0.0 || deadzone > 1.0) {
-		return _error("INVALID_DEADZONE", "deadzone must be between 0 and 1.");
-	}
-	action["deadzone"] = deadzone;
-
-	if (p_arguments.has("events")) {
-		if (p_arguments["events"].get_type() != Variant::ARRAY) {
-			return _error("INVALID_EVENTS", "events must be an array.");
-		}
-		const Array input_events = p_arguments["events"];
-		if (input_events.size() > 64) {
-			return _error("INVALID_EVENTS", "events cannot contain more than 64 entries.");
-		}
-		Array events;
-		for (int i = 0; i < input_events.size(); i++) {
-			if (input_events[i].get_type() != Variant::DICTIONARY) {
-				return _error("INVALID_EVENTS", vformat("events[%d] must be an object.", i));
-			}
-			Ref<InputEvent> event;
-			String event_error;
-			if (MCPInputMapEventCodec::decode(input_events[i], event, &event_error) != OK) {
-				return _error("INVALID_EVENTS", vformat("events[%d]: %s", i, event_error));
-			}
-			events.push_back(event);
-		}
-		action["events"] = events;
-	} else if (!action.has("events")) {
-		action["events"] = Array();
-	}
-
-	const int old_order = existed ? settings->get_order(setting_name) : -1;
-	MCPProjectSettingsMutation::commit("Set Input Action", setting_name, action, existed, old_action, old_order, MCPProjectSettingsMutation::REFRESH_INPUT_MAP);
-	Dictionary result = _make_action(setting_name, settings->get_setting(setting_name));
-	result["changed"] = !existed || old_action != action;
-	result["saved"] = false;
-	return MCPToolUtils::make_success_result(result);
+	return input_map_service.set_action(p_arguments);
 }
 
 Dictionary MCPInputMapProvider::remove_action(const Dictionary &p_arguments, const Dictionary &) {
-	String name;
-	if (!MCPInputMapToolUtils::read_name(p_arguments, name)) {
-		return _error("INVALID_ARGUMENTS", "name must be a non-empty action name without '/'.");
-	}
-	String setting_name;
-	Dictionary old_action;
-	if (!_find_action(name, setting_name, old_action)) {
-		return _error("ACTION_NOT_FOUND", "Input Map action was not found: " + name);
-	}
-	ProjectSettings *settings = ProjectSettings::get_singleton();
-	if (settings->is_builtin_setting(setting_name)) {
-		return _error("BUILTIN_ACTION", "Built-in Input Map actions cannot be removed through MCP: " + name);
-	}
-	const int old_order = settings->get_order(setting_name);
-	MCPProjectSettingsMutation::commit("Remove Input Action", setting_name, Variant(), true, old_action, old_order, MCPProjectSettingsMutation::REFRESH_INPUT_MAP);
-
-	Dictionary result;
-	result["name"] = name;
-	result["removed"] = true;
-	result["saved"] = false;
-	return MCPToolUtils::make_success_result(result);
+	return input_map_service.remove_action(p_arguments);
 }

@@ -1,9 +1,10 @@
 /**************************************************************************/
-/*  mcp_input_map_provider.h                                              */
+/*  mcp_input_map_service.h                                              */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
 /*                        https://godotengine.org                         */
+/**************************************************************************/
 /* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
 /* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
 /*                                                                        */
@@ -29,26 +30,11 @@
 
 #pragma once
 
-#include "../mcp_editor_feature.h"
-#include "mcp_input_map_service.h"
-
-#include "core/object/object.h"
 #include "core/variant/dictionary.h"
 
-class MCPToolRegistry;
-
-class MCPInputMapProvider : public Object, public MCPEditorFeature {
+class MCPInputMapService {
 public:
-	~MCPInputMapProvider();
-
-	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr) override;
-	void unregister_tools() override;
-
-	Dictionary get_actions(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary set_action(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary remove_action(const Dictionary &p_arguments, const Dictionary &p_context);
-
-private:
-	MCPToolRegistry *tool_registry = nullptr;
-	MCPInputMapService input_map_service;
+	Dictionary get_actions(const Dictionary &p_arguments) const;
+	Dictionary set_action(const Dictionary &p_arguments) const;
+	Dictionary remove_action(const Dictionary &p_arguments) const;
 };

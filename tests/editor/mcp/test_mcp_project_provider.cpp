@@ -30,6 +30,8 @@
 #include "core/config/project_settings.h"
 #include "core/mcp/mcp_tool_registry.h"
 #include "core/os/os.h"
+#include "editor/mcp/mcp_editor_feature.h"
+#include "editor/mcp/providers/mcp_autoload_provider.h"
 #include "editor/mcp/providers/mcp_project_provider.h"
 #include "editor/mcp/providers/mcp_variant_codec.h"
 #include "tests/test_macros.h"
@@ -73,18 +75,39 @@ public:
 	}
 };
 
+TEST_CASE("[MCP][Provider] Project and Autoload features preserve tool order") {
+	MCPToolRegistry registry;
+	MCPEditorFeatureSet feature_set;
+	MCPProjectProvider *project_provider = memnew(MCPProjectProvider);
+	MCPAutoloadProvider *autoload_provider = memnew(MCPAutoloadProvider);
+	REQUIRE(feature_set.add_feature(project_provider) == OK);
+	REQUIRE(feature_set.add_feature(autoload_provider) == OK);
+	REQUIRE(feature_set.register_tools(&registry) == OK);
+
+	const PackedStringArray names = registry.get_tool_names();
+	REQUIRE(names.size() == 8);
+	CHECK(names[0] == "godot.project.get_settings");
+	CHECK(names[4] == "godot.project.save");
+	CHECK(names[5] == "godot.autoload.get_all");
+	CHECK(names[7] == "godot.autoload.remove");
+
+	feature_set.unregister_tools();
+	CHECK(registry.get_tool_names().is_empty());
+	memdelete(autoload_provider);
+	memdelete(project_provider);
+}
+
 TEST_CASE("[MCP][Provider] Project settings are bounded, typed, undo-aware, and explicitly saved") {
 	MCPToolRegistry registry;
 	MCPProjectProvider *provider = memnew(MCPProjectProvider);
 	REQUIRE(provider->register_tools(&registry) == OK);
 	CHECK(provider->register_tools(&registry) == ERR_ALREADY_IN_USE);
 	const PackedStringArray names = registry.get_tool_names();
-	REQUIRE(names.size() == 8);
+	REQUIRE(names.size() == 5);
 	CHECK(names[0] == "godot.project.get_settings");
 	CHECK(names[4] == "godot.project.save");
-	CHECK(names[5] == "godot.autoload.get_all");
 	const Array definitions = registry.get_tool_definitions();
-	REQUIRE(definitions.size() == 8);
+	REQUIRE(definitions.size() == 5);
 	const Dictionary settings_output = Dictionary(definitions[0]).get("outputSchema", Dictionary());
 	CHECK(Dictionary(settings_output.get("properties", Dictionary())).has("settings"));
 	CHECK(PackedStringArray(settings_output.get("required", PackedStringArray())).has("matchedCount"));
@@ -98,12 +121,6 @@ TEST_CASE("[MCP][Provider] Project settings are bounded, typed, undo-aware, and 
 	CHECK(PackedStringArray(set_output.get("required", PackedStringArray())).has("changed"));
 	const Dictionary save_output = Dictionary(definitions[4]).get("outputSchema", Dictionary());
 	CHECK(PackedStringArray(save_output.get("required", PackedStringArray())).has("path"));
-	const Dictionary autoloads_output = Dictionary(definitions[5]).get("outputSchema", Dictionary());
-	CHECK(Dictionary(autoloads_output.get("properties", Dictionary())).has("autoloads"));
-	const Dictionary add_input = Dictionary(definitions[6]).get("inputSchema", Dictionary());
-	CHECK(int(Dictionary(add_input.get("properties", Dictionary())).get("path", Dictionary()).get("minLength", 0)) == 1);
-	const Dictionary remove_output = Dictionary(definitions[7]).get("outputSchema", Dictionary());
-	CHECK(PackedStringArray(remove_output.get("required", PackedStringArray())).has("removed"));
 
 	const String suffix = String::num_int64(OS::get_singleton()->get_process_id()) + "_" + String::num_uint64(OS::get_singleton()->get_ticks_usec());
 	const String setting_name = "mcp_test/settings_" + suffix;
@@ -159,8 +176,22 @@ TEST_CASE("[MCP][Provider] Project settings are bounded, typed, undo-aware, and 
 TEST_CASE("[MCP][Provider] Autoload tools expose and mutate project-local entries without saving") {
 	MCPToolRegistry registry;
 	const String repository_root = OS::get_singleton()->get_executable_path().get_base_dir().get_base_dir();
-	MCPProjectProvider *provider = memnew(MCPProjectProvider(repository_root));
+	MCPAutoloadProvider *provider = memnew(MCPAutoloadProvider(repository_root));
 	REQUIRE(provider->register_tools(&registry) == OK);
+	CHECK(provider->register_tools(&registry) == ERR_ALREADY_IN_USE);
+	const PackedStringArray names = registry.get_tool_names();
+	REQUIRE(names.size() == 3);
+	CHECK(names[0] == "godot.autoload.get_all");
+	CHECK(names[1] == "godot.autoload.add");
+	CHECK(names[2] == "godot.autoload.remove");
+	const Array definitions = registry.get_tool_definitions();
+	REQUIRE(definitions.size() == 3);
+	const Dictionary autoloads_output = Dictionary(definitions[0]).get("outputSchema", Dictionary());
+	CHECK(Dictionary(autoloads_output.get("properties", Dictionary())).has("autoloads"));
+	const Dictionary add_input = Dictionary(definitions[1]).get("inputSchema", Dictionary());
+	CHECK(int(Dictionary(add_input.get("properties", Dictionary())).get("path", Dictionary()).get("minLength", 0)) == 1);
+	const Dictionary remove_output = Dictionary(definitions[2]).get("outputSchema", Dictionary());
+	CHECK(PackedStringArray(remove_output.get("required", PackedStringArray())).has("removed"));
 
 	const String suffix = String::num_int64(OS::get_singleton()->get_process_id()) + "_" + String::num_uint64(OS::get_singleton()->get_ticks_usec());
 	const String autoload_name = "McpAutoload_" + suffix;

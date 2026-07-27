@@ -29,6 +29,7 @@
 
 #include "mcp_editor_plugin.h"
 
+#include "providers/mcp_autoload_provider.h"
 #include "providers/mcp_automation_provider.h"
 #include "providers/mcp_class_provider.h"
 #include "providers/mcp_debug_capture.h"
@@ -336,6 +337,7 @@ MCPEditorPlugin::MCPEditorPlugin() {
 	node_provider = memnew(MCPNodeProvider);
 	node_structure_provider = memnew(MCPNodeStructureProvider);
 	project_provider = memnew(MCPProjectProvider);
+	autoload_provider = memnew(MCPAutoloadProvider);
 	input_map_provider = memnew(MCPInputMapProvider);
 #if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
 	script_provider = memnew(MCPScriptProvider(session_manager));
@@ -357,6 +359,7 @@ MCPEditorPlugin::MCPEditorPlugin() {
 	ERR_FAIL_COND(feature_set.add_feature(node_provider) != OK);
 	ERR_FAIL_COND(feature_set.add_feature(node_structure_provider) != OK);
 	ERR_FAIL_COND(feature_set.add_feature(project_provider) != OK);
+	ERR_FAIL_COND(feature_set.add_feature(autoload_provider) != OK);
 	ERR_FAIL_COND(feature_set.add_feature(input_map_provider) != OK);
 #if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
 	ERR_FAIL_COND(feature_set.add_feature(script_provider) != OK);
@@ -378,6 +381,7 @@ MCPEditorPlugin::~MCPEditorPlugin() {
 	memdelete(script_provider);
 #endif
 	memdelete(input_map_provider);
+	memdelete(autoload_provider);
 	memdelete(project_provider);
 	memdelete(node_structure_provider);
 	memdelete(node_provider);

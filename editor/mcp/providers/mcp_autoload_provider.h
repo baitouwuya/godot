@@ -1,15 +1,16 @@
 /**************************************************************************/
-/*  mcp_project_provider.h                                                */
+/*  mcp_autoload_provider.h                                               */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
 /*                        https://godotengine.org                         */
+/**************************************************************************/
 /* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
 /* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
 /*                                                                        */
 /* Permission is hereby granted, free of charge, to any person obtaining  */
 /* a copy of this software and associated documentation files (the        */
-/* "Software"), to deal in the Software without restriction, including   */
+/* "Software"), to deal in the Software without restriction, including    */
 /* without limitation the rights to use, copy, modify, merge, publish,    */
 /* distribute, sublicense, and/or sell copies of the Software, and to     */
 /* permit persons to whom the Software is furnished to do so, subject to  */
@@ -36,19 +37,19 @@
 
 class MCPToolRegistry;
 
-class MCPProjectProvider : public Object, public MCPEditorFeature {
+class MCPAutoloadProvider : public Object, public MCPEditorFeature {
 public:
-	~MCPProjectProvider();
+	explicit MCPAutoloadProvider(const String &p_project_root = String());
+	~MCPAutoloadProvider();
 
 	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr) override;
 	void unregister_tools() override;
 
-	Dictionary get_settings(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary get_setting(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary set_setting(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary erase_setting(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary save(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary get_autoloads(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary add_autoload(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary remove_autoload(const Dictionary &p_arguments, const Dictionary &p_context);
 
 private:
 	MCPToolRegistry *tool_registry = nullptr;
+	String project_root;
 };

@@ -32,6 +32,7 @@
 #include "core/mcp/mcp_tool_registry.h"
 #include "core/object/script_language.h"
 #include "core/variant/callable.h"
+#include "editor/mcp/providers/mcp_node_inspection.h"
 #include "editor/mcp/providers/mcp_node_provider.h"
 #include "editor/mcp/providers/mcp_node_tool_utils.h"
 #include "editor/mcp/providers/mcp_undo_redo_action.h"
@@ -198,6 +199,32 @@ TEST_CASE("[MCP][Provider] Node tool utilities share signal flag constraints") {
 	CHECK(flags == (Object::CONNECT_DEFERRED | Object::CONNECT_ONE_SHOT));
 	arguments["flags"] = 2;
 	CHECK_FALSE(MCPNodeToolUtils::get_signal_flags(arguments, flags, error));
+}
+
+TEST_CASE("[MCP][Provider] Node inspection returns protocol-neutral property data") {
+	Node *scene_root = memnew(Node);
+	scene_root->set_name("SceneRoot");
+	Node *child = memnew(Node);
+	child->set_name("Child");
+	scene_root->add_child(child);
+	child->set_owner(scene_root);
+
+	Dictionary result;
+	String error;
+	CHECK(MCPNodeInspection::inspect(scene_root, child, result, &error) == OK);
+	CHECK(error.is_empty());
+	CHECK(result.get("path", String()) == "Child");
+	CHECK(result.get("name", String()) == "Child");
+	CHECK(int(result.get("propertyCount", 0)) > 0);
+	CHECK(result.get("properties", Variant()).get_type() == Variant::ARRAY);
+	CHECK(result.get("propertyLayout", Variant()).get_type() == Variant::ARRAY);
+
+	Node *detached = memnew(Node);
+	CHECK(MCPNodeInspection::inspect(scene_root, detached, result, &error) == ERR_INVALID_PARAMETER);
+	CHECK(result.is_empty());
+	CHECK(error.contains("edited scene"));
+	memdelete(detached);
+	memdelete(scene_root);
 }
 
 TEST_CASE("[MCP][Provider] Node tools expose encoded property and undoable mutation schemas") {

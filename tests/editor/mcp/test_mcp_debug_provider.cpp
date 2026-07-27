@@ -99,6 +99,22 @@ TEST_CASE("[MCP][Provider] Debug tools register in order with strict schemas") {
 		CHECK(schema.get("type", String()) == "object");
 		CHECK_FALSE(bool(schema.get("additionalProperties", true)));
 	}
+	const Dictionary logs_output = Dictionary(definitions[0]).get("outputSchema", Dictionary());
+	CHECK(Dictionary(logs_output.get("properties", Dictionary())).has("groups"));
+	CHECK(PackedStringArray(logs_output.get("required", PackedStringArray())).has("nextSequence"));
+	CHECK_FALSE(bool(logs_output.get("additionalProperties", true)));
+	const Dictionary errors_output = Dictionary(definitions[1]).get("outputSchema", Dictionary());
+	CHECK(Dictionary(errors_output.get("properties", Dictionary())).has("errors"));
+	const Dictionary latest_output = Dictionary(definitions[2]).get("outputSchema", Dictionary());
+	CHECK(PackedStringArray(latest_output.get("required", PackedStringArray())).has("shownLines"));
+	CHECK(bool(latest_output.get("additionalProperties", false)));
+	const Dictionary stack_input = Dictionary(definitions[3]).get("inputSchema", Dictionary());
+	CHECK(Array(stack_input.get("oneOf", Array())).size() == 2);
+	const Dictionary stack_error_id = Dictionary(stack_input.get("properties", Dictionary())).get("errorId", Dictionary());
+	CHECK(int(stack_error_id.get("minLength", 0)) == 1);
+	const Dictionary stack_output = Dictionary(definitions[3]).get("outputSchema", Dictionary());
+	CHECK(PackedStringArray(stack_output.get("required", PackedStringArray())).has("frames"));
+	CHECK_FALSE(bool(stack_output.get("additionalProperties", true)));
 
 	Dictionary invalid;
 	invalid["unknown"] = true;

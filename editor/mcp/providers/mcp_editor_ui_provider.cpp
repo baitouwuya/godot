@@ -43,6 +43,12 @@ static Dictionary _string_schema() {
 	return schema;
 }
 
+static Dictionary _required_string_schema() {
+	Dictionary schema = _string_schema();
+	schema["minLength"] = 1;
+	return schema;
+}
+
 static Dictionary _get_actions_schema() {
 	Dictionary boolean_schema;
 	boolean_schema["type"] = "boolean";
@@ -84,8 +90,8 @@ static Dictionary _perform_schema() {
 	action["enum"] = action_enum;
 
 	Dictionary properties;
-	properties["snapshotId"] = _string_schema();
-	properties["targetId"] = _string_schema();
+	properties["snapshotId"] = _required_string_schema();
+	properties["targetId"] = _required_string_schema();
 	properties["action"] = action;
 	Dictionary value;
 	Array value_types;
@@ -107,6 +113,37 @@ static Dictionary _perform_schema() {
 	schema["required"] = required;
 	schema["additionalProperties"] = false;
 	return schema;
+}
+
+static Dictionary _snapshot_output_schema() {
+	Dictionary item;
+	item["type"] = "object";
+	item["additionalProperties"] = true;
+	Dictionary items = MCPToolUtils::make_property_schema("array", "Visible editor UI action targets.");
+	items["items"] = item;
+	items["maxItems"] = 2048;
+	Dictionary count = MCPToolUtils::make_property_schema("integer", "Returned UI target count.");
+	count["minimum"] = 0;
+	count["maximum"] = 2048;
+
+	Dictionary properties;
+	properties["snapshotId"] = MCPToolUtils::make_property_schema("string", "Opaque session-bound UI snapshot ID.");
+	properties["windowTitle"] = MCPToolUtils::make_property_schema("string", "Captured editor window title.");
+	properties["items"] = items;
+	properties["truncated"] = MCPToolUtils::make_property_schema("boolean", "Whether additional UI targets were omitted.");
+	properties["count"] = count;
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "snapshotId", "windowTitle", "items", "truncated", "count" });
+}
+
+static Dictionary _perform_output_schema() {
+	Dictionary action = MCPToolUtils::make_property_schema("string", "Performed semantic UI action.");
+	action["enum"] = PackedStringArray{ "focus", "click", "activate", "select", "set_value", "expand", "collapse", "increment", "decrement" };
+	Dictionary properties;
+	properties["performed"] = MCPToolUtils::make_property_schema("boolean", "Whether the UI action completed.");
+	properties["action"] = action;
+	properties["targetId"] = MCPToolUtils::make_property_schema("string", "Opaque acted-on target ID.");
+	properties["snapshotInvalidated"] = MCPToolUtils::make_property_schema("boolean", "Whether the source snapshot was invalidated.");
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "performed", "action", "targetId", "snapshotInvalidated" });
 }
 
 static void _set_error(String *r_error, const String &p_message) {
@@ -134,16 +171,14 @@ Error MCPEditorUIProvider::register_tools(MCPToolRegistry *p_registry, String *r
 		return ERR_ALREADY_IN_USE;
 	}
 
-	Error error = p_registry->register_tool(
-			MCPToolUtils::make_tool_definition("godot.editor.ui.get_actions", "Inspect the currently visible editor controls and their semantic actions. Returns snapshot-bound opaque target IDs.", _get_actions_schema(), MCPToolUtils::TOOL_DESTRUCTIVE),
-			callable_mp(this, &MCPEditorUIProvider::get_actions), this, r_error);
-	if (error == OK) {
-		error = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.editor.ui.perform", "Perform a semantic action on a target from the latest editor UI snapshot for this MCP session.", _perform_schema(), MCPToolUtils::TOOL_DESTRUCTIVE),
-				callable_mp(this, &MCPEditorUIProvider::perform), this, r_error);
-	}
+	const LocalVector<MCPToolUtils::ToolDescriptor> tools{
+		{ "godot.editor.ui.get_actions", "Inspect the currently visible editor controls and their semantic actions. Returns snapshot-bound opaque target IDs.",
+				_get_actions_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPEditorUIProvider::get_actions), _snapshot_output_schema() },
+		{ "godot.editor.ui.perform", "Perform a semantic action on a target from the latest editor UI snapshot for this MCP session.",
+				_perform_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPEditorUIProvider::perform), _perform_output_schema() },
+	};
+	const Error error = MCPToolUtils::register_tools(p_registry, this, tools, r_error);
 	if (error != OK) {
-		p_registry->unregister_tools_for_owner(this);
 		return error;
 	}
 
@@ -189,16 +224,6 @@ bool MCPEditorUIProvider::_resolve_session(const Dictionary &p_context, String &
 }
 
 Dictionary MCPEditorUIProvider::get_actions(const Dictionary &p_arguments, const Dictionary &p_context) {
-	String unknown;
-	PackedStringArray allowed;
-	allowed.push_back("includeDisabled");
-	allowed.push_back("includeValues");
-	allowed.push_back("maxDepth");
-	allowed.push_back("limit");
-	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed, unknown)) {
-		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "Unknown argument: " + unknown);
-	}
-
 	String session_id;
 	Dictionary error_result;
 	if (!_resolve_session(p_context, session_id, error_result)) {
@@ -236,16 +261,6 @@ Dictionary MCPEditorUIProvider::get_actions(const Dictionary &p_arguments, const
 }
 
 Dictionary MCPEditorUIProvider::perform(const Dictionary &p_arguments, const Dictionary &p_context) {
-	String unknown;
-	PackedStringArray allowed;
-	allowed.push_back("snapshotId");
-	allowed.push_back("targetId");
-	allowed.push_back("action");
-	allowed.push_back("value");
-	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed, unknown)) {
-		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "Unknown argument: " + unknown);
-	}
-
 	const Variant snapshot = p_arguments.get("snapshotId", Variant());
 	const Variant target = p_arguments.get("targetId", Variant());
 	const Variant action = p_arguments.get("action", Variant());

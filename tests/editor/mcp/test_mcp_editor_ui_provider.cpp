@@ -122,6 +122,16 @@ TEST_CASE("[MCP][Provider] Editor UI tools expose strict session-bound schemas")
 		CHECK(schema.get("type", String()) == "object");
 		CHECK_FALSE(bool(schema.get("additionalProperties", true)));
 	}
+	const Dictionary snapshot_output = Dictionary(definitions[0]).get("outputSchema", Dictionary());
+	CHECK(Dictionary(snapshot_output.get("properties", Dictionary())).has("items"));
+	CHECK(PackedStringArray(snapshot_output.get("required", PackedStringArray())).has("snapshotId"));
+	CHECK_FALSE(bool(snapshot_output.get("additionalProperties", true)));
+	const Dictionary perform_input = Dictionary(definitions[1]).get("inputSchema", Dictionary());
+	const Dictionary perform_snapshot_id = Dictionary(perform_input.get("properties", Dictionary())).get("snapshotId", Dictionary());
+	CHECK(int(perform_snapshot_id.get("minLength", 0)) == 1);
+	const Dictionary perform_output = Dictionary(definitions[1]).get("outputSchema", Dictionary());
+	CHECK(PackedStringArray(perform_output.get("required", PackedStringArray())).has("snapshotInvalidated"));
+	CHECK_FALSE(bool(perform_output.get("additionalProperties", true)));
 
 	CHECK(_error_code(_call(registry, "godot.editor.ui.get_actions", Dictionary(), String())) == "MCP_SESSION_REQUIRED");
 	Dictionary invalid;

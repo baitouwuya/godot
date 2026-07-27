@@ -33,6 +33,7 @@
 #include "mcp_node_operations.h"
 #include "mcp_node_tool_utils.h"
 #include "mcp_path_utils.h"
+#include "mcp_scene_tool_utils.h"
 #include "mcp_scene_utils.h"
 #include "mcp_tool_utils.h"
 #include "mcp_undo_redo_action.h"
@@ -145,7 +146,7 @@ Error MCPNodeProvider::register_tools(MCPToolRegistry *p_registry, String *r_err
 			{ "godot.node.get_properties", "Get all native and script-exposed node properties marked for editor use.",
 					MCPNodeToolUtils::path_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPNodeProvider::get_properties), MCPNodeToolUtils::node_properties_output_schema() },
 			{ "godot.node.create", "Create a node through editor undo/redo.",
-					MCPNodeToolUtils::create_schema(), MCPToolUtils::TOOL_ADDITIVE, callable_mp(this, &MCPNodeProvider::create), MCPSceneUtils::make_node_summary_schema() },
+					MCPNodeToolUtils::create_schema(), MCPToolUtils::TOOL_ADDITIVE, callable_mp(this, &MCPNodeProvider::create), MCPSceneToolUtils::node_summary_schema() },
 			{ "godot.node.set_property", "Set a node property through editor undo/redo.",
 					MCPNodeToolUtils::set_property_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPNodeProvider::set_property), MCPNodeToolUtils::node_property_output_schema() },
 			{ "godot.node.attach_script", "Attach a project script through editor undo/redo.",

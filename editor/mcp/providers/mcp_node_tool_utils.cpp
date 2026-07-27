@@ -30,7 +30,7 @@
 
 #include "mcp_node_tool_utils.h"
 
-#include "mcp_scene_utils.h"
+#include "mcp_scene_tool_utils.h"
 #include "mcp_tool_utils.h"
 
 #include "core/object/object.h"
@@ -177,7 +177,7 @@ Dictionary node_properties_output_schema() {
 	array["items"] = MCPToolUtils::make_object_schema(Dictionary(), PackedStringArray(), true);
 	Dictionary layout = MCPToolUtils::make_property_schema("array", "Inspector property and section layout.");
 	layout["items"] = MCPToolUtils::make_object_schema(Dictionary(), PackedStringArray(), true);
-	Dictionary properties = MCPSceneUtils::make_node_summary_schema_properties();
+	Dictionary properties = MCPSceneToolUtils::node_summary_schema_properties();
 	properties["scriptPath"] = MCPToolUtils::make_property_schema("string", "Attached script path.");
 	properties["propertyCount"] = _non_negative_integer_schema("Inspectable property count.");
 	properties["scriptPropertyCount"] = _non_negative_integer_schema("Script-exposed property count.");
@@ -196,7 +196,7 @@ Dictionary node_property_output_schema() {
 }
 
 Dictionary structure_output_schema(bool p_include_previous_path) {
-	Dictionary properties = MCPSceneUtils::make_node_summary_schema_properties();
+	Dictionary properties = MCPSceneToolUtils::node_summary_schema_properties();
 	properties["previousPath"] = MCPToolUtils::make_property_schema("string", "Node path before the operation.");
 	properties["parentPath"] = MCPToolUtils::make_property_schema("string", "Parent node path after the operation.");
 	Dictionary index = MCPToolUtils::make_property_schema("integer", "0-based child index after the operation.");
@@ -210,7 +210,7 @@ Dictionary structure_output_schema(bool p_include_previous_path) {
 }
 
 Dictionary delete_output_schema() {
-	Dictionary deleted_properties = MCPSceneUtils::make_node_summary_schema_properties();
+	Dictionary deleted_properties = MCPSceneToolUtils::node_summary_schema_properties();
 	deleted_properties["parentPath"] = MCPToolUtils::make_property_schema("string", "Parent node path before deletion.");
 	Dictionary index = MCPToolUtils::make_property_schema("integer", "0-based child index before deletion.");
 	index["minimum"] = 0;
@@ -236,13 +236,13 @@ Dictionary groups_output_schema() {
 	Dictionary group = MCPToolUtils::make_object_schema(group_properties, PackedStringArray{ "name", "persistent" });
 	Dictionary groups = MCPToolUtils::make_property_schema("array", "Node scene groups.");
 	groups["items"] = group;
-	Dictionary properties = MCPSceneUtils::make_node_summary_schema_properties();
+	Dictionary properties = MCPSceneToolUtils::node_summary_schema_properties();
 	properties["groups"] = groups;
 	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "path", "name", "type", "childCount", "editable", "internal", "owner", "groups" }, true);
 }
 
 Dictionary group_mutation_output_schema(bool p_include_persistent) {
-	Dictionary properties = MCPSceneUtils::make_node_summary_schema_properties();
+	Dictionary properties = MCPSceneToolUtils::node_summary_schema_properties();
 	properties["group"] = MCPToolUtils::make_property_schema("string", "Affected scene group.");
 	PackedStringArray required{ "path", "name", "type", "childCount", "editable", "internal", "owner", "group" };
 	if (p_include_persistent) {
@@ -261,7 +261,7 @@ Dictionary connections_output_schema() {
 	Dictionary connection = MCPToolUtils::make_object_schema(connection_properties, PackedStringArray{ "signal", "targetPath", "method", "flags" });
 	Dictionary connections = MCPToolUtils::make_property_schema("array", "Persistent signal connections.");
 	connections["items"] = connection;
-	Dictionary properties = MCPSceneUtils::make_node_summary_schema_properties();
+	Dictionary properties = MCPSceneToolUtils::node_summary_schema_properties();
 	properties["connections"] = connections;
 	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "path", "name", "type", "childCount", "editable", "internal", "owner", "connections" }, true);
 }

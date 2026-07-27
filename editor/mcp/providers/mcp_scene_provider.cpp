@@ -30,7 +30,7 @@
 
 #include "mcp_scene_provider.h"
 
-#include "mcp_path_utils.h"
+#include "mcp_scene_tool_utils.h"
 #include "mcp_scene_utils.h"
 #include "mcp_tool_utils.h"
 
@@ -44,70 +44,6 @@
 #include "scene/main/node.h"
 
 namespace {
-
-static Dictionary _tree_schema() {
-	Dictionary root_path = MCPToolUtils::make_property_schema("string", "Optional node path used as the returned tree root.");
-	root_path["default"] = ".";
-	Dictionary max_depth = MCPToolUtils::make_property_schema("integer", "Maximum descendant depth. -1 uses the safety limit of 64.");
-	max_depth["minimum"] = -1;
-	max_depth["maximum"] = 64;
-	max_depth["default"] = -1;
-	Dictionary include_internal = MCPToolUtils::make_property_schema("boolean", "Include editor-internal child nodes.");
-	include_internal["default"] = false;
-
-	Dictionary properties;
-	properties["rootPath"] = root_path;
-	properties["maxDepth"] = max_depth;
-	properties["includeInternal"] = include_internal;
-	return MCPToolUtils::make_object_schema(properties);
-}
-
-static Dictionary _save_schema() {
-	Dictionary path = MCPToolUtils::make_property_schema("string", "Optional res:// path for Save As. Existing scene path is used when omitted.");
-	Dictionary properties;
-	properties["path"] = path;
-	return MCPToolUtils::make_object_schema(properties);
-}
-
-static Dictionary _open_schema() {
-	Dictionary path = MCPToolUtils::make_property_schema("string", "Project scene path beginning with res://.");
-	path["minLength"] = 1;
-	Dictionary properties;
-	properties["path"] = path;
-	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "path" });
-}
-
-static Dictionary _path_result_schema(const String &p_boolean_name, const String &p_boolean_description) {
-	Dictionary properties;
-	properties["path"] = MCPToolUtils::make_property_schema("string", "Normalized project scene path.");
-	properties[p_boolean_name] = MCPToolUtils::make_property_schema("boolean", p_boolean_description);
-	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "path", p_boolean_name });
-}
-
-static Dictionary _tree_output_schema() {
-	Dictionary root;
-	root["type"] = "object";
-	root["additionalProperties"] = true;
-	Dictionary properties;
-	properties["scenePath"] = MCPToolUtils::make_property_schema("string", "Current edited scene path.");
-	properties["root"] = root;
-	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "scenePath", "root" });
-}
-
-static Dictionary _selection_output_schema() {
-	Dictionary count = MCPToolUtils::make_property_schema("integer", "Selected scene node count.");
-	count["minimum"] = 0;
-	Dictionary node;
-	node["type"] = "object";
-	node["additionalProperties"] = true;
-	Dictionary nodes = MCPToolUtils::make_property_schema("array", "Selected scene node summaries.");
-	nodes["items"] = node;
-
-	Dictionary properties;
-	properties["count"] = count;
-	properties["nodes"] = nodes;
-	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "count", "nodes" });
-}
 
 static void _set_error(String *r_error, const String &p_message) {
 	if (r_error) {
@@ -144,13 +80,13 @@ Error MCPSceneProvider::register_tools(MCPToolRegistry *p_registry, String *r_er
 
 	const LocalVector<MCPToolUtils::ToolDescriptor> tools{
 		{ "godot.scene.open", "Open a project scene in the editor.",
-				_open_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPSceneProvider::open), _path_result_schema("opened", "Whether the scene was opened.") },
+				MCPSceneToolUtils::open_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPSceneProvider::open), MCPSceneToolUtils::path_result_schema("opened", "Whether the scene was opened.") },
 		{ "godot.scene.get_tree", "Get the current edited scene tree.",
-				_tree_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPSceneProvider::get_tree), _tree_output_schema() },
+				MCPSceneToolUtils::tree_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPSceneProvider::get_tree), MCPSceneToolUtils::tree_output_schema() },
 		{ "godot.scene.get_selection", "Get nodes selected in the editor.",
-				MCPToolUtils::make_object_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPSceneProvider::get_selection), _selection_output_schema() },
+				MCPToolUtils::make_object_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPSceneProvider::get_selection), MCPSceneToolUtils::selection_output_schema() },
 		{ "godot.scene.save", "Explicitly save the current edited scene.",
-				_save_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPSceneProvider::save), _path_result_schema("saved", "Whether the scene was saved.") },
+				MCPSceneToolUtils::save_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPSceneProvider::save), MCPSceneToolUtils::path_result_schema("saved", "Whether the scene was saved.") },
 	};
 	const Error err = MCPToolUtils::register_tools(p_registry, this, tools, r_error);
 	if (err != OK) {
@@ -170,20 +106,17 @@ void MCPSceneProvider::unregister_tools() {
 }
 
 Dictionary MCPSceneProvider::open(const Dictionary &p_arguments, const Dictionary &) {
-	const Variant path_value = p_arguments.get("path", Variant());
-	if (path_value.get_type() != Variant::STRING || String(path_value).is_empty()) {
-		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "A non-empty string path is required.");
+	String path;
+	String argument_error;
+	if (!MCPSceneToolUtils::parse_open_path(p_arguments, path, argument_error)) {
+		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", argument_error);
 	}
 
 	String scene_path;
 	String absolute_path;
 	String path_error;
-	if (MCPPathUtils::resolve_project_file_path(path_value, scene_path, absolute_path, &path_error) != OK) {
+	if (MCPSceneToolUtils::resolve_scene_file_path(path, scene_path, absolute_path, &path_error) != OK) {
 		return MCPToolUtils::make_error_result("INVALID_PATH", path_error);
-	}
-	const String extension = scene_path.get_extension().to_lower();
-	if (extension != "tscn" && extension != "scn") {
-		return MCPToolUtils::make_error_result("INVALID_PATH", "Scene path must use the .tscn or .scn extension.");
 	}
 	if (!FileAccess::exists(absolute_path)) {
 		return MCPToolUtils::make_error_result("SCENE_NOT_FOUND", "Scene does not exist: " + scene_path);
@@ -208,29 +141,24 @@ Dictionary MCPSceneProvider::open(const Dictionary &p_arguments, const Dictionar
 }
 
 Dictionary MCPSceneProvider::get_tree(const Dictionary &p_arguments, const Dictionary &) {
-	const Variant root_path_value = p_arguments.get("rootPath", ".");
-	const Variant max_depth_value = p_arguments.get("maxDepth", -1);
-	const Variant include_internal_value = p_arguments.get("includeInternal", false);
-	int64_t max_depth = 0;
-	if (root_path_value.get_type() != Variant::STRING ||
-			!MCPToolUtils::try_get_json_integer(max_depth_value, -1, 64, max_depth) ||
-			include_internal_value.get_type() != Variant::BOOL) {
-		return MCPToolUtils::make_error_result(
-				"INVALID_ARGUMENTS", "rootPath must be a string, maxDepth an integer from -1 to 64, and includeInternal a boolean.");
+	MCPSceneToolUtils::TreeOptions options;
+	String argument_error;
+	if (!MCPSceneToolUtils::parse_tree_options(p_arguments, options, argument_error)) {
+		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", argument_error);
 	}
 
 	Node *scene_root = _get_scene_root();
 	if (!scene_root) {
 		return MCPToolUtils::make_error_result("NO_SCENE", "No edited scene is open.");
 	}
-	Node *tree_root = MCPSceneUtils::find_node(scene_root, root_path_value);
+	Node *tree_root = MCPSceneUtils::find_node(scene_root, options.root_path);
 	if (!tree_root) {
-		return MCPToolUtils::make_error_result("NODE_NOT_FOUND", "Node was not found: " + String(root_path_value));
+		return MCPToolUtils::make_error_result("NODE_NOT_FOUND", "Node was not found: " + options.root_path);
 	}
 
 	Dictionary tree;
 	String tree_error;
-	const Error err = MCPSceneUtils::make_tree(scene_root, tree_root, int(max_depth), bool(include_internal_value), tree, &tree_error);
+	const Error err = MCPSceneUtils::make_tree(scene_root, tree_root, options.max_depth, options.include_internal, tree, &tree_error);
 	if (err != OK) {
 		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", tree_error);
 	}
@@ -265,9 +193,10 @@ Dictionary MCPSceneProvider::get_selection(const Dictionary &, const Dictionary 
 }
 
 Dictionary MCPSceneProvider::save(const Dictionary &p_arguments, const Dictionary &) {
-	const Variant path_value = p_arguments.get("path", String());
-	if (path_value.get_type() != Variant::STRING) {
-		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "path must be a string when provided.");
+	String save_path;
+	String argument_error;
+	if (!MCPSceneToolUtils::parse_save_path(p_arguments, save_path, argument_error)) {
+		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", argument_error);
 	}
 
 	EditorInterface *editor_interface = EditorInterface::get_singleton();
@@ -276,7 +205,6 @@ Dictionary MCPSceneProvider::save(const Dictionary &p_arguments, const Dictionar
 		return MCPToolUtils::make_error_result("NO_SCENE", "No edited scene is open.");
 	}
 
-	String save_path = path_value;
 	if (save_path.is_empty()) {
 		save_path = scene_root->get_scene_file_path();
 		if (save_path.is_empty()) {
@@ -290,16 +218,12 @@ Dictionary MCPSceneProvider::save(const Dictionary &p_arguments, const Dictionar
 		String normalized_save_path;
 		String absolute_path;
 		String path_error;
-		const Error path_result = MCPPathUtils::resolve_project_file_path(
+		const Error path_result = MCPSceneToolUtils::resolve_scene_file_path(
 				save_path, normalized_save_path, absolute_path, &path_error);
 		if (path_result != OK) {
 			return MCPToolUtils::make_error_result("INVALID_PATH", path_error);
 		}
 		save_path = normalized_save_path;
-		const String extension = save_path.get_extension().to_lower();
-		if (extension != "tscn" && extension != "scn") {
-			return MCPToolUtils::make_error_result("INVALID_PATH", "Scene path must use the .tscn or .scn extension.");
-		}
 		if (!DirAccess::dir_exists_absolute(absolute_path.get_base_dir())) {
 			return MCPToolUtils::make_error_result("DIRECTORY_NOT_FOUND", "Scene parent directory does not exist.");
 		}

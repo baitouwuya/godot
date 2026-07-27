@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  mcp_scene_utils.h                                                     */
+/*  mcp_scene_tool_utils.h                                                */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -31,20 +31,29 @@
 #pragma once
 
 #include "core/error/error_list.h"
+#include "core/string/ustring.h"
 #include "core/variant/dictionary.h"
 
-class EditorUndoRedoManager;
-class Node;
+namespace MCPSceneToolUtils {
 
-namespace MCPSceneUtils {
+struct TreeOptions {
+	String root_path = ".";
+	int max_depth = -1;
+	bool include_internal = false;
+};
 
-Node *get_edited_scene_root();
-Node *find_node(Node *p_scene_root, const String &p_path);
-String get_relative_path(Node *p_scene_root, Node *p_node);
-bool is_node_in_scene(Node *p_scene_root, Node *p_node);
-bool is_node_editable(Node *p_scene_root, Node *p_node);
-Dictionary make_node_summary(Node *p_scene_root, Node *p_node, bool p_include_internal_children = false);
-Error make_tree(Node *p_scene_root, Node *p_tree_root, int p_max_depth, bool p_include_internal_children, Dictionary &r_tree, String *r_error = nullptr);
-Error begin_undo_action(EditorUndoRedoManager *p_undo_redo, const String &p_name, String *r_error = nullptr);
+Dictionary node_summary_schema_properties();
+Dictionary node_summary_schema(bool p_allow_additional_properties = true);
+Dictionary open_schema();
+Dictionary tree_schema();
+Dictionary save_schema();
+Dictionary path_result_schema(const String &p_boolean_name, const String &p_boolean_description);
+Dictionary tree_output_schema();
+Dictionary selection_output_schema();
 
-} // namespace MCPSceneUtils
+bool parse_open_path(const Dictionary &p_arguments, String &r_path, String &r_error_message);
+bool parse_save_path(const Dictionary &p_arguments, String &r_path, String &r_error_message);
+bool parse_tree_options(const Dictionary &p_arguments, TreeOptions &r_options, String &r_error_message);
+Error resolve_scene_file_path(const String &p_path, String &r_resource_path, String &r_absolute_path, String *r_error = nullptr);
+
+} // namespace MCPSceneToolUtils

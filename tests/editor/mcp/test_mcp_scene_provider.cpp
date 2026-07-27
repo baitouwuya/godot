@@ -30,6 +30,7 @@
 
 #include "core/mcp/mcp_tool_registry.h"
 #include "editor/mcp/providers/mcp_scene_provider.h"
+#include "editor/mcp/providers/mcp_scene_tool_utils.h"
 #include "scene/main/node.h"
 #include "tests/test_macros.h"
 
@@ -62,10 +63,19 @@ TEST_CASE("[MCP][Provider] Scene tools register in order") {
 	CHECK(tree_properties.has("rootPath"));
 	CHECK(tree_properties.has("maxDepth"));
 	CHECK(tree_properties.has("includeInternal"));
+	CHECK(Dictionary(tree_properties.get("rootPath", Dictionary())).get("default", String()) == ".");
+	CHECK(int(Dictionary(tree_properties.get("maxDepth", Dictionary())).get("default", 0)) == -1);
+	CHECK_FALSE(bool(Dictionary(tree_properties.get("includeInternal", Dictionary())).get("default", true)));
 	const Dictionary tree_output = Dictionary(definitions[1]).get("outputSchema", Dictionary());
 	CHECK(PackedStringArray(tree_output.get("required", PackedStringArray())).has("root"));
+	const Dictionary tree_output_properties = tree_output.get("properties", Dictionary());
+	const Dictionary root_output = tree_output_properties.get("root", Dictionary());
+	CHECK(Dictionary(root_output.get("properties", Dictionary())).has("path"));
 	const Dictionary selection_output = Dictionary(definitions[2]).get("outputSchema", Dictionary());
-	CHECK(Dictionary(selection_output.get("properties", Dictionary())).has("nodes"));
+	const Dictionary selection_properties = selection_output.get("properties", Dictionary());
+	CHECK(selection_properties.has("nodes"));
+	const Dictionary selected_nodes = selection_properties.get("nodes", Dictionary());
+	CHECK(Dictionary(Dictionary(selected_nodes.get("items", Dictionary())).get("properties", Dictionary())).has("path"));
 	CHECK_FALSE(bool(selection_output.get("additionalProperties", true)));
 	const Dictionary save_output = Dictionary(definitions[3]).get("outputSchema", Dictionary());
 	CHECK(PackedStringArray(save_output.get("required", PackedStringArray())).has("saved"));
@@ -80,6 +90,52 @@ TEST_CASE("[MCP][Provider] Scene tools register in order") {
 	provider->unregister_tools();
 	CHECK(registry.get_tool_names().is_empty());
 	memdelete(provider);
+}
+
+TEST_CASE("[MCP][Provider] Scene tool contracts parse arguments consistently") {
+	MCPSceneToolUtils::TreeOptions options;
+	String error_message;
+	CHECK(MCPSceneToolUtils::parse_tree_options(Dictionary(), options, error_message));
+	CHECK(options.root_path == ".");
+	CHECK(options.max_depth == -1);
+	CHECK_FALSE(options.include_internal);
+	CHECK(error_message.is_empty());
+
+	Dictionary tree_arguments;
+	tree_arguments["rootPath"] = "Root/Child";
+	tree_arguments["maxDepth"] = 64.0;
+	tree_arguments["includeInternal"] = true;
+	CHECK(MCPSceneToolUtils::parse_tree_options(tree_arguments, options, error_message));
+	CHECK(options.root_path == "Root/Child");
+	CHECK(options.max_depth == 64);
+	CHECK(options.include_internal);
+
+	tree_arguments["maxDepth"] = 1.5;
+	CHECK_FALSE(MCPSceneToolUtils::parse_tree_options(tree_arguments, options, error_message));
+	CHECK(error_message.contains("maxDepth"));
+	tree_arguments["maxDepth"] = -2;
+	CHECK_FALSE(MCPSceneToolUtils::parse_tree_options(tree_arguments, options, error_message));
+	tree_arguments["maxDepth"] = 65;
+	CHECK_FALSE(MCPSceneToolUtils::parse_tree_options(tree_arguments, options, error_message));
+
+	String path;
+	Dictionary open_arguments;
+	open_arguments["path"] = "res://main.tscn";
+	CHECK(MCPSceneToolUtils::parse_open_path(open_arguments, path, error_message));
+	CHECK(path == "res://main.tscn");
+	open_arguments["path"] = String();
+	CHECK_FALSE(MCPSceneToolUtils::parse_open_path(open_arguments, path, error_message));
+	open_arguments["path"] = 1;
+	CHECK_FALSE(MCPSceneToolUtils::parse_open_path(open_arguments, path, error_message));
+
+	CHECK(MCPSceneToolUtils::parse_save_path(Dictionary(), path, error_message));
+	CHECK(path.is_empty());
+	Dictionary save_arguments;
+	save_arguments["path"] = "res://saved.tscn";
+	CHECK(MCPSceneToolUtils::parse_save_path(save_arguments, path, error_message));
+	CHECK(path == "res://saved.tscn");
+	save_arguments["path"] = false;
+	CHECK_FALSE(MCPSceneToolUtils::parse_save_path(save_arguments, path, error_message));
 }
 
 TEST_CASE("[MCP][Provider] Scene tree tool returns the injected edited scene") {

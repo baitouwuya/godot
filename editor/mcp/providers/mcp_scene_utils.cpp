@@ -30,8 +30,6 @@
 
 #include "mcp_scene_utils.h"
 
-#include "mcp_tool_utils.h"
-
 #include "editor/editor_interface.h"
 #include "editor/editor_node.h"
 #include "editor/editor_undo_redo_manager.h"
@@ -108,26 +106,6 @@ String get_relative_path(Node *p_scene_root, Node *p_node) {
 		return String();
 	}
 	return p_scene_root == p_node ? "." : String(p_scene_root->get_path_to(p_node));
-}
-
-Dictionary make_node_summary_schema_properties() {
-	Dictionary child_count = MCPToolUtils::make_property_schema("integer", "Number of child nodes.");
-	child_count["minimum"] = 0;
-	Dictionary properties;
-	properties["path"] = MCPToolUtils::make_property_schema("string", "Node path relative to the edited scene root.");
-	properties["name"] = MCPToolUtils::make_property_schema("string", "Node name.");
-	properties["type"] = MCPToolUtils::make_property_schema("string", "Node class name.");
-	properties["childCount"] = child_count;
-	properties["editable"] = MCPToolUtils::make_property_schema("boolean", "Whether the node can be edited.");
-	properties["internal"] = MCPToolUtils::make_property_schema("boolean", "Whether the node is internal.");
-	properties["owner"] = MCPToolUtils::make_property_schema("string", "Owning scene node path.");
-	properties["sceneFilePath"] = MCPToolUtils::make_property_schema("string", "Packed scene path when the node is an instance.");
-	return properties;
-}
-
-Dictionary make_node_summary_schema(bool p_allow_additional_properties) {
-	return MCPToolUtils::make_object_schema(make_node_summary_schema_properties(),
-			PackedStringArray{ "path", "name", "type", "childCount", "editable", "internal", "owner" }, p_allow_additional_properties);
 }
 
 Dictionary make_node_summary(Node *p_scene_root, Node *p_node, bool p_include_internal_children) {

@@ -31,7 +31,6 @@
 
 #include "mcp_host.h"
 #include "mcp_http_health_probe.h"
-#include "mcp_main_thread_executor.h"
 #include "mcp_project_heartbeat.h"
 #include "providers/mcp_runtime_input_debugger_plugin.h"
 #include "providers/mcp_runtime_observation_debugger_plugin.h"
@@ -81,7 +80,6 @@ class MCPEditorPlugin : public EditorPlugin, public MCPHostSessionObserver {
 	StartupState startup_state = STARTUP_PENDING;
 	MCPToolRegistry tool_registry;
 	MCPHost host;
-	MCPMainThreadExecutor main_thread_executor;
 	MCPProjectHeartbeat project_heartbeat;
 	MCPHTTPProjectLeaseHealthProbe health_probe;
 	MCPProjectIdentity project_identity;
@@ -137,7 +135,6 @@ public:
 	static void configure(bool p_requested, int p_port = 0);
 	static bool is_requested() { return requested; }
 	static MCPEditorPlugin *get_singleton() { return singleton; }
-	static MCPMainThreadExecutor *get_main_thread_executor();
 
 	MCPEditorPlugin();
 	~MCPEditorPlugin() override;

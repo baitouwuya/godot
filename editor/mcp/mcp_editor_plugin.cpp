@@ -73,10 +73,6 @@ void MCPEditorPlugin::configure(bool p_requested, int p_port) {
 	requested_port = p_port;
 }
 
-MCPMainThreadExecutor *MCPEditorPlugin::get_main_thread_executor() {
-	return singleton ? &singleton->main_thread_executor : nullptr;
-}
-
 bool MCPEditorPlugin::_is_headless() const {
 	return !DisplayServer::get_singleton() || DisplayServer::get_singleton()->get_name() == "headless";
 }
@@ -292,7 +288,6 @@ Error MCPEditorPlugin::_start_mcp(String &r_error) {
 	add_debugger_plugin(runtime_observation_debugger_plugin);
 	runtime_observation_debugger_registered = true;
 
-	main_thread_executor.reset();
 	error = project_heartbeat.start(project_lease, discovery_directory, discovery_record);
 	if (error != OK) {
 		r_error = "Unable to start the MCP project heartbeat worker.";
@@ -318,7 +313,6 @@ void MCPEditorPlugin::_stop_mcp() {
 		runtime_input_debugger_registered = false;
 	}
 	debug_capture->stop();
-	main_thread_executor.shutdown();
 	if (host.is_running()) {
 		host.stop();
 	}
@@ -425,7 +419,6 @@ void MCPEditorPlugin::_notification(int p_what) {
 				startup_state = STARTUP_RUNNING;
 			}
 			host.poll();
-			main_thread_executor.poll();
 			runtime_debug_service->process_input();
 			harness_provider->poll();
 			String heartbeat_failure;

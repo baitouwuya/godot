@@ -34,7 +34,11 @@
 
 #if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
 
+#include "core/io/dir_access.h"
+#include "core/io/file_access.h"
 #include "core/mcp/mcp_tool_registry.h"
+#include "editor/mcp/providers/mcp_script_buffer.h"
+#include "editor/mcp/providers/mcp_script_buffer_service.h"
 #include "editor/mcp/providers/mcp_script_provider.h"
 #include "editor/mcp/providers/mcp_script_tool_utils.h"
 
@@ -74,6 +78,41 @@ TEST_CASE("[MCP][Provider] Script tool utilities validate shared member argument
 	member["kind"] = "unsupported";
 	CHECK_FALSE(MCPScriptToolUtils::validate_member_query(member, error));
 	CHECK(error == "member kind is not supported.");
+}
+
+TEST_CASE("[MCP][Provider] Script buffer service creates bounded external scripts") {
+	Error temp_error = OK;
+	Ref<DirAccess> temporary_directory = DirAccess::create_temp("mcp_script_buffer_service", false, &temp_error);
+	REQUIRE(temp_error == OK);
+	REQUIRE(temporary_directory.is_valid());
+	REQUIRE(temporary_directory->make_dir("project") == OK);
+	const String project_root = temporary_directory->get_current_dir().path_join("project");
+	const String source = "extends Node\nvar value: int = 1\n";
+	MCPScriptBufferService service(project_root);
+
+	String resource_path;
+	MCPScriptBufferService::OperationResult result = service.create_external("res://scripts/example.gd", source, resource_path);
+	CHECK(result.is_ok());
+	CHECK(resource_path == "res://scripts/example.gd");
+	CHECK(FileAccess::get_file_as_string(project_root.path_join("scripts/example.gd")) == source);
+
+	result = service.create_external("res://scripts/example.gd", source, resource_path);
+	CHECK(result.error == ERR_ALREADY_EXISTS);
+	CHECK(result.error_code == "SCRIPT_EXISTS");
+	result = service.create_external("res://scripts/example.txt", source, resource_path);
+	CHECK(result.error == ERR_INVALID_PARAMETER);
+	CHECK(result.error_code == "INVALID_PATH");
+
+	MCPScriptBuffer buffer;
+	result = service.open_selected(Dictionary(), buffer);
+	CHECK(result.error == ERR_INVALID_PARAMETER);
+	CHECK(result.error_code == "INVALID_ARGUMENTS");
+	Dictionary conflicting_selector;
+	conflicting_selector["path"] = "res://scripts/example.gd";
+	conflicting_selector["nodePath"] = "Player";
+	result = service.open_selected(conflicting_selector, buffer);
+	CHECK(result.error == ERR_INVALID_PARAMETER);
+	CHECK(result.error_code == "INVALID_ARGUMENTS");
 }
 
 TEST_CASE("[MCP][Provider] Script tools register with optimistic edit requirements") {

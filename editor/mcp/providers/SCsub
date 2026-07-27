@@ -12,6 +12,7 @@ gdscript_lsp_sources = {
     "mcp_gdscript_session_manager.cpp",
     "mcp_gdscript_tool_utils.cpp",
     "mcp_script_analysis_sync.cpp",
+    "mcp_script_buffer_service.cpp",
     "mcp_script_document.cpp",
     "mcp_script_member_selector.cpp",
     "mcp_script_provider.cpp",

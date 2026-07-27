@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  mcp_script_provider.h                                                 */
+/*  mcp_script_buffer_service.h                                          */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,39 +30,28 @@
 
 #pragma once
 
-#include "../mcp_editor_feature.h"
-#include "mcp_gdscript_session_manager.h"
-#include "mcp_script_buffer_service.h"
-
-#include "core/object/object.h"
+#include "core/error/error_list.h"
+#include "core/string/ustring.h"
 #include "core/variant/dictionary.h"
 
-class MCPToolRegistry;
-class GDScriptAnalysisSession;
+class MCPScriptBuffer;
 
-class MCPScriptProvider : public Object, public MCPEditorFeature {
+class MCPScriptBufferService {
 public:
-	static constexpr const char *STALE_REVISION_ERROR_CODE = "stale_revision";
+	struct OperationResult {
+		Error error = OK;
+		String error_code;
+		String message;
 
-	MCPScriptProvider(const Ref<MCPGDScriptSessionManager> &p_session_manager = Ref<MCPGDScriptSessionManager>());
-	~MCPScriptProvider();
+		bool is_ok() const { return error == OK; }
+	};
 
-	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr) override;
-	void unregister_tools() override;
-	void set_session_manager(const Ref<MCPGDScriptSessionManager> &p_session_manager) { session_manager = p_session_manager; }
-	const Ref<MCPGDScriptSessionManager> &get_session_manager() const { return session_manager; }
+	explicit MCPScriptBufferService(const String &p_project_root = String());
 
-	Dictionary create(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary open(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary get(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary usages(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary edit(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary save(const Dictionary &p_arguments, const Dictionary &p_context);
+	OperationResult create_external(const String &p_path, const String &p_text, String &r_resource_path) const;
+	OperationResult open_path(const String &p_path, MCPScriptBuffer &r_buffer) const;
+	OperationResult open_selected(const Dictionary &p_arguments, MCPScriptBuffer &r_buffer) const;
 
 private:
-	MCPToolRegistry *tool_registry = nullptr;
-	Ref<MCPGDScriptSessionManager> session_manager;
-	MCPScriptBufferService buffer_service;
-
-	bool _resolve_analysis_context(const Dictionary &p_context, String &r_session_id, Ref<GDScriptAnalysisSession> &r_session, String &r_error);
+	String project_root;
 };

@@ -32,20 +32,16 @@
 
 #include "mcp_script_analysis_sync.h"
 #include "mcp_script_buffer.h"
+#include "mcp_script_buffer_service.h"
 #include "mcp_script_document.h"
 #include "mcp_script_tool_utils.h"
 #include "mcp_script_usages.h"
-#include "mcp_scene_utils.h"
 #include "mcp_tool_utils.h"
 
-#include "core/io/dir_access.h"
-#include "core/io/file_access.h"
 #include "core/mcp/mcp_tool_registry.h"
 #include "core/object/callable_mp.h"
-#include "editor/file_system/editor_file_system.h"
 #include "modules/gdscript/language_server/gdscript_analysis_session.h"
 #include "modules/gdscript/language_server/gdscript_extend_parser.h"
-#include "scene/main/node.h"
 
 namespace {
 
@@ -58,53 +54,8 @@ static bool _get_required_string(const Dictionary &p_arguments, const StringName
 	return !r_value.is_empty();
 }
 
-static String _buffer_error_code(Error p_error) {
-	switch (p_error) {
-		case ERR_FILE_NOT_FOUND:
-			return "SCRIPT_NOT_FOUND";
-		case ERR_INVALID_PARAMETER:
-		case ERR_PARAMETER_RANGE_ERROR:
-			return "INVALID_PATH";
-		case ERR_UNCONFIGURED:
-			return "EDITOR_UNAVAILABLE";
-		default:
-			return "BUFFER_UNAVAILABLE";
-	}
-}
-
-static Dictionary _open_buffer(const String &p_path, MCPScriptBuffer &r_buffer) {
-	String error;
-	const Error err = MCPScriptBuffer::open(p_path, r_buffer, &error);
-	return err == OK ? Dictionary() : MCPToolUtils::make_error_result(_buffer_error_code(err), error);
-}
-
-static Dictionary _open_selected_buffer(const Dictionary &p_arguments, MCPScriptBuffer &r_buffer) {
-	const Variant path_value = p_arguments.get("path", Variant());
-	const Variant node_path_value = p_arguments.get("nodePath", Variant());
-	const bool has_path = path_value.get_type() == Variant::STRING && !String(path_value).is_empty();
-	const bool has_node_path = node_path_value.get_type() == Variant::STRING && !String(node_path_value).is_empty();
-	if (has_path == has_node_path) {
-		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "Exactly one non-empty path or nodePath is required.");
-	}
-	if (has_path) {
-		return _open_buffer(path_value, r_buffer);
-	}
-
-	Node *scene_root = MCPSceneUtils::get_edited_scene_root();
-	if (!scene_root) {
-		return MCPToolUtils::make_error_result("NO_SCENE", "No edited scene is open.");
-	}
-	Node *node = MCPSceneUtils::find_node(scene_root, node_path_value);
-	if (!node) {
-		return MCPToolUtils::make_error_result("NODE_NOT_FOUND", "Node was not found: " + String(node_path_value));
-	}
-	const Ref<Script> script = node->get_script();
-	if (script.is_null()) {
-		return MCPToolUtils::make_error_result("SCRIPT_NOT_FOUND", "The selected node does not have an attached script.");
-	}
-	String error;
-	const Error err = MCPScriptBuffer::open(script, r_buffer, &error);
-	return err == OK ? Dictionary() : MCPToolUtils::make_error_result(_buffer_error_code(err), error);
+static Dictionary _service_error(const MCPScriptBufferService::OperationResult &p_result, const Dictionary &p_details = Dictionary()) {
+	return MCPToolUtils::make_error_result(p_result.error_code, p_result.message, p_details);
 }
 
 static void _set_error(String *r_error, const String &p_message) {
@@ -177,9 +128,9 @@ void MCPScriptProvider::unregister_tools() {
 
 Dictionary MCPScriptProvider::open(const Dictionary &p_arguments, const Dictionary &) {
 	MCPScriptBuffer buffer;
-	const Dictionary buffer_error = _open_selected_buffer(p_arguments, buffer);
-	if (!buffer_error.is_empty()) {
-		return buffer_error;
+	const MCPScriptBufferService::OperationResult open_result = buffer_service.open_selected(p_arguments, buffer);
+	if (!open_result.is_ok()) {
+		return _service_error(open_result);
 	}
 	Dictionary result = buffer.get_snapshot();
 	result.erase("text");
@@ -203,50 +154,18 @@ Dictionary MCPScriptProvider::create(const Dictionary &p_arguments, const Dictio
 	MCPGDScriptTransientParserCleanup cleanup(session);
 
 	String resource_path;
-	String absolute_path;
-	String path_error;
-	const Error path_result = MCPScriptBuffer::normalize_path(path, resource_path, absolute_path, &path_error);
-	if (path_result != OK) {
-		return MCPToolUtils::make_error_result("INVALID_PATH", path_error);
-	}
-	if (FileAccess::exists(absolute_path)) {
-		return MCPToolUtils::make_error_result("SCRIPT_EXISTS", "Script already exists: " + resource_path);
-	}
-
-	const String parent_directory = absolute_path.get_base_dir();
-	if (!DirAccess::dir_exists_absolute(parent_directory)) {
-		const Error directory_error = DirAccess::make_dir_recursive_absolute(parent_directory);
-		if (directory_error != OK) {
-			return MCPToolUtils::make_error_result("DIRECTORY_CREATE_FAILED", "Could not create the script parent directory.");
-		}
-	}
-
-	Error open_error = OK;
-	Ref<FileAccess> file = FileAccess::open(absolute_path, FileAccess::WRITE, &open_error);
-	if (file.is_null() || open_error != OK) {
-		return MCPToolUtils::make_error_result("FILE_OPEN_FAILED", "Could not create script: " + resource_path);
-	}
-	if (!file->store_string(text)) {
-		file.unref();
-		DirAccess::remove_absolute(absolute_path);
-		return MCPToolUtils::make_error_result("FILE_WRITE_FAILED", "Could not write script: " + resource_path);
-	}
-	file->flush();
-	file.unref();
-	if (EditorFileSystem::get_singleton()) {
-		EditorFileSystem::get_singleton()->update_file(resource_path);
+	const MCPScriptBufferService::OperationResult create_result = buffer_service.create_external(path, text, resource_path);
+	if (!create_result.is_ok()) {
+		return _service_error(create_result);
 	}
 
 	MCPScriptBuffer buffer;
-	const Dictionary buffer_error = _open_buffer(resource_path, buffer);
-	if (!buffer_error.is_empty()) {
+	const MCPScriptBufferService::OperationResult open_result = buffer_service.open_path(resource_path, buffer);
+	if (!open_result.is_ok()) {
 		Dictionary details;
 		details["path"] = resource_path;
 		details["created"] = true;
-		const Dictionary structured = buffer_error.get("structuredContent", Dictionary());
-		const Dictionary error = structured.get("error", Dictionary());
-		return MCPToolUtils::make_error_result(error.get("code", "BUFFER_UNAVAILABLE"),
-				error.get("message", "The script was created but its editor buffer is unavailable."), details);
+		return _service_error(open_result, details);
 	}
 
 	Dictionary result = buffer.get_snapshot();
@@ -276,9 +195,9 @@ Dictionary MCPScriptProvider::get(const Dictionary &p_arguments, const Dictionar
 	MCPGDScriptTransientParserCleanup cleanup(session);
 
 	MCPScriptBuffer buffer;
-	const Dictionary buffer_error = _open_selected_buffer(p_arguments, buffer);
-	if (!buffer_error.is_empty()) {
-		return buffer_error;
+	const MCPScriptBufferService::OperationResult open_result = buffer_service.open_selected(p_arguments, buffer);
+	if (!open_result.is_ok()) {
+		return _service_error(open_result);
 	}
 	Dictionary result = buffer.get_snapshot();
 	if (MCPScriptAnalysisSync::sync_snapshot(session_manager, session_id, result, nullptr, &analysis_error) != OK) {
@@ -324,9 +243,9 @@ Dictionary MCPScriptProvider::usages(const Dictionary &p_arguments, const Dictio
 	MCPGDScriptTransientParserCleanup cleanup(session);
 
 	MCPScriptBuffer buffer;
-	const Dictionary buffer_error = _open_selected_buffer(p_arguments, buffer);
-	if (!buffer_error.is_empty()) {
-		return buffer_error;
+	const MCPScriptBufferService::OperationResult open_result = buffer_service.open_selected(p_arguments, buffer);
+	if (!open_result.is_ok()) {
+		return _service_error(open_result);
 	}
 	Dictionary result = buffer.get_snapshot();
 	if (MCPScriptAnalysisSync::sync_snapshot(session_manager, session_id, result, nullptr, &analysis_error) != OK) {
@@ -375,9 +294,9 @@ Dictionary MCPScriptProvider::edit(const Dictionary &p_arguments, const Dictiona
 	MCPGDScriptTransientParserCleanup cleanup(session);
 
 	MCPScriptBuffer buffer;
-	const Dictionary buffer_error = _open_selected_buffer(p_arguments, buffer);
-	if (!buffer_error.is_empty()) {
-		return buffer_error;
+	const MCPScriptBufferService::OperationResult open_result = buffer_service.open_selected(p_arguments, buffer);
+	if (!open_result.is_ok()) {
+		return _service_error(open_result);
 	}
 
 	bool changed = false;
@@ -415,9 +334,9 @@ Dictionary MCPScriptProvider::save(const Dictionary &p_arguments, const Dictiona
 	MCPGDScriptTransientParserCleanup cleanup(session);
 
 	MCPScriptBuffer buffer;
-	const Dictionary buffer_error = _open_selected_buffer(p_arguments, buffer);
-	if (!buffer_error.is_empty()) {
-		return buffer_error;
+	const MCPScriptBufferService::OperationResult open_result = buffer_service.open_selected(p_arguments, buffer);
+	if (!open_result.is_ok()) {
+		return _service_error(open_result);
 	}
 	const Dictionary before_save = buffer.get_snapshot();
 	String save_error;

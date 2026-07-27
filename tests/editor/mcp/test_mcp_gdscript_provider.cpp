@@ -39,6 +39,7 @@
 #include "core/mcp/mcp_tool_registry.h"
 #include "editor/mcp/providers/mcp_gdscript_provider.h"
 #include "editor/mcp/providers/mcp_gdscript_request_parser.h"
+#include "editor/mcp/providers/mcp_gdscript_result_builder.h"
 #include "editor/mcp/providers/mcp_gdscript_tool_utils.h"
 
 #endif
@@ -157,6 +158,33 @@ TEST_CASE("[MCP][Provider] GDScript request parser adapts document selectors to 
 	arguments.erase("line");
 	CHECK(parser.parse_position(arguments, path, position, &error) == ERR_INVALID_PARAMETER);
 	CHECK(error == "Either position or both line and character are required.");
+}
+
+TEST_CASE("[MCP][Provider] GDScript result builder preserves analysis metadata and bounded locations") {
+	Ref<GDScriptWorkspace> workspace;
+	workspace.instantiate();
+	Ref<GDScriptAnalysisSession> session = memnew(GDScriptAnalysisSession(1, workspace));
+	const String path = "res://result_builder.gd";
+	const String source = "var value: int = 1\n";
+	REQUIRE(session->open_document(path, source, LSP::LanguageId::GDSCRIPT, 7) == OK);
+	MCPGDScriptResultBuilder builder(workspace, session, path);
+
+	const Dictionary metadata = builder.metadata();
+	CHECK(metadata.get("path", String()) == path);
+	CHECK(int64_t(metadata.get("revision", -1)) == 7);
+	CHECK(metadata.get("sha256", String()) == source.sha256_text());
+	CHECK(metadata.get("sourceState", String()) == "open");
+
+	LSP::Location location;
+	location.uri = workspace->get_file_uri(path);
+	location.range = LSP::Range(0, 4, 0, 9);
+	const Dictionary locations = builder.locations(Vector<LSP::Location>{ location });
+	CHECK(bool(locations.get("found", false)));
+	CHECK(Array(locations.get("locations", Array())).size() == 1);
+
+	const Dictionary no_hover = builder.hover(nullptr);
+	CHECK_FALSE(bool(no_hover.get("found", true)));
+	CHECK(no_hover.get("hover", "unexpected").get_type() == Variant::NIL);
 }
 
 TEST_CASE("[MCP][Provider] GDScript semantic tools use injected analysis sessions") {

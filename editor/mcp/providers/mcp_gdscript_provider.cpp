@@ -31,6 +31,7 @@
 #include "mcp_gdscript_provider.h"
 
 #include "mcp_gdscript_request_parser.h"
+#include "mcp_gdscript_result_builder.h"
 #include "mcp_gdscript_tool_utils.h"
 #include "mcp_script_analysis_sync.h"
 #include "mcp_tool_utils.h"
@@ -40,8 +41,6 @@
 #include "core/mcp/mcp_tool_registry.h"
 #include "core/object/callable_mp.h"
 #include "core/object/script_language.h"
-
-#include "modules/gdscript/language_server/gdscript_extend_parser.h"
 
 namespace {
 
@@ -177,26 +176,6 @@ bool MCPGDScriptProvider::_parse_reference_position(const Dictionary &p_argument
 	return parser.parse_reference_position(p_arguments, r_path, r_params, &r_error) == OK;
 }
 
-Dictionary MCPGDScriptProvider::_metadata(const Ref<GDScriptAnalysisSession> &p_session, const String &p_path) const {
-	Dictionary result;
-	result["path"] = p_path;
-	Ref<GDScriptWorkspace> workspace = _get_workspace();
-	if (workspace.is_valid()) {
-		result["uri"] = workspace->get_file_uri(p_path);
-	}
-	const GDScriptAnalysisSession::DocumentState *document = p_session->get_document(p_path);
-	result["analysisRevision"] = document ? document->revision : p_session->get_revision();
-	if (document) {
-		if (document->source_state == GDScriptAnalysisSession::SOURCE_STATE_OPEN_DOCUMENT && document->client_version >= 0) {
-			result["revision"] = document->client_version;
-		}
-		result["sha256"] = document->sha256;
-		result["sourceState"] = document->source_state == GDScriptAnalysisSession::SOURCE_STATE_OPEN_DOCUMENT ? "open" : "disk";
-		result["clientVersion"] = document->client_version;
-	}
-	return result;
-}
-
 Dictionary MCPGDScriptProvider::_invalid_arguments(const String &p_message) const {
 	return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", p_message);
 }
@@ -209,66 +188,6 @@ Dictionary MCPGDScriptProvider::_script_not_found(const String &p_path) const {
 	Dictionary details;
 	details["path"] = p_path;
 	return MCPToolUtils::make_error_result("SCRIPT_NOT_FOUND", "GDScript could not be loaded: " + p_path, details);
-}
-
-Dictionary MCPGDScriptProvider::_locations_result(const Ref<GDScriptAnalysisSession> &p_session, const String &p_path, const Vector<LSP::Location> &p_locations, const LSP::DocumentSymbol *p_symbol) const {
-	Dictionary result = _metadata(p_session, p_path);
-	Array locations;
-	for (const LSP::Location &location : p_locations) {
-		locations.push_back(location.to_json());
-	}
-	result["locations"] = locations;
-	result["found"] = !locations.is_empty();
-	if (p_symbol) {
-		result["symbol"] = p_symbol->to_json(true);
-	}
-	return MCPToolUtils::make_success_result(result);
-}
-
-Array MCPGDScriptProvider::_completion_items(const Ref<GDScriptAnalysisSession> &p_session, const String &p_path, const List<ScriptLanguage::CodeCompletionOption> &p_options, int p_limit) const {
-	Array items;
-	items.resize(MIN(p_options.size(), p_limit));
-	ExtendGDScriptParser *parser = p_session->get_parse_result(p_path);
-	int index = 0;
-	for (const ScriptLanguage::CodeCompletionOption &option : p_options) {
-		if (index >= p_limit) {
-			break;
-		}
-		LSP::CompletionItem item;
-		item.label = option.display;
-		item.insertText = option.insert_text;
-		item.kind = MCPGDScriptToolUtils::completion_kind(option.kind);
-		if (option.text_edit.is_set()) {
-			item.textEdit.newText = option.text_edit.new_text;
-			if (parser) {
-				item.textEdit.range = parser->to_lsp_range(option.text_edit.start_line, option.text_edit.start_column, option.text_edit.end_line, option.text_edit.end_column);
-			} else {
-				item.textEdit.range = LSP::Range(option.text_edit.start_line, option.text_edit.start_column, option.text_edit.end_line, option.text_edit.end_column);
-			}
-		}
-		items[index++] = item.to_json();
-	}
-	return items;
-}
-
-Dictionary MCPGDScriptProvider::_symbol_result(const Ref<GDScriptAnalysisSession> &p_session, const String &p_path, const LSP::TextDocumentPositionParams &p_params, bool p_declaration) const {
-	Dictionary result = _metadata(p_session, p_path);
-	const LSP::DocumentSymbol *symbol = _get_workspace()->resolve_symbol(p_session, p_params);
-	Array locations;
-	if (symbol && !symbol->uri.is_empty()) {
-		LSP::Location location;
-		location.uri = symbol->uri;
-		location.range = symbol->selectionRange;
-		locations.push_back(location.to_json());
-	}
-	result["locations"] = locations;
-	result["found"] = !locations.is_empty();
-	if (symbol) {
-		result["symbol"] = symbol->to_json(true);
-		result["native"] = symbol->native_class.is_empty() ? false : true;
-	}
-	result["operation"] = p_declaration ? "declaration" : "definition";
-	return MCPToolUtils::make_success_result(result);
 }
 
 Dictionary MCPGDScriptProvider::diagnostics(const Dictionary &p_arguments, const Dictionary &p_context) {
@@ -288,9 +207,8 @@ Dictionary MCPGDScriptProvider::diagnostics(const Dictionary &p_arguments, const
 		return preparation_error;
 	}
 	MCPGDScriptTransientParserCleanup cleanup(session);
-	Dictionary result = _metadata(session, path);
-	result["diagnostics"] = diagnostic_list;
-	return MCPToolUtils::make_success_result(result);
+	const MCPGDScriptResultBuilder result_builder(_get_workspace(), session, path);
+	return MCPToolUtils::make_success_result(result_builder.diagnostics(diagnostic_list));
 }
 
 Dictionary MCPGDScriptProvider::symbols(const Dictionary &p_arguments, const Dictionary &p_context) {
@@ -313,11 +231,8 @@ Dictionary MCPGDScriptProvider::symbols(const Dictionary &p_arguments, const Dic
 	if (!parser) {
 		return _script_not_found(path);
 	}
-	Dictionary result = _metadata(session, path);
-	Array symbol_list;
-	symbol_list.push_back(parser->get_symbols().to_json(true));
-	result["symbols"] = symbol_list;
-	return MCPToolUtils::make_success_result(result);
+	const MCPGDScriptResultBuilder result_builder(_get_workspace(), session, path);
+	return MCPToolUtils::make_success_result(result_builder.document_symbols());
 }
 
 Dictionary MCPGDScriptProvider::completion(const Dictionary &p_arguments, const Dictionary &p_context) {
@@ -349,11 +264,8 @@ Dictionary MCPGDScriptProvider::completion(const Dictionary &p_arguments, const 
 	params.position = position.position;
 	List<ScriptLanguage::CodeCompletionOption> options;
 	_get_workspace()->completion(session, params, &options);
-	Dictionary result = _metadata(session, path);
-	result["items"] = _completion_items(session, path, options, limit);
-	result["totalItemCount"] = options.size();
-	result["isIncomplete"] = options.size() > limit;
-	return MCPToolUtils::make_success_result(result);
+	const MCPGDScriptResultBuilder result_builder(_get_workspace(), session, path);
+	return MCPToolUtils::make_success_result(result_builder.completion(options, limit));
 }
 
 Dictionary MCPGDScriptProvider::hover(const Dictionary &p_arguments, const Dictionary &p_context) {
@@ -376,20 +288,9 @@ Dictionary MCPGDScriptProvider::hover(const Dictionary &p_arguments, const Dicti
 	if (!session->get_parse_result(path)) {
 		return _script_not_found(path);
 	}
-	Dictionary result = _metadata(session, path);
 	const LSP::DocumentSymbol *symbol = _get_workspace()->resolve_symbol(session, params);
-	if (symbol) {
-		LSP::Hover hover_result;
-		hover_result.contents = symbol->render();
-		hover_result.range = symbol->selectionRange;
-		result["hover"] = hover_result.to_json();
-		result["symbol"] = symbol->to_json(true);
-		result["found"] = true;
-	} else {
-		result["hover"] = Variant();
-		result["found"] = false;
-	}
-	return MCPToolUtils::make_success_result(result);
+	const MCPGDScriptResultBuilder result_builder(_get_workspace(), session, path);
+	return MCPToolUtils::make_success_result(result_builder.hover(symbol));
 }
 
 Dictionary MCPGDScriptProvider::definition(const Dictionary &p_arguments, const Dictionary &p_context) {
@@ -412,7 +313,9 @@ Dictionary MCPGDScriptProvider::definition(const Dictionary &p_arguments, const 
 	if (!session->get_parse_result(path)) {
 		return _script_not_found(path);
 	}
-	return _symbol_result(session, path, params, false);
+	const LSP::DocumentSymbol *symbol = _get_workspace()->resolve_symbol(session, params);
+	const MCPGDScriptResultBuilder result_builder(_get_workspace(), session, path);
+	return MCPToolUtils::make_success_result(result_builder.symbol_resolution(symbol, false));
 }
 
 Dictionary MCPGDScriptProvider::declaration(const Dictionary &p_arguments, const Dictionary &p_context) {
@@ -435,7 +338,9 @@ Dictionary MCPGDScriptProvider::declaration(const Dictionary &p_arguments, const
 	if (!session->get_parse_result(path)) {
 		return _script_not_found(path);
 	}
-	return _symbol_result(session, path, params, true);
+	const LSP::DocumentSymbol *symbol = _get_workspace()->resolve_symbol(session, params);
+	const MCPGDScriptResultBuilder result_builder(_get_workspace(), session, path);
+	return MCPToolUtils::make_success_result(result_builder.symbol_resolution(symbol, true));
 }
 
 Dictionary MCPGDScriptProvider::references(const Dictionary &p_arguments, const Dictionary &p_context) {
@@ -460,10 +365,8 @@ Dictionary MCPGDScriptProvider::references(const Dictionary &p_arguments, const 
 	}
 	const LSP::DocumentSymbol *symbol = _get_workspace()->resolve_symbol(session, params);
 	if (!symbol) {
-		Dictionary result = _metadata(session, path);
-		result["locations"] = Array();
-		result["found"] = false;
-		return MCPToolUtils::make_success_result(result);
+		const MCPGDScriptResultBuilder result_builder(_get_workspace(), session, path);
+		return MCPToolUtils::make_success_result(result_builder.locations(Vector<LSP::Location>()));
 	}
 	Vector<LSP::Location> usages = _get_workspace()->find_all_usages(session, *symbol);
 	if (!params.context.includeDeclaration) {
@@ -476,7 +379,8 @@ Dictionary MCPGDScriptProvider::references(const Dictionary &p_arguments, const 
 		}
 		usages = filtered;
 	}
-	return _locations_result(session, path, usages, symbol);
+	const MCPGDScriptResultBuilder result_builder(_get_workspace(), session, path);
+	return MCPToolUtils::make_success_result(result_builder.locations(usages, symbol));
 }
 
 Dictionary MCPGDScriptProvider::signature_help(const Dictionary &p_arguments, const Dictionary &p_context) {
@@ -501,15 +405,8 @@ Dictionary MCPGDScriptProvider::signature_help(const Dictionary &p_arguments, co
 	}
 	LSP::SignatureHelp signature;
 	const Error error = _get_workspace()->resolve_signature(session, params, signature);
-	Dictionary result = _metadata(session, path);
-	if (error == OK) {
-		result["signatureHelp"] = signature.to_json();
-		result["found"] = true;
-	} else {
-		result["signatureHelp"] = Variant();
-		result["found"] = false;
-	}
-	return MCPToolUtils::make_success_result(result);
+	const MCPGDScriptResultBuilder result_builder(_get_workspace(), session, path);
+	return MCPToolUtils::make_success_result(result_builder.signature_help(error == OK ? &signature : nullptr));
 }
 
 Dictionary MCPGDScriptProvider::rename(const Dictionary &p_arguments, const Dictionary &p_context) {
@@ -537,11 +434,8 @@ Dictionary MCPGDScriptProvider::rename(const Dictionary &p_arguments, const Dict
 		return _script_not_found(path);
 	}
 	const Dictionary edit = _get_workspace()->rename(session, params, new_name);
-	Dictionary result = _metadata(session, path);
-	result["edit"] = edit;
-	const Dictionary changes = edit.get("changes", Dictionary());
-	result["changed"] = !changes.is_empty();
-	return MCPToolUtils::make_success_result(result);
+	const MCPGDScriptResultBuilder result_builder(_get_workspace(), session, path);
+	return MCPToolUtils::make_success_result(result_builder.rename(edit));
 }
 
 Dictionary MCPGDScriptProvider::apply_workspace_edit(const Dictionary &p_arguments, const Dictionary &p_context) {

@@ -34,7 +34,6 @@
 #include "mcp_gdscript_session_manager.h"
 
 #include "core/object/object.h"
-#include "core/object/script_language.h"
 #include "core/variant/dictionary.h"
 
 #include "modules/gdscript/language_server/gdscript_workspace.h"
@@ -92,12 +91,7 @@ private:
 	bool _parse_position(const Dictionary &p_arguments, String &r_path, LSP::TextDocumentPositionParams &r_params, String &r_error) const;
 	bool _parse_reference_position(const Dictionary &p_arguments, String &r_path, LSP::ReferenceParams &r_params, String &r_error) const;
 
-	Dictionary _metadata(const Ref<GDScriptAnalysisSession> &p_session, const String &p_path) const;
 	Dictionary _invalid_arguments(const String &p_message) const;
 	Dictionary _unavailable(const String &p_message) const;
 	Dictionary _script_not_found(const String &p_path) const;
-	Dictionary _locations_result(const Ref<GDScriptAnalysisSession> &p_session, const String &p_path, const Vector<LSP::Location> &p_locations, const LSP::DocumentSymbol *p_symbol = nullptr) const;
-
-	Array _completion_items(const Ref<GDScriptAnalysisSession> &p_session, const String &p_path, const List<ScriptLanguage::CodeCompletionOption> &p_options, int p_limit) const;
-	Dictionary _symbol_result(const Ref<GDScriptAnalysisSession> &p_session, const String &p_path, const LSP::TextDocumentPositionParams &p_params, bool p_declaration) const;
 };

@@ -9,6 +9,7 @@ sources = glob.glob("*.cpp")
 gdscript_lsp_sources = {
     "mcp_gdscript_provider.cpp",
     "mcp_gdscript_request_parser.cpp",
+    "mcp_gdscript_result_builder.cpp",
     "mcp_gdscript_session_manager.cpp",
     "mcp_gdscript_tool_utils.cpp",
     "mcp_script_analysis_sync.cpp",

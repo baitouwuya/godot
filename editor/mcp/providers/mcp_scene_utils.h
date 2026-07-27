@@ -43,6 +43,8 @@ Node *find_node(Node *p_scene_root, const String &p_path);
 String get_relative_path(Node *p_scene_root, Node *p_node);
 bool is_node_in_scene(Node *p_scene_root, Node *p_node);
 bool is_node_editable(Node *p_scene_root, Node *p_node);
+Dictionary make_node_summary_schema_properties();
+Dictionary make_node_summary_schema(bool p_allow_additional_properties = true);
 Dictionary make_node_summary(Node *p_scene_root, Node *p_node, bool p_include_internal_children = false);
 Error make_tree(Node *p_scene_root, Node *p_tree_root, int p_max_depth, bool p_include_internal_children, Dictionary &r_tree, String *r_error = nullptr);
 Error begin_undo_action(EditorUndoRedoManager *p_undo_redo, const String &p_name, String *r_error = nullptr);

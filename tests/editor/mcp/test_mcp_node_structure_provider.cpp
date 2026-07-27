@@ -121,6 +121,17 @@ TEST_CASE("[MCP][Provider] Node structure tools expose strict schemas") {
 	CHECK(names[3] == "godot.node.move");
 	CHECK(names[4] == "godot.node.duplicate");
 	CHECK(names[5] == "godot.node.instantiate_scene");
+	const Array definitions = registry.get_tool_definitions();
+	const Dictionary delete_output = Dictionary(definitions[0]).get("outputSchema", Dictionary());
+	CHECK_FALSE(bool(delete_output.get("additionalProperties", true)));
+	CHECK(Dictionary(delete_output.get("properties", Dictionary())).has("deleted"));
+	const Dictionary rename_output = Dictionary(definitions[1]).get("outputSchema", Dictionary());
+	CHECK_FALSE(bool(rename_output.get("additionalProperties", true)));
+	const Dictionary rename_properties = rename_output.get("properties", Dictionary());
+	CHECK(rename_properties.has("path"));
+	CHECK(rename_properties.has("previousPath"));
+	CHECK(rename_properties.has("parentPath"));
+	CHECK(rename_properties.has("index"));
 
 	Dictionary invalid;
 	invalid["path"] = "Child";

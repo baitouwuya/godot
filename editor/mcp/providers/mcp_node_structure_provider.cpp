@@ -108,6 +108,33 @@ static Dictionary _instantiate_schema() {
 	return MCPToolUtils::make_object_schema(properties, required);
 }
 
+static Dictionary _node_output_schema(bool p_include_previous_path) {
+	Dictionary properties = MCPSceneUtils::make_node_summary_schema_properties();
+	properties["previousPath"] = MCPToolUtils::make_property_schema("string", "Node path before the operation.");
+	properties["parentPath"] = MCPToolUtils::make_property_schema("string", "Parent node path after the operation.");
+	Dictionary index = MCPToolUtils::make_property_schema("integer", "0-based child index after the operation.");
+	index["minimum"] = 0;
+	properties["index"] = index;
+	PackedStringArray required{ "path", "name", "type", "childCount", "editable", "internal", "owner" };
+	if (p_include_previous_path) {
+		required.push_back("previousPath");
+	}
+	return MCPToolUtils::make_object_schema(properties, required);
+}
+
+static Dictionary _delete_output_schema() {
+	Dictionary deleted_properties = MCPSceneUtils::make_node_summary_schema_properties();
+	deleted_properties["parentPath"] = MCPToolUtils::make_property_schema("string", "Parent node path before deletion.");
+	Dictionary index = MCPToolUtils::make_property_schema("integer", "0-based child index before deletion.");
+	index["minimum"] = 0;
+	deleted_properties["index"] = index;
+	const Dictionary deleted = MCPToolUtils::make_object_schema(deleted_properties,
+			PackedStringArray{ "path", "name", "type", "childCount", "editable", "internal", "owner", "parentPath", "index" });
+	Dictionary properties;
+	properties["deleted"] = deleted;
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "deleted" });
+}
+
 static bool _get_required_string(const Dictionary &p_arguments, const StringName &p_name, String &r_value) {
 	const Variant value = p_arguments.get(p_name, Variant());
 	if (value.get_type() != Variant::STRING || String(value).is_empty()) {
@@ -213,17 +240,17 @@ Error MCPNodeStructureProvider::register_tools(MCPToolRegistry *p_registry, Stri
 
 	const LocalVector<MCPToolUtils::ToolDescriptor> tools{
 		{ "godot.node.delete", "Delete a node through editor undo/redo.",
-				_path_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPNodeStructureProvider::delete_node) },
+				_path_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPNodeStructureProvider::delete_node), _delete_output_schema() },
 		{ "godot.node.rename", "Rename a node and update scene path references through editor undo/redo.",
-				_rename_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPNodeStructureProvider::rename_node) },
+				_rename_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPNodeStructureProvider::rename_node), _node_output_schema(true) },
 		{ "godot.node.reparent", "Reparent a node and update scene path references through editor undo/redo.",
-				_reparent_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPNodeStructureProvider::reparent_node) },
+				_reparent_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPNodeStructureProvider::reparent_node), _node_output_schema(true) },
 		{ "godot.node.move", "Move a node to a sibling index through editor undo/redo.",
-				_move_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPNodeStructureProvider::move_node) },
+				_move_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPNodeStructureProvider::move_node), _node_output_schema(false) },
 		{ "godot.node.duplicate", "Duplicate an editable node subtree through editor undo/redo.",
-				_duplicate_schema(), MCPToolUtils::TOOL_ADDITIVE, callable_mp(this, &MCPNodeStructureProvider::duplicate_node) },
+				_duplicate_schema(), MCPToolUtils::TOOL_ADDITIVE, callable_mp(this, &MCPNodeStructureProvider::duplicate_node), _node_output_schema(false) },
 		{ "godot.node.instantiate_scene", "Instantiate a project PackedScene through editor undo/redo.",
-				_instantiate_schema(), MCPToolUtils::TOOL_ADDITIVE, callable_mp(this, &MCPNodeStructureProvider::instantiate_scene) },
+				_instantiate_schema(), MCPToolUtils::TOOL_ADDITIVE, callable_mp(this, &MCPNodeStructureProvider::instantiate_scene), _node_output_schema(false) },
 	};
 	const Error err = MCPToolUtils::register_tools(p_registry, this, tools, r_error);
 	if (err != OK) {

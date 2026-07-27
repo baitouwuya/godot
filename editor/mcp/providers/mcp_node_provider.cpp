@@ -142,29 +142,12 @@ static Dictionary _signal_mutation_schema(bool p_connect) {
 	return MCPToolUtils::make_object_schema(properties, required);
 }
 
-static Dictionary _node_summary_properties() {
-	Dictionary properties;
-	properties["path"] = MCPToolUtils::make_property_schema("string", "Node path relative to the edited scene root.");
-	properties["name"] = MCPToolUtils::make_property_schema("string", "Node name.");
-	properties["type"] = MCPToolUtils::make_property_schema("string", "Node class name.");
-	properties["childCount"] = _non_negative_integer_schema("Number of child nodes.");
-	properties["editable"] = MCPToolUtils::make_property_schema("boolean", "Whether the node can be edited.");
-	properties["internal"] = MCPToolUtils::make_property_schema("boolean", "Whether the node is internal.");
-	properties["owner"] = MCPToolUtils::make_property_schema("string", "Owning scene node path.");
-	properties["sceneFilePath"] = MCPToolUtils::make_property_schema("string", "Packed scene path when the node is an instance.");
-	return properties;
-}
-
-static Dictionary _node_summary_schema() {
-	return MCPToolUtils::make_object_schema(_node_summary_properties(), PackedStringArray{ "path", "name", "type", "childCount", "editable", "internal", "owner" }, true);
-}
-
 static Dictionary _node_properties_output_schema() {
 	Dictionary array = MCPToolUtils::make_property_schema("array", "Inspectable node properties.");
 	array["items"] = MCPToolUtils::make_object_schema(Dictionary(), PackedStringArray(), true);
 	Dictionary layout = MCPToolUtils::make_property_schema("array", "Inspector property and section layout.");
 	layout["items"] = MCPToolUtils::make_object_schema(Dictionary(), PackedStringArray(), true);
-	Dictionary properties = _node_summary_properties();
+	Dictionary properties = MCPSceneUtils::make_node_summary_schema_properties();
 	properties["scriptPath"] = MCPToolUtils::make_property_schema("string", "Attached script path.");
 	properties["propertyCount"] = _non_negative_integer_schema("Inspectable property count.");
 	properties["scriptPropertyCount"] = _non_negative_integer_schema("Script-exposed property count.");
@@ -196,13 +179,13 @@ static Dictionary _groups_output_schema() {
 	Dictionary group = MCPToolUtils::make_object_schema(group_properties, PackedStringArray{ "name", "persistent" });
 	Dictionary groups = MCPToolUtils::make_property_schema("array", "Node scene groups.");
 	groups["items"] = group;
-	Dictionary properties = _node_summary_properties();
+	Dictionary properties = MCPSceneUtils::make_node_summary_schema_properties();
 	properties["groups"] = groups;
 	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "path", "name", "type", "childCount", "editable", "internal", "owner", "groups" }, true);
 }
 
 static Dictionary _group_mutation_output_schema(bool p_include_persistent) {
-	Dictionary properties = _node_summary_properties();
+	Dictionary properties = MCPSceneUtils::make_node_summary_schema_properties();
 	properties["group"] = MCPToolUtils::make_property_schema("string", "Affected scene group.");
 	PackedStringArray required{ "path", "name", "type", "childCount", "editable", "internal", "owner", "group" };
 	if (p_include_persistent) {
@@ -221,7 +204,7 @@ static Dictionary _connections_output_schema() {
 	Dictionary connection = MCPToolUtils::make_object_schema(connection_properties, PackedStringArray{ "signal", "targetPath", "method", "flags" });
 	Dictionary connections = MCPToolUtils::make_property_schema("array", "Persistent signal connections.");
 	connections["items"] = connection;
-	Dictionary properties = _node_summary_properties();
+	Dictionary properties = MCPSceneUtils::make_node_summary_schema_properties();
 	properties["connections"] = connections;
 	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "path", "name", "type", "childCount", "editable", "internal", "owner", "connections" }, true);
 }
@@ -348,7 +331,7 @@ Error MCPNodeProvider::register_tools(MCPToolRegistry *p_registry, String *r_err
 			{ "godot.node.get_properties", "Get all native and script-exposed node properties marked for editor use.",
 					_path_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPNodeProvider::get_properties), _node_properties_output_schema() },
 			{ "godot.node.create", "Create a node through editor undo/redo.",
-					_create_schema(), MCPToolUtils::TOOL_ADDITIVE, callable_mp(this, &MCPNodeProvider::create), _node_summary_schema() },
+					_create_schema(), MCPToolUtils::TOOL_ADDITIVE, callable_mp(this, &MCPNodeProvider::create), MCPSceneUtils::make_node_summary_schema() },
 			{ "godot.node.set_property", "Set a node property through editor undo/redo.",
 					_set_property_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPNodeProvider::set_property), _node_property_output_schema() },
 			{ "godot.node.attach_script", "Attach a project script through editor undo/redo.",

@@ -80,6 +80,7 @@ MCPRuntimeJobService::Config _performance_job_config() {
 
 MCPRuntimeDebugService::MCPRuntimeDebugService(MCPDebugCapture *p_debug_capture) :
 		runtime_gateway(p_debug_capture),
+		observation_service(&runtime_gateway),
 		remote_scene_service(&runtime_gateway),
 		condition_jobs(&runtime_gateway, _condition_job_config()),
 		performance_jobs(&runtime_gateway, _performance_job_config()),
@@ -284,61 +285,24 @@ Dictionary MCPRuntimeDebugService::get_tree(const Dictionary &p_arguments) const
 	return remote_scene_service.get_tree(p_arguments);
 }
 
-Dictionary MCPRuntimeDebugService::_request_debugger_message(const Dictionary &p_arguments, const String &p_capture,
-		const String &p_operation, const Dictionary &p_payload, bool p_require_generation) const {
-	return runtime_gateway.request(p_arguments, p_capture, p_operation, p_payload, p_require_generation);
-}
-
-Dictionary MCPRuntimeDebugService::_request_observation(const Dictionary &p_arguments, const String &p_operation,
-		const Dictionary &p_payload, bool p_require_generation) const {
-	return _request_debugger_message(p_arguments, "mcp_observation", p_operation, p_payload, p_require_generation);
-}
-
 Dictionary MCPRuntimeDebugService::get_screenshot(const Dictionary &p_arguments) const {
-	Dictionary payload;
-	if (p_arguments.has("name")) {
-		payload["name"] = p_arguments["name"];
-	}
-	if (p_arguments.has("crop")) {
-		payload["crop"] = p_arguments["crop"];
-	}
-	return _request_observation(p_arguments, "get_screenshot", payload);
+	return observation_service.get_screenshot(p_arguments);
 }
 
 Dictionary MCPRuntimeDebugService::get_viewport_summary(const Dictionary &p_arguments) const {
-	Dictionary payload;
-	if (p_arguments.has("includeCounts")) {
-		payload["includeCounts"] = p_arguments["includeCounts"];
-	}
-	return _request_observation(p_arguments, "get_viewport_summary", payload);
+	return observation_service.get_viewport_summary(p_arguments);
 }
 
 Dictionary MCPRuntimeDebugService::query_nodes(const Dictionary &p_arguments) const {
-	Dictionary payload;
-	if (p_arguments.has("filter")) {
-		payload["filter"] = p_arguments["filter"];
-	}
-	if (p_arguments.has("maxResults")) {
-		payload["maxResults"] = p_arguments["maxResults"];
-	}
-	return _request_observation(p_arguments, "query_nodes", payload);
+	return observation_service.query_nodes(p_arguments);
 }
 
 Dictionary MCPRuntimeDebugService::get_interactables(const Dictionary &p_arguments) const {
-	Dictionary payload;
-	if (p_arguments.has("filter")) {
-		payload["filter"] = p_arguments["filter"];
-	}
-	if (p_arguments.has("maxResults")) {
-		payload["maxResults"] = p_arguments["maxResults"];
-	}
-	return _request_observation(p_arguments, "get_interactables", payload);
+	return observation_service.get_interactables(p_arguments);
 }
 
 Dictionary MCPRuntimeDebugService::get_node_snapshot(const Dictionary &p_arguments) const {
-	Dictionary payload;
-	payload["selector"] = p_arguments.get("selector", Dictionary());
-	return _request_observation(p_arguments, "get_node_snapshot", payload);
+	return observation_service.get_node_snapshot(p_arguments);
 }
 
 Dictionary MCPRuntimeDebugService::start_wait(const Dictionary &p_arguments, const String &p_mcp_session_id) {

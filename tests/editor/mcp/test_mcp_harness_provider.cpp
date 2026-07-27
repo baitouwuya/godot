@@ -190,6 +190,19 @@ TEST_CASE("[MCP][Harness] Provider registers four MCP tools") {
 	CHECK(names[1] == "godot.runtime.harness.status");
 	CHECK(names[2] == "godot.runtime.harness.cancel");
 	CHECK(names[3] == "godot.runtime.harness.get_report");
+	const Array definitions = registry.get_tool_definitions();
+	const Dictionary summary_output = Dictionary(definitions[0]).get("outputSchema", Dictionary());
+	CHECK_FALSE(bool(summary_output.get("additionalProperties", true)));
+	const Dictionary summary_properties = summary_output.get("properties", Dictionary());
+	CHECK(summary_properties.has("jobId"));
+	CHECK(summary_properties.has("runtimeGeneration"));
+	CHECK(summary_properties.has("completedStepCount"));
+	const Dictionary report_output = Dictionary(definitions[3]).get("outputSchema", Dictionary());
+	CHECK_FALSE(bool(report_output.get("additionalProperties", true)));
+	const Dictionary report_properties = report_output.get("properties", Dictionary());
+	CHECK(report_properties.has("steps"));
+	CHECK(report_properties.has("assertions"));
+	CHECK(report_properties.has("evidence"));
 	provider->unregister_tools();
 	memdelete(provider);
 }

@@ -30,6 +30,7 @@
 
 #include "core/doc_data.h"
 #include "core/mcp/mcp_tool_registry.h"
+#include "core/object/script_language.h"
 #include "editor/doc/doc_tools.h"
 #include "editor/mcp/providers/mcp_class_provider.h"
 #include "tests/test_macros.h"
@@ -37,6 +38,20 @@
 TEST_FORCE_LINK(test_mcp_class_provider);
 
 namespace TestMCPClassProvider {
+
+class ScopedGlobalClass {
+	StringName name;
+
+public:
+	ScopedGlobalClass(const StringName &p_name, const StringName &p_base, const String &p_path) :
+			name(p_name) {
+		ScriptServer::add_global_class(name, p_base, "GDScript", p_path, false, false);
+	}
+
+	~ScopedGlobalClass() {
+		ScriptServer::remove_global_class(name);
+	}
+};
 
 static MCPToolRegistry::CallResult _call(MCPToolRegistry &p_registry, const StringName &p_name, const Dictionary &p_arguments) {
 	MCPToolCallContext context;
@@ -171,6 +186,38 @@ TEST_CASE("[MCP][Provider] Class search supports fuzzy source and inheritance fi
 	const Array native_matches = content.get("matches", Array());
 	REQUIRE(native_matches.size() == 1);
 	CHECK(Dictionary(native_matches[0]).get("name", String()) == "FancyNode");
+}
+
+TEST_CASE("[MCP][Provider] Undocumented global script classes remain discoverable") {
+	const StringName class_name = "MCPUndocumentedProjectActor";
+	const String script_path = "res://undocumented_actor.gd";
+	ScopedGlobalClass global_class(class_name, "FancyNode", script_path);
+	DocTools docs = _make_docs();
+	MCPToolRegistry registry;
+	MCPClassProvider provider(&docs);
+	REQUIRE(provider.register_tools(&registry) == OK);
+
+	Dictionary search_arguments;
+	search_arguments["query"] = String(class_name);
+	search_arguments["source"] = "script";
+	search_arguments["inherits"] = "Node";
+	const Dictionary content = _success(_call(registry, "godot.class.search", search_arguments));
+	const Array matches = content.get("matches", Array());
+	REQUIRE(matches.size() == 1);
+	const Dictionary match = matches[0];
+	CHECK(match.get("name", String()) == String(class_name));
+	CHECK(match.get("scriptPath", String()) == script_path);
+	CHECK(match.get("kind", String()) == "global");
+	CHECK_FALSE(match.has("brief"));
+
+	Dictionary documentation_arguments;
+	documentation_arguments["name"] = String(class_name);
+	const MCPToolRegistry::CallResult documentation = _call(registry, "godot.class.get_documentation", documentation_arguments);
+	CHECK(bool(documentation.result.get("isError", false)));
+	const Dictionary structured = documentation.result.get("structuredContent", Dictionary());
+	const Dictionary error = structured.get("error", Dictionary());
+	CHECK(error.get("code", String()) == "USE_SCRIPT_DOCUMENTATION_TOOL");
+	CHECK(Dictionary(error.get("details", Dictionary())).get("path", String()) == script_path);
 }
 
 TEST_CASE("[MCP][Provider] Class documentation renders compact sections and exact full members") {

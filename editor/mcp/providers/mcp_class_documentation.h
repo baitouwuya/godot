@@ -30,7 +30,9 @@
 
 #pragma once
 
+#include "core/doc_data.h"
 #include "core/error/error_list.h"
+#include "core/templates/hash_map.h"
 #include "core/variant/dictionary.h"
 
 class DocTools;
@@ -38,7 +40,8 @@ class DocTools;
 namespace MCPClassDocumentation {
 
 Error search(DocTools *p_docs, const String &p_query, const String &p_source, const String &p_inherits,
-		bool p_include_deprecated, int p_limit, Dictionary &r_result, String *r_error = nullptr);
+			bool p_include_deprecated, int p_limit, const HashMap<String, DocData::ClassDoc> &p_supplemental_docs,
+			Dictionary &r_result, String *r_error = nullptr);
 Error render(DocTools *p_docs, const String &p_class_name, const String &p_view, const String &p_section,
 		const String &p_member, Dictionary &r_result, String *r_error = nullptr);
 

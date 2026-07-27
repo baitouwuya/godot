@@ -36,6 +36,7 @@
 #include "core/doc_data.h"
 #include "core/mcp/mcp_tool_registry.h"
 #include "core/object/callable_mp.h"
+#include "core/object/script_language.h"
 #include "editor/doc/doc_tools.h"
 #include "editor/doc/editor_help.h"
 
@@ -119,6 +120,24 @@ static void _set_error(String *r_error, const String &p_message) {
 	}
 }
 
+static HashMap<String, DocData::ClassDoc> _get_undocumented_global_classes(DocTools *p_docs) {
+	HashMap<String, DocData::ClassDoc> classes;
+	LocalVector<StringName> names;
+	ScriptServer::get_global_class_list(names);
+	for (const StringName &name : names) {
+		if (p_docs && p_docs->class_list.has(name)) {
+			continue;
+		}
+		DocData::ClassDoc doc;
+		doc.name = name;
+		doc.inherits = ScriptServer::get_global_class_base(name);
+		doc.is_script_doc = true;
+		doc.script_path = ScriptServer::get_global_class_path(name);
+		classes.insert(doc.name, doc);
+	}
+	return classes;
+}
+
 } // namespace
 
 MCPClassProvider::MCPClassProvider(DocTools *p_doc_tools) :
@@ -199,8 +218,10 @@ Dictionary MCPClassProvider::search(const Dictionary &p_arguments, const Diction
 
 	Dictionary result;
 	String documentation_error;
-	const Error err = MCPClassDocumentation::search(_get_doc_tools(), query, source, inherits,
-			include_deprecated, int(limit), result, &documentation_error);
+	DocTools *docs = _get_doc_tools();
+	const HashMap<String, DocData::ClassDoc> supplemental_docs = _get_undocumented_global_classes(docs);
+	const Error err = MCPClassDocumentation::search(docs, query, source, inherits,
+			include_deprecated, int(limit), supplemental_docs, result, &documentation_error);
 	return err == OK ? MCPToolUtils::make_success_result(result) : _documentation_error(err, documentation_error);
 }
 
@@ -236,11 +257,13 @@ Dictionary MCPClassProvider::get_documentation(const Dictionary &p_arguments, co
 
 	DocTools *docs = _get_doc_tools();
 	const DocData::ClassDoc *class_doc = docs ? docs->class_list.getptr(name) : nullptr;
-	if (class_doc && class_doc->is_script_doc) {
+	const bool undocumented_global_class = !class_doc && ScriptServer::is_global_class(name);
+	if ((class_doc && class_doc->is_script_doc) || undocumented_global_class) {
 		Dictionary details;
-		details["className"] = class_doc->name;
-		if (!class_doc->script_path.is_empty()) {
-			details["path"] = class_doc->script_path;
+		details["className"] = name;
+		const String script_path = class_doc ? class_doc->script_path : ScriptServer::get_global_class_path(name);
+		if (!script_path.is_empty()) {
+			details["path"] = script_path;
 		}
 		details["tool"] = "godot.script.get";
 		return MCPToolUtils::make_error_result("USE_SCRIPT_DOCUMENTATION_TOOL",

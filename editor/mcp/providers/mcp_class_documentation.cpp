@@ -68,13 +68,19 @@ static bool _source_matches(const DocData::ClassDoc &p_doc, const String &p_sour
 	return p_source == "all" || (p_source == "script") == p_doc.is_script_doc;
 }
 
-static bool _inherits_from(DocTools *p_docs, const DocData::ClassDoc &p_doc, const String &p_base) {
+static const DocData::ClassDoc *_find_doc(DocTools *p_docs, const HashMap<String, DocData::ClassDoc> &p_supplemental_docs, const String &p_name) {
+	const DocData::ClassDoc *doc = p_docs->class_list.getptr(p_name);
+	return doc ? doc : p_supplemental_docs.getptr(p_name);
+}
+
+static bool _inherits_from(DocTools *p_docs, const HashMap<String, DocData::ClassDoc> &p_supplemental_docs,
+		const DocData::ClassDoc &p_doc, const String &p_base) {
 	String current = p_doc.inherits;
 	for (int depth = 0; !current.is_empty() && depth < 256; depth++) {
 		if (current == p_base) {
 			return true;
 		}
-		const DocData::ClassDoc *base_doc = p_docs->class_list.getptr(current);
+		const DocData::ClassDoc *base_doc = _find_doc(p_docs, p_supplemental_docs, current);
 		if (!base_doc) {
 			break;
 		}
@@ -351,7 +357,8 @@ static Dictionary _make_counts(const DocData::ClassDoc &p_doc) {
 }
 
 Error search(DocTools *p_docs, const String &p_query, const String &p_source, const String &p_inherits,
-		bool p_include_deprecated, int p_limit, Dictionary &r_result, String *r_error) {
+		bool p_include_deprecated, int p_limit, const HashMap<String, DocData::ClassDoc> &p_supplemental_docs,
+		Dictionary &r_result, String *r_error) {
 	r_result = Dictionary();
 	if (r_error) {
 		*r_error = String();
@@ -359,7 +366,7 @@ Error search(DocTools *p_docs, const String &p_query, const String &p_source, co
 	if (!p_docs) {
 		return _fail("Editor class documentation is not available.", r_error, ERR_UNCONFIGURED);
 	}
-	if (!p_inherits.is_empty() && !p_docs->class_list.has(p_inherits)) {
+	if (!p_inherits.is_empty() && !_find_doc(p_docs, p_supplemental_docs, p_inherits)) {
 		return _fail("Base class documentation was not found: " + p_inherits, r_error, ERR_DOES_NOT_EXIST);
 	}
 
@@ -369,7 +376,16 @@ Error search(DocTools *p_docs, const String &p_query, const String &p_source, co
 		const DocData::ClassDoc &doc = entry.value;
 		if (doc.name.is_empty() || !_source_matches(doc, p_source) ||
 				(!p_include_deprecated && doc.is_deprecated) ||
-				(!p_inherits.is_empty() && !_inherits_from(p_docs, doc, p_inherits))) {
+				(!p_inherits.is_empty() && !_inherits_from(p_docs, p_supplemental_docs, doc, p_inherits))) {
+			continue;
+		}
+		candidates.push_back(doc.name);
+	}
+	for (const KeyValue<String, DocData::ClassDoc> &entry : p_supplemental_docs) {
+		const DocData::ClassDoc &doc = entry.value;
+		if (doc.name.is_empty() || p_docs->class_list.has(doc.name) || !_source_matches(doc, p_source) ||
+				(!p_include_deprecated && doc.is_deprecated) ||
+				(!p_inherits.is_empty() && !_inherits_from(p_docs, p_supplemental_docs, doc, p_inherits))) {
 			continue;
 		}
 		candidates.push_back(doc.name);
@@ -396,7 +412,7 @@ Error search(DocTools *p_docs, const String &p_query, const String &p_source, co
 
 	Array matches;
 	for (const String &name : names) {
-		const DocData::ClassDoc *doc = p_docs->class_list.getptr(name);
+		const DocData::ClassDoc *doc = _find_doc(p_docs, p_supplemental_docs, name);
 		if (doc) {
 			matches.push_back(_make_search_result(*doc));
 		}

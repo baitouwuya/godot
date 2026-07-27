@@ -140,6 +140,16 @@ static MCPToolRegistry::CallResult _call_tool(MCPToolRegistry &p_registry, const
 	return p_registry.call_tool(p_name, p_arguments, context);
 }
 
+static String _error_code(const MCPToolRegistry::CallResult &p_result) {
+	const Dictionary structured = p_result.result.get("structuredContent", Dictionary());
+	return Dictionary(structured.get("error", Dictionary())).get("code", String());
+}
+
+static Dictionary _error_details(const MCPToolRegistry::CallResult &p_result) {
+	const Dictionary structured = p_result.result.get("structuredContent", Dictionary());
+	return Dictionary(structured.get("error", Dictionary())).get("details", Dictionary());
+}
+
 static bool _check_tool_success(const MCPToolRegistry::CallResult &p_result) {
 	INFO(p_result.result);
 	CHECK(p_result.status == MCPToolRegistry::CALL_OK);
@@ -197,10 +207,30 @@ TEST_CASE("[MCP][Provider] Node tools expose encoded property and undoable mutat
 	CHECK(required.has("path"));
 	CHECK(required.has("property"));
 	CHECK(required.has("value"));
+	const Dictionary property_input = Dictionary(definitions[0]).get("inputSchema", Dictionary());
+	CHECK(int(Dictionary(Dictionary(property_input.get("properties", Dictionary())).get("path", Dictionary())).get("minLength", 0)) == 1);
+	const Dictionary properties_output = Dictionary(definitions[0]).get("outputSchema", Dictionary());
+	CHECK(Dictionary(properties_output.get("properties", Dictionary())).has("propertyLayout"));
+	CHECK(PackedStringArray(properties_output.get("required", PackedStringArray())).has("scriptPropertyCount"));
+	const Dictionary create_input = Dictionary(definitions[1]).get("inputSchema", Dictionary());
+	CHECK(int(Dictionary(Dictionary(create_input.get("properties", Dictionary())).get("type", Dictionary())).get("minLength", 0)) == 1);
+	const Dictionary create_output = Dictionary(definitions[1]).get("outputSchema", Dictionary());
+	CHECK(PackedStringArray(create_output.get("required", PackedStringArray())).has("childCount"));
 	const Dictionary connect_schema = Dictionary(definitions[8]).get("inputSchema", Dictionary());
 	CHECK(Dictionary(connect_schema.get("properties", Dictionary())).has("flags"));
+	CHECK(int(Dictionary(Dictionary(connect_schema.get("properties", Dictionary())).get("flags", Dictionary())).get("minimum", -1)) == 0);
+	const Dictionary groups_output = Dictionary(definitions[4]).get("outputSchema", Dictionary());
+	CHECK(Dictionary(groups_output.get("properties", Dictionary())).has("groups"));
+	const Dictionary connections_output = Dictionary(definitions[7]).get("outputSchema", Dictionary());
+	CHECK(Dictionary(connections_output.get("properties", Dictionary())).has("connections"));
 
 	MCPToolCallContext context;
+	Dictionary unexpected_arguments;
+	unexpected_arguments["type"] = "Node";
+	unexpected_arguments["unexpected"] = true;
+	const MCPToolRegistry::CallResult unexpected_result = registry.call_tool("godot.node.create", unexpected_arguments, context);
+	CHECK(_error_code(unexpected_result) == "INVALID_ARGUMENTS");
+	CHECK(_error_details(unexpected_result).get("keyword", String()) == "additionalProperties");
 	const MCPToolRegistry::CallResult invalid_call = registry.call_tool("godot.node.create", Dictionary(), context);
 	REQUIRE(invalid_call.status == MCPToolRegistry::CALL_OK);
 	CHECK(bool(invalid_call.result.get("isError", false)));

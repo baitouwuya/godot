@@ -47,17 +47,27 @@
 
 namespace {
 
+static Dictionary _required_string_schema(const String &p_description) {
+	Dictionary schema = MCPToolUtils::make_property_schema("string", p_description);
+	schema["minLength"] = 1;
+	return schema;
+}
+
+static Dictionary _non_negative_integer_schema(const String &p_description) {
+	Dictionary schema = MCPToolUtils::make_property_schema("integer", p_description);
+	schema["minimum"] = 0;
+	return schema;
+}
+
 static Dictionary _path_schema() {
 	Dictionary properties;
-	properties["path"] = MCPToolUtils::make_property_schema("string", "Node path relative to the edited scene root. Use '.' for the root.");
-	PackedStringArray required;
-	required.push_back("path");
-	return MCPToolUtils::make_object_schema(properties, required);
+	properties["path"] = _required_string_schema("Node path relative to the edited scene root. Use '.' for the root.");
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "path" });
 }
 
 static Dictionary _create_schema() {
 	Dictionary properties;
-	properties["type"] = MCPToolUtils::make_property_schema("string", "Instantiable Godot Node class name.");
+	properties["type"] = _required_string_schema("Instantiable Godot Node class name.");
 	properties["name"] = MCPToolUtils::make_property_schema("string", "Optional node name.");
 	properties["parentPath"] = MCPToolUtils::make_property_schema("string", "Optional parent path. Defaults to the edited scene root.");
 	PackedStringArray required;
@@ -67,8 +77,8 @@ static Dictionary _create_schema() {
 
 static Dictionary _set_property_schema() {
 	Dictionary properties;
-	properties["path"] = MCPToolUtils::make_property_schema("string", "Node path relative to the edited scene root.");
-	properties["property"] = MCPToolUtils::make_property_schema("string", "Node property name.");
+	properties["path"] = _required_string_schema("Node path relative to the edited scene root.");
+	properties["property"] = _required_string_schema("Node property name.");
 	Dictionary value;
 	value["description"] = "JSON-native Variant value returned by godot.node.get_properties.";
 	properties["value"] = value;
@@ -81,8 +91,8 @@ static Dictionary _set_property_schema() {
 
 static Dictionary _attach_script_schema() {
 	Dictionary properties;
-	properties["path"] = MCPToolUtils::make_property_schema("string", "Node path relative to the edited scene root.");
-	properties["scriptPath"] = MCPToolUtils::make_property_schema("string", "Project script path beginning with res://.");
+	properties["path"] = _required_string_schema("Node path relative to the edited scene root.");
+	properties["scriptPath"] = _required_string_schema("Project script path beginning with res://.");
 	PackedStringArray required;
 	required.push_back("path");
 	required.push_back("scriptPath");
@@ -91,8 +101,8 @@ static Dictionary _attach_script_schema() {
 
 static Dictionary _group_schema(bool p_add) {
 	Dictionary properties;
-	properties["path"] = MCPToolUtils::make_property_schema("string", "Node path relative to the edited scene root.");
-	properties["group"] = MCPToolUtils::make_property_schema("string", "Non-empty scene group name.");
+	properties["path"] = _required_string_schema("Node path relative to the edited scene root.");
+	properties["group"] = _required_string_schema("Non-empty scene group name.");
 	if (p_add) {
 		properties["persistent"] = MCPToolUtils::make_property_schema("boolean", "Whether the group is saved with the scene. Defaults to true.");
 	}
@@ -104,8 +114,8 @@ static Dictionary _group_schema(bool p_add) {
 
 static Dictionary _signal_connections_schema() {
 	Dictionary properties;
-	properties["path"] = MCPToolUtils::make_property_schema("string", "Source node path relative to the edited scene root.");
-	properties["signal"] = MCPToolUtils::make_property_schema("string", "Optional source signal name to filter connections.");
+	properties["path"] = _required_string_schema("Source node path relative to the edited scene root.");
+	properties["signal"] = _required_string_schema("Optional source signal name to filter connections.");
 	PackedStringArray required;
 	required.push_back("path");
 	return MCPToolUtils::make_object_schema(properties, required);
@@ -113,10 +123,10 @@ static Dictionary _signal_connections_schema() {
 
 static Dictionary _signal_mutation_schema(bool p_connect) {
 	Dictionary properties;
-	properties["path"] = MCPToolUtils::make_property_schema("string", "Source node path relative to the edited scene root.");
-	properties["signal"] = MCPToolUtils::make_property_schema("string", "Signal declared by the source node.");
-	properties["targetPath"] = MCPToolUtils::make_property_schema("string", "Target node path relative to the edited scene root.");
-	properties["method"] = MCPToolUtils::make_property_schema("string", "Target method name.");
+	properties["path"] = _required_string_schema("Source node path relative to the edited scene root.");
+	properties["signal"] = _required_string_schema("Signal declared by the source node.");
+	properties["targetPath"] = _required_string_schema("Target node path relative to the edited scene root.");
+	properties["method"] = _required_string_schema("Target method name.");
 	if (p_connect) {
 		Dictionary flags = MCPToolUtils::make_property_schema("integer", "Optional Object connect flags. Only deferred (1) and one-shot (4) are accepted; persistence is automatic.");
 		flags["minimum"] = 0;
@@ -132,8 +142,104 @@ static Dictionary _signal_mutation_schema(bool p_connect) {
 	return MCPToolUtils::make_object_schema(properties, required);
 }
 
-static Dictionary _unknown_argument_error(const String &p_name) {
-	return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "Unknown argument: " + p_name);
+static Dictionary _node_summary_properties() {
+	Dictionary properties;
+	properties["path"] = MCPToolUtils::make_property_schema("string", "Node path relative to the edited scene root.");
+	properties["name"] = MCPToolUtils::make_property_schema("string", "Node name.");
+	properties["type"] = MCPToolUtils::make_property_schema("string", "Node class name.");
+	properties["childCount"] = _non_negative_integer_schema("Number of child nodes.");
+	properties["editable"] = MCPToolUtils::make_property_schema("boolean", "Whether the node can be edited.");
+	properties["internal"] = MCPToolUtils::make_property_schema("boolean", "Whether the node is internal.");
+	properties["owner"] = MCPToolUtils::make_property_schema("string", "Owning scene node path.");
+	properties["sceneFilePath"] = MCPToolUtils::make_property_schema("string", "Packed scene path when the node is an instance.");
+	return properties;
+}
+
+static Dictionary _node_summary_schema() {
+	return MCPToolUtils::make_object_schema(_node_summary_properties(), PackedStringArray{ "path", "name", "type", "childCount", "editable", "internal", "owner" }, true);
+}
+
+static Dictionary _node_properties_output_schema() {
+	Dictionary array = MCPToolUtils::make_property_schema("array", "Inspectable node properties.");
+	array["items"] = MCPToolUtils::make_object_schema(Dictionary(), PackedStringArray(), true);
+	Dictionary layout = MCPToolUtils::make_property_schema("array", "Inspector property and section layout.");
+	layout["items"] = MCPToolUtils::make_object_schema(Dictionary(), PackedStringArray(), true);
+	Dictionary properties = _node_summary_properties();
+	properties["scriptPath"] = MCPToolUtils::make_property_schema("string", "Attached script path.");
+	properties["propertyCount"] = _non_negative_integer_schema("Inspectable property count.");
+	properties["scriptPropertyCount"] = _non_negative_integer_schema("Script-exposed property count.");
+	properties["properties"] = array;
+	properties["propertyLayout"] = layout;
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "path", "name", "type", "childCount", "editable", "internal", "owner", "propertyCount", "scriptPropertyCount", "properties", "propertyLayout" }, true);
+}
+
+static Dictionary _node_property_output_schema() {
+	Dictionary properties;
+	properties["path"] = MCPToolUtils::make_property_schema("string", "Changed node path.");
+	properties["property"] = MCPToolUtils::make_property_schema("string", "Changed node property name.");
+	properties["value"] = Dictionary();
+	properties["valueEncodingError"] = MCPToolUtils::make_property_schema("string", "Value encoding failure.");
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "path", "property", "value" });
+}
+
+static Dictionary _attach_script_output_schema() {
+	Dictionary properties;
+	properties["path"] = MCPToolUtils::make_property_schema("string", "Node path.");
+	properties["scriptPath"] = MCPToolUtils::make_property_schema("string", "Attached project script path.");
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "path", "scriptPath" });
+}
+
+static Dictionary _groups_output_schema() {
+	Dictionary group_properties;
+	group_properties["name"] = MCPToolUtils::make_property_schema("string", "Scene group name.");
+	group_properties["persistent"] = MCPToolUtils::make_property_schema("boolean", "Whether the group is persistent.");
+	Dictionary group = MCPToolUtils::make_object_schema(group_properties, PackedStringArray{ "name", "persistent" });
+	Dictionary groups = MCPToolUtils::make_property_schema("array", "Node scene groups.");
+	groups["items"] = group;
+	Dictionary properties = _node_summary_properties();
+	properties["groups"] = groups;
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "path", "name", "type", "childCount", "editable", "internal", "owner", "groups" }, true);
+}
+
+static Dictionary _group_mutation_output_schema(bool p_include_persistent) {
+	Dictionary properties = _node_summary_properties();
+	properties["group"] = MCPToolUtils::make_property_schema("string", "Affected scene group.");
+	PackedStringArray required{ "path", "name", "type", "childCount", "editable", "internal", "owner", "group" };
+	if (p_include_persistent) {
+		properties["persistent"] = MCPToolUtils::make_property_schema("boolean", "Whether the group is persistent.");
+		required.push_back("persistent");
+	}
+	return MCPToolUtils::make_object_schema(properties, required, true);
+}
+
+static Dictionary _connections_output_schema() {
+	Dictionary connection_properties;
+	connection_properties["signal"] = MCPToolUtils::make_property_schema("string", "Signal name.");
+	connection_properties["targetPath"] = MCPToolUtils::make_property_schema("string", "Target node path.");
+	connection_properties["method"] = MCPToolUtils::make_property_schema("string", "Target method name.");
+	connection_properties["flags"] = _non_negative_integer_schema("Signal connection flags.");
+	Dictionary connection = MCPToolUtils::make_object_schema(connection_properties, PackedStringArray{ "signal", "targetPath", "method", "flags" });
+	Dictionary connections = MCPToolUtils::make_property_schema("array", "Persistent signal connections.");
+	connections["items"] = connection;
+	Dictionary properties = _node_summary_properties();
+	properties["connections"] = connections;
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "path", "name", "type", "childCount", "editable", "internal", "owner", "connections" }, true);
+}
+
+static Dictionary _signal_mutation_output_schema(bool p_include_flags) {
+	Dictionary properties;
+	properties["path"] = MCPToolUtils::make_property_schema("string", "Source node path.");
+	properties["signal"] = MCPToolUtils::make_property_schema("string", "Signal name.");
+	properties["targetPath"] = MCPToolUtils::make_property_schema("string", "Target node path.");
+	properties["method"] = MCPToolUtils::make_property_schema("string", "Target method name.");
+	if (p_include_flags) {
+		properties["flags"] = _non_negative_integer_schema("Applied signal connection flags.");
+	}
+	PackedStringArray required{ "path", "signal", "targetPath", "method" };
+	if (p_include_flags) {
+		required.push_back("flags");
+	}
+	return MCPToolUtils::make_object_schema(properties, required);
 }
 
 static bool _validate_string_argument(const Dictionary &p_arguments, const StringName &p_name, String &r_value) {
@@ -238,56 +344,30 @@ Error MCPNodeProvider::register_tools(MCPToolRegistry *p_registry, String *r_err
 		return ERR_ALREADY_IN_USE;
 	}
 
-	Error err = p_registry->register_tool(
-			MCPToolUtils::make_tool_definition("godot.node.get_properties", "Get all native and script-exposed node properties marked for editor use.", _path_schema(), MCPToolUtils::TOOL_READ_ONLY),
-			callable_mp(this, &MCPNodeProvider::get_properties), this, r_error);
-	if (err == OK) {
-		err = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.node.create", "Create a node through editor undo/redo.", _create_schema(), MCPToolUtils::TOOL_ADDITIVE),
-				callable_mp(this, &MCPNodeProvider::create), this, r_error);
-	}
-	if (err == OK) {
-		err = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.node.set_property", "Set a node property through editor undo/redo.", _set_property_schema(), MCPToolUtils::TOOL_DESTRUCTIVE),
-				callable_mp(this, &MCPNodeProvider::set_property), this, r_error);
-	}
-	if (err == OK) {
-		err = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.node.attach_script", "Attach a project script through editor undo/redo.", _attach_script_schema(), MCPToolUtils::TOOL_DESTRUCTIVE),
-				callable_mp(this, &MCPNodeProvider::attach_script), this, r_error);
-	}
-	if (err == OK) {
-		err = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.node.get_groups", "List editable scene groups on a node.", _path_schema(), MCPToolUtils::TOOL_READ_ONLY),
-				callable_mp(this, &MCPNodeProvider::get_groups), this, r_error);
-	}
-	if (err == OK) {
-		err = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.node.add_to_group", "Add a node to a persistent scene group through editor undo/redo.", _group_schema(true), MCPToolUtils::TOOL_ADDITIVE),
-				callable_mp(this, &MCPNodeProvider::add_to_group), this, r_error);
-	}
-	if (err == OK) {
-		err = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.node.remove_from_group", "Remove a node from a scene group through editor undo/redo.", _group_schema(false), MCPToolUtils::TOOL_DESTRUCTIVE),
-				callable_mp(this, &MCPNodeProvider::remove_from_group), this, r_error);
-	}
-	if (err == OK) {
-		err = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.node.get_signal_connections", "List persistent signal connections from an editable scene node.", _signal_connections_schema(), MCPToolUtils::TOOL_READ_ONLY),
-				callable_mp(this, &MCPNodeProvider::get_signal_connections), this, r_error);
-	}
-	if (err == OK) {
-		err = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.node.connect_signal", "Create a persistent scene signal connection through editor undo/redo.", _signal_mutation_schema(true), MCPToolUtils::TOOL_ADDITIVE),
-				callable_mp(this, &MCPNodeProvider::connect_signal), this, r_error);
-	}
-	if (err == OK) {
-		err = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.node.disconnect_signal", "Remove a persistent scene signal connection through editor undo/redo.", _signal_mutation_schema(false), MCPToolUtils::TOOL_DESTRUCTIVE),
-				callable_mp(this, &MCPNodeProvider::disconnect_signal), this, r_error);
-	}
+	const LocalVector<MCPToolUtils::ToolDescriptor> tools{
+			{ "godot.node.get_properties", "Get all native and script-exposed node properties marked for editor use.",
+					_path_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPNodeProvider::get_properties), _node_properties_output_schema() },
+			{ "godot.node.create", "Create a node through editor undo/redo.",
+					_create_schema(), MCPToolUtils::TOOL_ADDITIVE, callable_mp(this, &MCPNodeProvider::create), _node_summary_schema() },
+			{ "godot.node.set_property", "Set a node property through editor undo/redo.",
+					_set_property_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPNodeProvider::set_property), _node_property_output_schema() },
+			{ "godot.node.attach_script", "Attach a project script through editor undo/redo.",
+					_attach_script_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPNodeProvider::attach_script), _attach_script_output_schema() },
+			{ "godot.node.get_groups", "List editable scene groups on a node.",
+					_path_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPNodeProvider::get_groups), _groups_output_schema() },
+			{ "godot.node.add_to_group", "Add a node to a persistent scene group through editor undo/redo.",
+					_group_schema(true), MCPToolUtils::TOOL_ADDITIVE, callable_mp(this, &MCPNodeProvider::add_to_group), _group_mutation_output_schema(true) },
+			{ "godot.node.remove_from_group", "Remove a node from a scene group through editor undo/redo.",
+					_group_schema(false), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPNodeProvider::remove_from_group), _group_mutation_output_schema(false) },
+			{ "godot.node.get_signal_connections", "List persistent signal connections from an editable scene node.",
+					_signal_connections_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPNodeProvider::get_signal_connections), _connections_output_schema() },
+			{ "godot.node.connect_signal", "Create a persistent scene signal connection through editor undo/redo.",
+					_signal_mutation_schema(true), MCPToolUtils::TOOL_ADDITIVE, callable_mp(this, &MCPNodeProvider::connect_signal), _signal_mutation_output_schema(true) },
+			{ "godot.node.disconnect_signal", "Remove a persistent scene signal connection through editor undo/redo.",
+					_signal_mutation_schema(false), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPNodeProvider::disconnect_signal), _signal_mutation_output_schema(false) },
+	};
+	const Error err = MCPToolUtils::register_tools(p_registry, this, tools, r_error);
 	if (err != OK) {
-		p_registry->unregister_tools_for_owner(this);
 		return err;
 	}
 
@@ -304,12 +384,6 @@ void MCPNodeProvider::unregister_tools() {
 }
 
 Dictionary MCPNodeProvider::get_properties(const Dictionary &p_arguments, const Dictionary &) {
-	PackedStringArray allowed_arguments;
-	allowed_arguments.push_back("path");
-	String unknown_argument;
-	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed_arguments, unknown_argument)) {
-		return _unknown_argument_error(unknown_argument);
-	}
 	String path;
 	if (!_validate_string_argument(p_arguments, "path", path)) {
 		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "A non-empty string path is required.");
@@ -421,15 +495,6 @@ Dictionary MCPNodeProvider::get_properties(const Dictionary &p_arguments, const 
 }
 
 Dictionary MCPNodeProvider::create(const Dictionary &p_arguments, const Dictionary &) {
-	PackedStringArray allowed_arguments;
-	allowed_arguments.push_back("type");
-	allowed_arguments.push_back("name");
-	allowed_arguments.push_back("parentPath");
-	String unknown_argument;
-	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed_arguments, unknown_argument)) {
-		return _unknown_argument_error(unknown_argument);
-	}
-
 	String type;
 	if (!_validate_string_argument(p_arguments, "type", type)) {
 		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "A non-empty string type is required.");
@@ -461,15 +526,6 @@ Dictionary MCPNodeProvider::create(const Dictionary &p_arguments, const Dictiona
 }
 
 Dictionary MCPNodeProvider::set_property(const Dictionary &p_arguments, const Dictionary &) {
-	PackedStringArray allowed_arguments;
-	allowed_arguments.push_back("path");
-	allowed_arguments.push_back("property");
-	allowed_arguments.push_back("value");
-	String unknown_argument;
-	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed_arguments, unknown_argument)) {
-		return _unknown_argument_error(unknown_argument);
-	}
-
 	String path;
 	String property;
 	if (!_validate_string_argument(p_arguments, "path", path) || !_validate_string_argument(p_arguments, "property", property) ||
@@ -514,14 +570,6 @@ Dictionary MCPNodeProvider::set_property(const Dictionary &p_arguments, const Di
 }
 
 Dictionary MCPNodeProvider::attach_script(const Dictionary &p_arguments, const Dictionary &) {
-	PackedStringArray allowed_arguments;
-	allowed_arguments.push_back("path");
-	allowed_arguments.push_back("scriptPath");
-	String unknown_argument;
-	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed_arguments, unknown_argument)) {
-		return _unknown_argument_error(unknown_argument);
-	}
-
 	String path;
 	String script_path;
 	if (!_validate_string_argument(p_arguments, "path", path) || !_validate_string_argument(p_arguments, "scriptPath", script_path)) {
@@ -569,10 +617,6 @@ Dictionary MCPNodeProvider::attach_script(const Dictionary &p_arguments, const D
 }
 
 Dictionary MCPNodeProvider::get_groups(const Dictionary &p_arguments, const Dictionary &) {
-	String unknown_argument;
-	if (!MCPToolUtils::has_only_arguments(p_arguments, PackedStringArray{ "path" }, unknown_argument)) {
-		return _unknown_argument_error(unknown_argument);
-	}
 	String path;
 	if (!_validate_string_argument(p_arguments, "path", path)) {
 		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "A non-empty string path is required.");
@@ -600,10 +644,6 @@ Dictionary MCPNodeProvider::get_groups(const Dictionary &p_arguments, const Dict
 }
 
 Dictionary MCPNodeProvider::add_to_group(const Dictionary &p_arguments, const Dictionary &) {
-	String unknown_argument;
-	if (!MCPToolUtils::has_only_arguments(p_arguments, PackedStringArray{ "path", "group", "persistent" }, unknown_argument)) {
-		return _unknown_argument_error(unknown_argument);
-	}
 	String path;
 	String group;
 	if (!_validate_string_argument(p_arguments, "path", path) || !_validate_string_argument(p_arguments, "group", group)) {
@@ -635,10 +675,6 @@ Dictionary MCPNodeProvider::add_to_group(const Dictionary &p_arguments, const Di
 }
 
 Dictionary MCPNodeProvider::remove_from_group(const Dictionary &p_arguments, const Dictionary &) {
-	String unknown_argument;
-	if (!MCPToolUtils::has_only_arguments(p_arguments, PackedStringArray{ "path", "group" }, unknown_argument)) {
-		return _unknown_argument_error(unknown_argument);
-	}
 	String path;
 	String group;
 	if (!_validate_string_argument(p_arguments, "path", path) || !_validate_string_argument(p_arguments, "group", group)) {
@@ -665,10 +701,6 @@ Dictionary MCPNodeProvider::remove_from_group(const Dictionary &p_arguments, con
 }
 
 Dictionary MCPNodeProvider::get_signal_connections(const Dictionary &p_arguments, const Dictionary &) {
-	String unknown_argument;
-	if (!MCPToolUtils::has_only_arguments(p_arguments, PackedStringArray{ "path", "signal" }, unknown_argument)) {
-		return _unknown_argument_error(unknown_argument);
-	}
 	String path;
 	if (!_validate_string_argument(p_arguments, "path", path)) {
 		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "A non-empty string path is required.");
@@ -715,11 +747,6 @@ Dictionary MCPNodeProvider::get_signal_connections(const Dictionary &p_arguments
 }
 
 Dictionary MCPNodeProvider::_mutate_signal_connection(const Dictionary &p_arguments, bool p_connect) {
-	String unknown_argument;
-	const PackedStringArray allowed = p_connect ? PackedStringArray{ "path", "signal", "targetPath", "method", "flags" } : PackedStringArray{ "path", "signal", "targetPath", "method" };
-	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed, unknown_argument)) {
-		return _unknown_argument_error(unknown_argument);
-	}
 	String path;
 	String signal;
 	String target_path;

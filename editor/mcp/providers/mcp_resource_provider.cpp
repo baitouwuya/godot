@@ -52,56 +52,54 @@
 
 namespace {
 
+static Dictionary _required_string_schema(const String &p_description) {
+	Dictionary schema = MCPToolUtils::make_property_schema("string", p_description);
+	schema["minLength"] = 1;
+	return schema;
+}
+
+static Dictionary _non_negative_integer_schema(const String &p_description) {
+	Dictionary schema = MCPToolUtils::make_property_schema("integer", p_description);
+	schema["minimum"] = 0;
+	return schema;
+}
+
 static Dictionary _resource_options_schema(bool p_include_target) {
 	Dictionary properties;
-	properties["source"] = MCPToolUtils::make_property_schema("string", "Absolute read-only filesystem path to the source asset.");
-	properties["importer"] = MCPToolUtils::make_property_schema("string", "Optional ResourceImporter name.");
+	properties["source"] = _required_string_schema("Absolute read-only filesystem path to the source asset.");
+	properties["importer"] = _required_string_schema("Optional ResourceImporter name.");
 
 	Dictionary preset = MCPToolUtils::make_property_schema("integer", "Optional zero-based importer preset index.");
 	preset["minimum"] = 0;
 	properties["preset"] = preset;
 
-	Dictionary options;
-	options["type"] = "object";
+	Dictionary options = MCPToolUtils::make_object_schema(Dictionary(), PackedStringArray(), true);
 	options["description"] = "Optional JSON-native import option overrides keyed by PropertyInfo name.";
-	options["additionalProperties"] = true;
 	properties["options"] = options;
 
 	PackedStringArray required;
 	required.push_back("source");
 	if (p_include_target) {
-		properties["target"] = MCPToolUtils::make_property_schema("string", "Destination source asset path beginning with res://.");
+		properties["target"] = _required_string_schema("Destination source asset path beginning with res://.");
 		Dictionary overwrite = MCPToolUtils::make_property_schema("boolean", "Allow replacing an existing target and its import metadata.");
 		overwrite["default"] = false;
 		properties["overwrite"] = overwrite;
 		required.push_back("target");
 	}
 
-	Dictionary schema;
-	schema["type"] = "object";
-	schema["properties"] = properties;
-	schema["required"] = required;
-	schema["additionalProperties"] = false;
-	return schema;
+	return MCPToolUtils::make_object_schema(properties, required);
 }
 
 static Dictionary _resource_path_schema() {
 	Dictionary properties;
-	properties["path"] = MCPToolUtils::make_property_schema("string", "Project resource path beginning with res://.");
-	PackedStringArray required;
-	required.push_back("path");
-	Dictionary schema;
-	schema["type"] = "object";
-	schema["properties"] = properties;
-	schema["required"] = required;
-	schema["additionalProperties"] = false;
-	return schema;
+	properties["path"] = _required_string_schema("Project resource path beginning with res://.");
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "path" });
 }
 
 static Dictionary _resource_set_property_schema() {
 	Dictionary schema = _resource_path_schema();
 	Dictionary properties = schema["properties"];
-	properties["property"] = MCPToolUtils::make_property_schema("string", "Editable Resource property name.");
+	properties["property"] = _required_string_schema("Editable Resource property name.");
 	Dictionary value;
 	value["description"] = "JSON-native Variant value returned by godot.resource.get_properties.";
 	properties["value"] = value;
@@ -111,6 +109,91 @@ static Dictionary _resource_set_property_schema() {
 	required.push_back("value");
 	schema["required"] = required;
 	return schema;
+}
+
+static Dictionary _property_description_schema() {
+	Dictionary properties;
+	properties["name"] = MCPToolUtils::make_property_schema("string", "Resource property name.");
+	properties["type"] = MCPToolUtils::make_property_schema("string", "Godot Variant type name.");
+	properties["typeId"] = _non_negative_integer_schema("Godot Variant type ID.");
+	properties["className"] = MCPToolUtils::make_property_schema("string", "Resource class name, when applicable.");
+	properties["hint"] = _non_negative_integer_schema("Godot property hint ID.");
+	properties["hintString"] = MCPToolUtils::make_property_schema("string", "Godot property hint data.");
+	properties["usage"] = _non_negative_integer_schema("Godot property usage flags.");
+	properties["readOnly"] = MCPToolUtils::make_property_schema("boolean", "Whether the property is read-only.");
+	properties["editable"] = MCPToolUtils::make_property_schema("boolean", "Whether the property can be edited.");
+	properties["valueAvailable"] = MCPToolUtils::make_property_schema("boolean", "Whether the property value is available.");
+	properties["encodable"] = MCPToolUtils::make_property_schema("boolean", "Whether the property value is MCP encodable.");
+	properties["value"] = Dictionary();
+	properties["encodingError"] = MCPToolUtils::make_property_schema("string", "Value encoding failure.");
+	return MCPToolUtils::make_object_schema(properties,
+			PackedStringArray{ "name", "type", "typeId", "className", "hint", "hintString", "usage", "readOnly", "editable", "valueAvailable", "encodable" });
+}
+
+static Dictionary _get_properties_output_schema() {
+	Dictionary properties_array = MCPToolUtils::make_property_schema("array", "Inspectable Resource property descriptions.");
+	properties_array["items"] = _property_description_schema();
+	Dictionary properties;
+	properties["path"] = MCPToolUtils::make_property_schema("string", "Project resource path.");
+	properties["type"] = MCPToolUtils::make_property_schema("string", "Resource class name.");
+	properties["propertyCount"] = _non_negative_integer_schema("Inspectable Resource property count.");
+	properties["properties"] = properties_array;
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "path", "type", "propertyCount", "properties" });
+}
+
+static Dictionary _set_property_output_schema() {
+	Dictionary properties;
+	properties["path"] = MCPToolUtils::make_property_schema("string", "Project resource path.");
+	properties["property"] = MCPToolUtils::make_property_schema("string", "Changed Resource property name.");
+	properties["changed"] = MCPToolUtils::make_property_schema("boolean", "Whether the effective property value changed.");
+	properties["saved"] = MCPToolUtils::make_property_schema("boolean", "Whether the Resource was saved.");
+	properties["oldValue"] = Dictionary();
+	properties["value"] = Dictionary();
+	properties["valueEncodingError"] = MCPToolUtils::make_property_schema("string", "Value encoding failure.");
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "path", "property", "changed", "saved", "value" });
+}
+
+static Dictionary _save_output_schema() {
+	Dictionary properties;
+	properties["path"] = MCPToolUtils::make_property_schema("string", "Saved project resource path.");
+	properties["type"] = MCPToolUtils::make_property_schema("string", "Saved Resource class name.");
+	properties["saved"] = MCPToolUtils::make_property_schema("boolean", "Whether the Resource was saved.");
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "path", "type", "saved" });
+}
+
+static Dictionary _import_options_output_schema() {
+	Dictionary importer = MCPToolUtils::make_object_schema(Dictionary(), PackedStringArray(), true);
+	Dictionary importers = MCPToolUtils::make_property_schema("array", "ResourceImporter candidates.");
+	importers["items"] = importer;
+	Dictionary options = MCPToolUtils::make_property_schema("array", "Effective import option descriptions.");
+	options["items"] = MCPToolUtils::make_object_schema(Dictionary(), PackedStringArray(), true);
+	Dictionary properties;
+	properties["source"] = MCPToolUtils::make_property_schema("string", "Validated source asset path.");
+	properties["extension"] = MCPToolUtils::make_property_schema("string", "Normalized source extension.");
+	properties["defaultImporter"] = MCPToolUtils::make_property_schema("string", "Default ResourceImporter name.");
+	properties["selectedImporter"] = MCPToolUtils::make_property_schema("string", "Selected ResourceImporter name.");
+	properties["selectedPreset"] = MCPToolUtils::make_object_schema(Dictionary(), PackedStringArray(), true);
+	properties["projectDefaultsApplied"] = MCPToolUtils::make_property_schema("boolean", "Whether project defaults were applied.");
+	properties["importers"] = importers;
+	properties["options"] = options;
+	return MCPToolUtils::make_object_schema(properties,
+			PackedStringArray{ "source", "extension", "defaultImporter", "selectedImporter", "selectedPreset", "projectDefaultsApplied", "importers", "options" });
+}
+
+static Dictionary _import_output_schema() {
+	Dictionary generated_files = MCPToolUtils::make_property_schema("array", "Generated imported Resource paths.");
+	generated_files["items"] = MCPToolUtils::make_property_schema("string", "Project resource path.");
+	Dictionary properties;
+	properties["source"] = MCPToolUtils::make_property_schema("string", "Source asset path.");
+	properties["target"] = MCPToolUtils::make_property_schema("string", "Imported project resource path.");
+	properties["importer"] = MCPToolUtils::make_property_schema("string", "Selected ResourceImporter name.");
+	properties["preset"] = _non_negative_integer_schema("Selected importer preset index.");
+	properties["projectDefaultsApplied"] = MCPToolUtils::make_property_schema("boolean", "Whether project defaults were applied.");
+	properties["overwritten"] = MCPToolUtils::make_property_schema("boolean", "Whether existing target-owned files were replaced.");
+	properties["internalPath"] = MCPToolUtils::make_property_schema("string", "Godot internal imported Resource path.");
+	properties["generatedFiles"] = generated_files;
+	return MCPToolUtils::make_object_schema(properties,
+			PackedStringArray{ "source", "target", "importer", "preset", "projectDefaultsApplied", "overwritten", "internalPath", "generatedFiles" });
 }
 
 struct ResourceSelection {
@@ -168,10 +251,6 @@ static void _set_error(String *r_error, const String &p_message) {
 	if (r_error) {
 		*r_error = p_message;
 	}
-}
-
-static Dictionary _unknown_argument_error(const String &p_name) {
-	return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "Unknown argument: " + p_name);
 }
 
 static Dictionary _validate_source_path(const Dictionary &p_arguments, String &r_source_path) {
@@ -337,31 +416,20 @@ Error MCPResourceProvider::register_tools(MCPToolRegistry *p_registry, String *r
 		return ERR_ALREADY_IN_USE;
 	}
 
-	Error error = p_registry->register_tool(
-			MCPToolUtils::make_tool_definition("godot.resource.get_properties", "Get editable Inspector properties from a cached project Resource.", _resource_path_schema(), MCPToolUtils::TOOL_READ_ONLY),
-			callable_mp(this, &MCPResourceProvider::get_properties), this, r_error);
-	if (error == OK) {
-		error = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.resource.set_property", "Set a cached project Resource property without saving it.", _resource_set_property_schema(), MCPToolUtils::TOOL_DESTRUCTIVE),
-				callable_mp(this, &MCPResourceProvider::set_property), this, r_error);
-	}
-	if (error == OK) {
-		error = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.resource.save", "Explicitly save a cached project Resource.", _resource_path_schema(), MCPToolUtils::TOOL_DESTRUCTIVE),
-				callable_mp(this, &MCPResourceProvider::save), this, r_error);
-	}
-	if (error == OK) {
-		error = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.resource.import_options", "List ResourceImporter candidates and effective import options for an external asset.", _resource_options_schema(false), MCPToolUtils::TOOL_READ_ONLY),
-				callable_mp(this, &MCPResourceProvider::import_options), this, r_error);
-	}
-	if (error == OK) {
-		error = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.resource.import", "Copy an external asset into the project, roll back known target-owned artifacts, and report unowned residuals.", _resource_options_schema(true), MCPToolUtils::TOOL_DESTRUCTIVE),
-				callable_mp(this, &MCPResourceProvider::import_resource), this, r_error);
-	}
+	const LocalVector<MCPToolUtils::ToolDescriptor> tools{
+			{ "godot.resource.get_properties", "Get editable Inspector properties from a cached project Resource.",
+					_resource_path_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPResourceProvider::get_properties), _get_properties_output_schema() },
+			{ "godot.resource.set_property", "Set a cached project Resource property without saving it.",
+					_resource_set_property_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPResourceProvider::set_property), _set_property_output_schema() },
+			{ "godot.resource.save", "Explicitly save a cached project Resource.",
+					_resource_path_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPResourceProvider::save), _save_output_schema() },
+			{ "godot.resource.import_options", "List ResourceImporter candidates and effective import options for an external asset.",
+					_resource_options_schema(false), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPResourceProvider::import_options), _import_options_output_schema() },
+			{ "godot.resource.import", "Copy an external asset into the project, roll back known target-owned artifacts, and report unowned residuals.",
+					_resource_options_schema(true), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPResourceProvider::import_resource), _import_output_schema() },
+	};
+	const Error error = MCPToolUtils::register_tools(p_registry, this, tools, r_error);
 	if (error != OK) {
-		p_registry->unregister_tools_for_owner(this);
 		return error;
 	}
 
@@ -380,13 +448,6 @@ void MCPResourceProvider::unregister_tools() {
 }
 
 Dictionary MCPResourceProvider::get_properties(const Dictionary &p_arguments, const Dictionary &) {
-	PackedStringArray allowed_arguments;
-	allowed_arguments.push_back("path");
-	String unknown_argument;
-	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed_arguments, unknown_argument)) {
-		return _unknown_argument_error(unknown_argument);
-	}
-
 	ResourceSelection selection;
 	const Dictionary load_error = _load_project_resource(p_arguments, project_root, resource_cache, selection);
 	if (!load_error.is_empty()) {
@@ -428,14 +489,6 @@ Dictionary MCPResourceProvider::get_properties(const Dictionary &p_arguments, co
 }
 
 Dictionary MCPResourceProvider::set_property(const Dictionary &p_arguments, const Dictionary &) {
-	PackedStringArray allowed_arguments;
-	allowed_arguments.push_back("path");
-	allowed_arguments.push_back("property");
-	allowed_arguments.push_back("value");
-	String unknown_argument;
-	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed_arguments, unknown_argument)) {
-		return _unknown_argument_error(unknown_argument);
-	}
 	const Variant property_value = p_arguments.get("property", Variant());
 	if (property_value.get_type() != Variant::STRING || String(property_value).is_empty() || !p_arguments.has("value")) {
 		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "A non-empty property string and a value are required.");
@@ -507,13 +560,6 @@ Dictionary MCPResourceProvider::set_property(const Dictionary &p_arguments, cons
 }
 
 Dictionary MCPResourceProvider::save(const Dictionary &p_arguments, const Dictionary &) {
-	PackedStringArray allowed_arguments;
-	allowed_arguments.push_back("path");
-	String unknown_argument;
-	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed_arguments, unknown_argument)) {
-		return _unknown_argument_error(unknown_argument);
-	}
-
 	ResourceSelection selection;
 	const Dictionary load_error = _load_project_resource(p_arguments, project_root, resource_cache, selection);
 	if (!load_error.is_empty()) {
@@ -544,16 +590,6 @@ Dictionary MCPResourceProvider::save(const Dictionary &p_arguments, const Dictio
 }
 
 Dictionary MCPResourceProvider::import_options(const Dictionary &p_arguments, const Dictionary &) {
-	PackedStringArray allowed_arguments;
-	allowed_arguments.push_back("source");
-	allowed_arguments.push_back("importer");
-	allowed_arguments.push_back("preset");
-	allowed_arguments.push_back("options");
-	String unknown_argument;
-	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed_arguments, unknown_argument)) {
-		return _unknown_argument_error(unknown_argument);
-	}
-
 	String source_path;
 	const Dictionary source_error = _validate_source_path(p_arguments, source_path);
 	if (!source_error.is_empty()) {
@@ -572,18 +608,6 @@ Dictionary MCPResourceProvider::import_options(const Dictionary &p_arguments, co
 }
 
 Dictionary MCPResourceProvider::import_resource(const Dictionary &p_arguments, const Dictionary &) {
-	PackedStringArray allowed_arguments;
-	allowed_arguments.push_back("source");
-	allowed_arguments.push_back("target");
-	allowed_arguments.push_back("importer");
-	allowed_arguments.push_back("preset");
-	allowed_arguments.push_back("options");
-	allowed_arguments.push_back("overwrite");
-	String unknown_argument;
-	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed_arguments, unknown_argument)) {
-		return _unknown_argument_error(unknown_argument);
-	}
-
 	String source_path;
 	const Dictionary source_error = _validate_source_path(p_arguments, source_path);
 	if (!source_error.is_empty()) {

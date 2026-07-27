@@ -393,7 +393,8 @@ TEST_CASE("[MCP][Provider] Resource options expose candidates, presets, Property
 	CHECK(bool(_find_option(Array(preset_result.get("options", Array())), "enabled").get("value", false)));
 	arguments["preset"] = 1.5;
 	call_result = registry.call_tool("godot.resource.import_options", arguments, context);
-	CHECK(_error_code(call_result) == "INVALID_PRESET");
+	CHECK(_error_code(call_result) == "INVALID_ARGUMENTS");
+	CHECK(_error_details(call_result).get("keyword", String()) == "type");
 
 	arguments.erase("preset");
 	arguments["importer"] = "missing_importer";
@@ -403,7 +404,8 @@ TEST_CASE("[MCP][Provider] Resource options expose candidates, presets, Property
 	arguments.erase("importer");
 	arguments["options"] = Array();
 	call_result = registry.call_tool("godot.resource.import_options", arguments, context);
-	CHECK(_error_code(call_result) == "INVALID_OPTIONS");
+	CHECK(_error_code(call_result) == "INVALID_ARGUMENTS");
+	CHECK(_error_details(call_result).get("keyword", String()) == "type");
 
 	provider->unregister_tools();
 	memdelete(provider);

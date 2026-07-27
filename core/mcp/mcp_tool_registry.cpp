@@ -30,53 +30,23 @@
 
 #include "mcp_tool_registry.h"
 
+#include "mcp_json_schema_validator.h"
+
 namespace {
 
-static bool _find_unknown_argument(const Dictionary &p_arguments, const Dictionary &p_schema,
-		String &r_unknown_argument, PackedStringArray &r_valid_arguments) {
-	r_unknown_argument = String();
-	r_valid_arguments.clear();
-	const Variant additional_properties = p_schema.get("additionalProperties", true);
-	if (additional_properties.get_type() != Variant::BOOL || bool(additional_properties)) {
-		return false;
-	}
-
-	const Dictionary properties = p_schema.get("properties", Dictionary());
-	for (const Variant &key : properties.keys()) {
-		if (key.is_string()) {
-			r_valid_arguments.push_back(key);
-		}
-	}
-	r_valid_arguments.sort();
-	for (const KeyValue<Variant, Variant> &entry : p_arguments) {
-		if (!entry.key.is_string() || !properties.has(entry.key)) {
-			r_unknown_argument = entry.key;
-			return true;
-		}
-	}
-	return false;
-}
-
-static Dictionary _make_unknown_argument_result(const String &p_unknown_argument, const PackedStringArray &p_valid_arguments) {
-	String message = "Unknown argument: " + p_unknown_argument + ".";
-	if (p_valid_arguments.is_empty()) {
-		message += " This tool accepts no arguments.";
-	} else {
-		message += " Valid arguments: " + String(", ").join(p_valid_arguments) + ".";
-	}
-
-	Dictionary details;
-	details["unknownArgument"] = p_unknown_argument;
-	details["validArguments"] = p_valid_arguments;
+static Dictionary _make_invalid_arguments_result(const MCPJSONSchemaValidator::ValidationError &p_validation_error) {
+	Dictionary details = p_validation_error.details.duplicate(true);
+	details["keyword"] = p_validation_error.keyword;
+	details["instancePath"] = p_validation_error.instance_path;
 	Dictionary error;
 	error["code"] = "INVALID_ARGUMENTS";
-	error["message"] = message;
+	error["message"] = p_validation_error.message;
 	error["details"] = details;
 	Dictionary structured_content;
 	structured_content["error"] = error;
 	Dictionary text_content;
 	text_content["type"] = "text";
-	text_content["text"] = message;
+	text_content["text"] = p_validation_error.message;
 	Array content;
 	content.push_back(text_content);
 	Dictionary result;
@@ -156,11 +126,29 @@ Error MCPToolRegistry::register_tool(const Dictionary &p_definition, const Calla
 		}
 		return ERR_INVALID_PARAMETER;
 	}
+	if (p_definition.has("inputSchema")) {
+		String schema_error;
+		if (!MCPJSONSchemaValidator::validate_schema(p_definition["inputSchema"], &schema_error)) {
+			if (r_error) {
+				*r_error = "Tool definition 'inputSchema' is invalid: " + schema_error;
+			}
+			return ERR_INVALID_PARAMETER;
+		}
+	}
 	if (p_definition.has("outputSchema") && p_definition["outputSchema"].get_type() != Variant::DICTIONARY) {
 		if (r_error) {
 			*r_error = "Tool definition 'outputSchema' must be a dictionary.";
 		}
 		return ERR_INVALID_PARAMETER;
+	}
+	if (p_definition.has("outputSchema")) {
+		String schema_error;
+		if (!MCPJSONSchemaValidator::validate_schema(p_definition["outputSchema"], &schema_error)) {
+			if (r_error) {
+				*r_error = "Tool definition 'outputSchema' is invalid: " + schema_error;
+			}
+			return ERR_INVALID_PARAMETER;
+		}
 	}
 	if (p_definition.has("annotations")) {
 		if (p_definition["annotations"].get_type() != Variant::DICTIONARY) {
@@ -278,11 +266,10 @@ MCPToolRegistry::CallResult MCPToolRegistry::call_tool(const StringName &p_name,
 		call_result.message = "Tool is no longer available: " + String(p_name);
 		return call_result;
 	}
-	String unknown_argument;
-	PackedStringArray valid_arguments;
 	const Dictionary input_schema = entry->definition.get("inputSchema", Dictionary());
-	if (_find_unknown_argument(p_arguments, input_schema, unknown_argument, valid_arguments)) {
-		call_result.result = _make_unknown_argument_result(unknown_argument, valid_arguments);
+	MCPJSONSchemaValidator::ValidationError validation_error;
+	if (!MCPJSONSchemaValidator::validate(p_arguments, input_schema, validation_error)) {
+		call_result.result = _make_invalid_arguments_result(validation_error);
 		return call_result;
 	}
 

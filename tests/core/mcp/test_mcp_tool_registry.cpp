@@ -88,6 +88,8 @@ TEST_CASE("[MCP][ToolRegistry] Closed schemas reject unknown arguments with vali
 	const Dictionary details = error.get("details", Dictionary());
 	CHECK(details.get("unknownArgument", String()) == "alpah");
 	CHECK(PackedStringArray(details.get("validArguments", PackedStringArray())) == PackedStringArray{ "alpha", "zeta" });
+	CHECK(details.get("keyword", String()) == "additionalProperties");
+	CHECK(String(details.get("instancePath", String())).is_empty());
 
 	registry.unregister_tools_for_owner(provider);
 	memdelete(provider);
@@ -157,6 +159,14 @@ TEST_CASE("[MCP][ToolRegistry] Validates and isolates tool result metadata") {
 	String error;
 	CHECK_EQ(registry.register_tool(invalid_output, handler, provider, &error), ERR_INVALID_PARAMETER);
 	CHECK(error.contains("outputSchema"));
+
+	Dictionary invalid_schema = make_definition("invalid_schema");
+	Dictionary bad_input_schema;
+	bad_input_schema["type"] = "dictionary";
+	invalid_schema["inputSchema"] = bad_input_schema;
+	CHECK_EQ(registry.register_tool(invalid_schema, handler, provider, &error), ERR_INVALID_PARAMETER);
+	CHECK(error.contains("inputSchema"));
+	CHECK(error.contains("Unknown JSON type"));
 
 	Dictionary invalid_annotations = make_definition("invalid_annotations");
 	invalid_annotations["annotations"] = Array();

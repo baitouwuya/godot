@@ -54,6 +54,12 @@ static String _error_code(const Dictionary &p_result) {
 	return error.get("code", String());
 }
 
+static Dictionary _error_details(const Dictionary &p_result) {
+	const Dictionary structured = p_result.get("structuredContent", Dictionary());
+	const Dictionary error = structured.get("error", Dictionary());
+	return error.get("details", Dictionary());
+}
+
 static Error _write_text(const String &p_path, const String &p_text) {
 	Error open_error = OK;
 	Ref<FileAccess> file = FileAccess::open(p_path, FileAccess::WRITE, &open_error);
@@ -209,6 +215,13 @@ TEST_CASE("[MCP][Provider] GDScript semantic tools use injected analysis session
 	const MCPToolRegistry::CallResult mixed_call = registry.call_tool("godot.gdscript.hover", mixed_position, context);
 	REQUIRE(mixed_call.status == MCPToolRegistry::CALL_OK);
 	CHECK(_error_code(mixed_call.result) == "INVALID_ARGUMENTS");
+
+	const MCPToolRegistry::CallResult missing_selector = registry.call_tool("godot.gdscript.diagnostics", Dictionary(), context);
+	REQUIRE(missing_selector.status == MCPToolRegistry::CALL_OK);
+	CHECK(_error_code(missing_selector.result) == "INVALID_ARGUMENTS");
+	const Dictionary selector_error = _error_details(missing_selector.result);
+	CHECK(selector_error.get("keyword", String()) == "oneOf");
+	CHECK(int(selector_error.get("matchedSchemas", -1)) == 0);
 
 	provider->unregister_tools();
 	CHECK(registry.get_tool_names().is_empty());

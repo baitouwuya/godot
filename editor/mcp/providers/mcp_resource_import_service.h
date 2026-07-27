@@ -1,8 +1,9 @@
 /**************************************************************************/
-/*  mcp_resource_provider.h                                               */
+/*  mcp_resource_import_service.h                                         */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
 /**************************************************************************/
 /* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
 /* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
@@ -29,36 +30,26 @@
 
 #pragma once
 
-#include "../mcp_editor_feature.h"
-#include "mcp_resource_import_service.h"
-
-#include "core/object/object.h"
+#include "core/error/error_list.h"
+#include "core/string/ustring.h"
 #include "core/templates/hash_map.h"
 #include "core/variant/dictionary.h"
 
-class MCPToolRegistry;
-class Resource;
-
-class MCPResourceProvider : public Object, public MCPEditorFeature {
+class MCPResourceImportService {
 public:
-	using ImportFunction = MCPResourceImportService::ImportFunction;
-	using ScanFunction = MCPResourceImportService::ScanFunction;
+	using ImportFunction = Error (*)(const String &p_target_path, const HashMap<StringName, Variant> &p_options, const String &p_importer);
+	using ScanFunction = void (*)();
 
-	explicit MCPResourceProvider(const String &p_project_root = String(), ImportFunction p_import_function = nullptr, ScanFunction p_scan_function = nullptr);
-	~MCPResourceProvider();
+	explicit MCPResourceImportService(const String &p_project_root = String(), ImportFunction p_import_function = nullptr, ScanFunction p_scan_function = nullptr);
 
-	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr) override;
-	void unregister_tools() override;
-
-	Dictionary import_options(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary import_resource(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary get_properties(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary set_property(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary save(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary get_options(const Dictionary &p_arguments) const;
+	Dictionary import_resource(const Dictionary &p_arguments) const;
 
 private:
-	MCPToolRegistry *tool_registry = nullptr;
-	HashMap<String, Ref<Resource>> resource_cache;
+	Error _execute_import(const String &p_target_path, const HashMap<StringName, Variant> &p_options, const String &p_importer) const;
+	void _scan_changes() const;
+
 	String project_root;
-	MCPResourceImportService import_service;
+	ImportFunction import_function = nullptr;
+	ScanFunction scan_function = nullptr;
 };

@@ -30,121 +30,13 @@
 
 #include "mcp_editor_ui_provider.h"
 
+#include "mcp_editor_ui_tool_utils.h"
 #include "mcp_tool_utils.h"
 
 #include "core/mcp/mcp_tool_registry.h"
 #include "core/object/callable_mp.h"
 
 namespace {
-
-static Dictionary _string_schema() {
-	Dictionary schema;
-	schema["type"] = "string";
-	return schema;
-}
-
-static Dictionary _required_string_schema() {
-	Dictionary schema = _string_schema();
-	schema["minLength"] = 1;
-	return schema;
-}
-
-static Dictionary _get_actions_schema() {
-	Dictionary boolean_schema;
-	boolean_schema["type"] = "boolean";
-	Dictionary integer_schema;
-	integer_schema["type"] = "integer";
-
-	Dictionary max_depth = integer_schema.duplicate();
-	max_depth["minimum"] = 1;
-	max_depth["maximum"] = 64;
-	Dictionary limit = integer_schema.duplicate();
-	limit["minimum"] = 1;
-	limit["maximum"] = 2048;
-
-	Dictionary properties;
-	properties["includeDisabled"] = boolean_schema;
-	properties["includeValues"] = boolean_schema;
-	properties["maxDepth"] = max_depth;
-	properties["limit"] = limit;
-
-	Dictionary schema;
-	schema["type"] = "object";
-	schema["properties"] = properties;
-	schema["additionalProperties"] = false;
-	return schema;
-}
-
-static Dictionary _perform_schema() {
-	Dictionary action = _string_schema();
-	PackedStringArray action_enum;
-	action_enum.push_back("focus");
-	action_enum.push_back("click");
-	action_enum.push_back("activate");
-	action_enum.push_back("select");
-	action_enum.push_back("set_value");
-	action_enum.push_back("expand");
-	action_enum.push_back("collapse");
-	action_enum.push_back("increment");
-	action_enum.push_back("decrement");
-	action["enum"] = action_enum;
-
-	Dictionary properties;
-	properties["snapshotId"] = _required_string_schema();
-	properties["targetId"] = _required_string_schema();
-	properties["action"] = action;
-	Dictionary value;
-	Array value_types;
-	value_types.push_back("string");
-	value_types.push_back("number");
-	value_types.push_back("integer");
-	value_types.push_back("boolean");
-	value["type"] = value_types;
-	properties["value"] = value;
-
-	PackedStringArray required;
-	required.push_back("snapshotId");
-	required.push_back("targetId");
-	required.push_back("action");
-
-	Dictionary schema;
-	schema["type"] = "object";
-	schema["properties"] = properties;
-	schema["required"] = required;
-	schema["additionalProperties"] = false;
-	return schema;
-}
-
-static Dictionary _snapshot_output_schema() {
-	Dictionary item;
-	item["type"] = "object";
-	item["additionalProperties"] = true;
-	Dictionary items = MCPToolUtils::make_property_schema("array", "Visible editor UI action targets.");
-	items["items"] = item;
-	items["maxItems"] = 2048;
-	Dictionary count = MCPToolUtils::make_property_schema("integer", "Returned UI target count.");
-	count["minimum"] = 0;
-	count["maximum"] = 2048;
-
-	Dictionary properties;
-	properties["snapshotId"] = MCPToolUtils::make_property_schema("string", "Opaque session-bound UI snapshot ID.");
-	properties["windowTitle"] = MCPToolUtils::make_property_schema("string", "Captured editor window title.");
-	properties["items"] = items;
-	properties["truncated"] = MCPToolUtils::make_property_schema("boolean", "Whether additional UI targets were omitted.");
-	properties["count"] = count;
-	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "snapshotId", "windowTitle", "items", "truncated", "count" });
-}
-
-static Dictionary _perform_output_schema() {
-	Dictionary action = MCPToolUtils::make_property_schema("string", "Performed semantic UI action.");
-	action["enum"] = PackedStringArray{ "focus", "click", "activate", "select", "set_value", "expand", "collapse", "increment", "decrement" };
-	Dictionary properties;
-	properties["performed"] = MCPToolUtils::make_property_schema("boolean", "Whether the UI action completed.");
-	properties["action"] = action;
-	properties["targetId"] = MCPToolUtils::make_property_schema("string", "Opaque acted-on target ID.");
-	properties["snapshotInvalidated"] = MCPToolUtils::make_property_schema("boolean", "Whether the source snapshot was invalidated.");
-	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "performed", "action", "targetId", "snapshotInvalidated" });
-}
 
 static void _set_error(String *r_error, const String &p_message) {
 	if (r_error) {
@@ -173,9 +65,9 @@ Error MCPEditorUIProvider::register_tools(MCPToolRegistry *p_registry, String *r
 
 	const LocalVector<MCPToolUtils::ToolDescriptor> tools{
 		{ "godot.editor.ui.get_actions", "Inspect the currently visible editor controls and their semantic actions. Returns snapshot-bound opaque target IDs.",
-				_get_actions_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPEditorUIProvider::get_actions), _snapshot_output_schema() },
+				MCPEditorUIToolUtils::get_actions_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPEditorUIProvider::get_actions), MCPEditorUIToolUtils::snapshot_output_schema() },
 		{ "godot.editor.ui.perform", "Perform a semantic action on a target from the latest editor UI snapshot for this MCP session.",
-				_perform_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPEditorUIProvider::perform), _perform_output_schema() },
+				MCPEditorUIToolUtils::perform_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPEditorUIProvider::perform), MCPEditorUIToolUtils::perform_output_schema() },
 	};
 	const Error error = MCPToolUtils::register_tools(p_registry, this, tools, r_error);
 	if (error != OK) {
@@ -231,41 +123,19 @@ Dictionary MCPEditorUIProvider::get_actions(const Dictionary &p_arguments, const
 	}
 
 	MCPEditorUIService::SnapshotOptions options;
-	if (p_arguments.has("includeDisabled")) {
-		if (p_arguments["includeDisabled"].get_type() != Variant::BOOL) {
-			return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "includeDisabled must be a boolean.");
-		}
-		options.include_disabled = p_arguments["includeDisabled"];
-	}
-	if (p_arguments.has("includeValues")) {
-		if (p_arguments["includeValues"].get_type() != Variant::BOOL) {
-			return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "includeValues must be a boolean.");
-		}
-		options.include_values = p_arguments["includeValues"];
-	}
-	int64_t integer = 0;
-	if (p_arguments.has("maxDepth")) {
-		if (!MCPToolUtils::try_get_json_integer(p_arguments["maxDepth"], 1, 64, integer)) {
-			return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "maxDepth must be an integer from 1 to 64.");
-		}
-		options.max_depth = integer;
-	}
-	if (p_arguments.has("limit")) {
-		if (!MCPToolUtils::try_get_json_integer(p_arguments["limit"], 1, 2048, integer)) {
-			return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "limit must be an integer from 1 to 2048.");
-		}
-		options.limit = integer;
+	String argument_error;
+	if (MCPEditorUIToolUtils::parse_snapshot_options(p_arguments, options, argument_error) != OK) {
+		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", argument_error);
 	}
 
 	return MCPToolUtils::make_success_result(service.capture(session_id, options));
 }
 
 Dictionary MCPEditorUIProvider::perform(const Dictionary &p_arguments, const Dictionary &p_context) {
-	const Variant snapshot = p_arguments.get("snapshotId", Variant());
-	const Variant target = p_arguments.get("targetId", Variant());
-	const Variant action = p_arguments.get("action", Variant());
-	if (snapshot.get_type() != Variant::STRING || String(snapshot).is_empty() || target.get_type() != Variant::STRING || String(target).is_empty() || action.get_type() != Variant::STRING || String(action).is_empty()) {
-		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "snapshotId, targetId, and action must be non-empty strings.");
+	MCPEditorUIToolUtils::PerformArguments arguments;
+	String argument_error;
+	if (MCPEditorUIToolUtils::parse_perform_arguments(p_arguments, arguments, argument_error) != OK) {
+		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", argument_error);
 	}
 
 	String session_id;
@@ -277,7 +147,7 @@ Dictionary MCPEditorUIProvider::perform(const Dictionary &p_arguments, const Dic
 	Dictionary result;
 	String error_code;
 	String error_message;
-	const Error error = service.perform(session_id, snapshot, target, action, p_arguments, result, error_code, error_message);
+	const Error error = service.perform(session_id, arguments.snapshot_id, arguments.target_id, arguments.action, p_arguments, result, error_code, error_message);
 	if (error != OK) {
 		return MCPToolUtils::make_error_result(error_code, error_message);
 	}

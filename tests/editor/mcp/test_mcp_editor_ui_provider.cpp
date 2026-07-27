@@ -31,6 +31,7 @@
 #include "core/mcp/mcp_tool_registry.h"
 #include "editor/editor_node.h"
 #include "editor/mcp/providers/mcp_editor_ui_provider.h"
+#include "editor/mcp/providers/mcp_editor_ui_tool_utils.h"
 #include "scene/gui/line_edit.h"
 #include "scene/gui/option_button.h"
 #include "scene/gui/slider.h"
@@ -126,6 +127,11 @@ TEST_CASE("[MCP][Provider] Editor UI tools expose strict session-bound schemas")
 	CHECK(Dictionary(snapshot_output.get("properties", Dictionary())).has("items"));
 	CHECK(PackedStringArray(snapshot_output.get("required", PackedStringArray())).has("snapshotId"));
 	CHECK_FALSE(bool(snapshot_output.get("additionalProperties", true)));
+	const Dictionary snapshot_input_properties = Dictionary(Dictionary(definitions[0]).get("inputSchema", Dictionary())).get("properties", Dictionary());
+	CHECK(int(Dictionary(snapshot_input_properties.get("maxDepth", Dictionary())).get("default", 0)) == 32);
+	CHECK(int(Dictionary(snapshot_input_properties.get("limit", Dictionary())).get("default", 0)) == 512);
+	CHECK_FALSE(bool(Dictionary(snapshot_input_properties.get("includeDisabled", Dictionary())).get("default", true)));
+	CHECK(bool(Dictionary(snapshot_input_properties.get("includeValues", Dictionary())).get("default", false)));
 	const Dictionary perform_input = Dictionary(definitions[1]).get("inputSchema", Dictionary());
 	const Dictionary perform_snapshot_id = Dictionary(perform_input.get("properties", Dictionary())).get("snapshotId", Dictionary());
 	CHECK(int(perform_snapshot_id.get("minLength", 0)) == 1);
@@ -140,6 +146,44 @@ TEST_CASE("[MCP][Provider] Editor UI tools expose strict session-bound schemas")
 
 	provider.unregister_tools();
 	CHECK(registry.get_tool_names().is_empty());
+}
+
+TEST_CASE("[MCP][Provider] Editor UI argument parsing shares discovery defaults and bounds") {
+	MCPEditorUIService::SnapshotOptions options;
+	String error_message;
+	CHECK(MCPEditorUIToolUtils::parse_snapshot_options(Dictionary(), options, error_message) == OK);
+	CHECK_FALSE(options.include_disabled);
+	CHECK(options.include_values);
+	CHECK(options.max_depth == 32);
+	CHECK(options.limit == 512);
+
+	Dictionary arguments;
+	arguments["includeDisabled"] = true;
+	arguments["includeValues"] = false;
+	arguments["maxDepth"] = 64;
+	arguments["limit"] = 2048;
+	CHECK(MCPEditorUIToolUtils::parse_snapshot_options(arguments, options, error_message) == OK);
+	CHECK(options.include_disabled);
+	CHECK_FALSE(options.include_values);
+	CHECK(options.max_depth == 64);
+	CHECK(options.limit == 2048);
+
+	arguments["maxDepth"] = 65;
+	CHECK(MCPEditorUIToolUtils::parse_snapshot_options(arguments, options, error_message) == ERR_INVALID_PARAMETER);
+	CHECK(error_message == "maxDepth must be an integer from 1 to 64.");
+
+	MCPEditorUIToolUtils::PerformArguments perform;
+	Dictionary perform_arguments;
+	perform_arguments["snapshotId"] = "snapshot";
+	perform_arguments["targetId"] = "target";
+	perform_arguments["action"] = "click";
+	CHECK(MCPEditorUIToolUtils::parse_perform_arguments(perform_arguments, perform, error_message) == OK);
+	CHECK(perform.snapshot_id == "snapshot");
+	CHECK(perform.target_id == "target");
+	CHECK(perform.action == "click");
+	perform_arguments["targetId"] = String();
+	CHECK(MCPEditorUIToolUtils::parse_perform_arguments(perform_arguments, perform, error_message) == ERR_INVALID_PARAMETER);
+	CHECK(error_message == "snapshotId, targetId, and action must be non-empty strings.");
 }
 
 TEST_CASE("[MCP][Provider] Editor UI snapshots are monotonic, latest-only, and isolated by session") {

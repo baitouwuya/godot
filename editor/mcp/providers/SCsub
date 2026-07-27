@@ -14,6 +14,7 @@ gdscript_lsp_sources = {
     "mcp_script_document.cpp",
     "mcp_script_member_selector.cpp",
     "mcp_script_provider.cpp",
+    "mcp_script_tool_utils.cpp",
     "mcp_script_usages.cpp",
     "mcp_workspace_edit_planner.cpp",
     "mcp_workspace_edit_transaction.cpp",

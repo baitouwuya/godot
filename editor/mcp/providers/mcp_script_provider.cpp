@@ -33,6 +33,7 @@
 #include "mcp_script_analysis_sync.h"
 #include "mcp_script_buffer.h"
 #include "mcp_script_document.h"
+#include "mcp_script_tool_utils.h"
 #include "mcp_script_usages.h"
 #include "mcp_scene_utils.h"
 #include "mcp_tool_utils.h"
@@ -48,235 +49,6 @@
 
 namespace {
 
-static Dictionary _required_string_schema(const String &p_description) {
-	Dictionary schema = MCPToolUtils::make_property_schema("string", p_description);
-	schema["minLength"] = 1;
-	return schema;
-}
-
-static Dictionary _non_negative_integer_schema(const String &p_description) {
-	Dictionary schema = MCPToolUtils::make_property_schema("integer", p_description);
-	schema["minimum"] = 0;
-	return schema;
-}
-
-static Dictionary _script_selector_schema(const Dictionary &p_extra_properties = Dictionary()) {
-	Dictionary properties;
-	properties["path"] = _required_string_schema("External GDScript or built-in res:// resource path.");
-	properties["nodePath"] = _required_string_schema("Node path in the edited scene whose attached GDScript should be used.");
-	for (const KeyValue<Variant, Variant> &property : p_extra_properties) {
-		properties[property.key] = property.value;
-	}
-	Dictionary schema = MCPToolUtils::make_object_schema(properties, PackedStringArray());
-	Dictionary path_required;
-	PackedStringArray path_names;
-	path_names.push_back("path");
-	path_required["required"] = path_names;
-	Dictionary node_required;
-	PackedStringArray node_names;
-	node_names.push_back("nodePath");
-	node_required["required"] = node_names;
-	Array one_of;
-	one_of.push_back(path_required);
-	one_of.push_back(node_required);
-	schema["oneOf"] = one_of;
-	return schema;
-}
-
-static Dictionary _create_schema() {
-	Dictionary properties;
-	properties["path"] = _required_string_schema("New external .gd path beginning with res://.");
-	properties["text"] = MCPToolUtils::make_property_schema("string", "Initial UTF-8 GDScript source text.");
-	PackedStringArray required;
-	required.push_back("path");
-	required.push_back("text");
-	return MCPToolUtils::make_object_schema(properties, required);
-}
-
-static Dictionary _member_schema() {
-	Dictionary properties;
-	Dictionary kind = MCPToolUtils::make_property_schema("string", "Member kind to read.");
-	PackedStringArray kinds;
-	kinds.push_back("class");
-	kinds.push_back("property");
-	kinds.push_back("variable");
-	kinds.push_back("constant");
-	kinds.push_back("enum");
-	kinds.push_back("enumValue");
-	kinds.push_back("signal");
-	kinds.push_back("method");
-	kinds.push_back("parameter");
-	kind["enum"] = kinds;
-	properties["kind"] = kind;
-	properties["name"] = _required_string_schema("Exact member name.");
-	properties["owner"] = MCPToolUtils::make_property_schema("string", "Optional qualified inner class path, or required method/signal name for a parameter.");
-	properties["classPath"] = _required_string_schema("Optional qualified inner class path for a parameter, such as Outer.Inner.");
-	PackedStringArray required;
-	required.push_back("kind");
-	required.push_back("name");
-	return MCPToolUtils::make_object_schema(properties, required);
-}
-
-static Dictionary _get_schema() {
-	Dictionary properties;
-	Dictionary view = MCPToolUtils::make_property_schema("string", "documentation omits implementations; full returns authoritative source lines.");
-	PackedStringArray views;
-	views.push_back("documentation");
-	views.push_back("full");
-	view["enum"] = views;
-	view["default"] = "documentation";
-	properties["view"] = view;
-	Dictionary include_comments = MCPToolUtils::make_property_schema("boolean", "Include documentation or source comments.");
-	include_comments["default"] = true;
-	properties["includeComments"] = include_comments;
-	properties["member"] = _member_schema();
-	return _script_selector_schema(properties);
-}
-
-static Dictionary _usages_schema() {
-	Dictionary properties;
-	properties["member"] = _member_schema();
-	Dictionary include_declaration = MCPToolUtils::make_property_schema("boolean", "Include the selected member declaration in the returned LSP locations.");
-	include_declaration["default"] = false;
-	properties["includeDeclaration"] = include_declaration;
-	Dictionary schema = _script_selector_schema(properties);
-	PackedStringArray required;
-	required.push_back("member");
-	schema["required"] = required;
-	return schema;
-}
-
-static Dictionary _edit_schema() {
-	Dictionary properties;
-	properties["text"] = MCPToolUtils::make_property_schema("string", "Complete replacement source text.");
-
-	Dictionary expected_revision = MCPToolUtils::make_property_schema("integer", "TextEdit revision returned by godot.script.get.");
-	expected_revision["minimum"] = 0;
-	expected_revision["maximum"] = int64_t(0xFFFFFFFFLL);
-	properties["expected_revision"] = expected_revision;
-
-	Dictionary expected_sha256 = MCPToolUtils::make_property_schema("string", "SHA-256 returned by godot.script.get.");
-	expected_sha256["pattern"] = "^[0-9a-fA-F]{64}$";
-	properties["expected_sha256"] = expected_sha256;
-
-	Dictionary schema = _script_selector_schema(properties);
-	PackedStringArray required;
-	required.push_back("text");
-	Dictionary text_required;
-	text_required["required"] = required;
-
-	PackedStringArray revision_required;
-	revision_required.push_back("expected_revision");
-	Dictionary revision_option;
-	revision_option["required"] = revision_required;
-	PackedStringArray sha_required;
-	sha_required.push_back("expected_sha256");
-	Dictionary sha_option;
-	sha_option["required"] = sha_required;
-	Array any_of;
-	any_of.push_back(revision_option);
-	any_of.push_back(sha_option);
-	Array all_of;
-	all_of.push_back(text_required);
-	Dictionary revision_choice;
-	revision_choice["anyOf"] = any_of;
-	all_of.push_back(revision_choice);
-	schema["allOf"] = all_of;
-	return schema;
-}
-
-static Dictionary _diagnostics_schema() {
-	Dictionary diagnostics = MCPToolUtils::make_property_schema("array", "GDScript diagnostics for the authoritative buffer revision.");
-	diagnostics["items"] = MCPToolUtils::make_object_schema(Dictionary(), PackedStringArray(), true);
-	return diagnostics;
-}
-
-static Dictionary _snapshot_properties() {
-	Dictionary properties;
-	properties["path"] = MCPToolUtils::make_property_schema("string", "Authoritative Script editor resource path.");
-	properties["text"] = MCPToolUtils::make_property_schema("string", "Authoritative UTF-8 script text.");
-	properties["revision"] = _non_negative_integer_schema("Current Script editor revision.");
-	properties["savedRevision"] = _non_negative_integer_schema("Last saved Script editor revision.");
-	Dictionary sha256 = MCPToolUtils::make_property_schema("string", "SHA-256 of the authoritative script text.");
-	sha256["pattern"] = "^[0-9a-f]{64}$";
-	properties["sha256"] = sha256;
-	properties["unsaved"] = MCPToolUtils::make_property_schema("boolean", "Whether the Script editor buffer has unsaved changes.");
-	properties["sourceState"] = MCPToolUtils::make_property_schema("string", "Authoritative source state.");
-	properties["sourceType"] = MCPToolUtils::make_property_schema("string", "External or built-in script source type.");
-	properties["scenePath"] = MCPToolUtils::make_property_schema("string", "Owning scene path for a built-in script.");
-	return properties;
-}
-
-static PackedStringArray _snapshot_required(bool p_include_text) {
-	PackedStringArray required{ "path", "revision", "savedRevision", "sha256", "unsaved", "sourceState", "sourceType" };
-	if (p_include_text) {
-		required.push_back("text");
-	}
-	return required;
-}
-
-static Dictionary _open_output_schema() {
-	Dictionary properties = _snapshot_properties();
-	properties["opened"] = MCPToolUtils::make_property_schema("boolean", "Whether the script was opened.");
-	PackedStringArray required = _snapshot_required(false);
-	required.push_back("opened");
-	return MCPToolUtils::make_object_schema(properties, required);
-}
-
-static Dictionary _create_output_schema() {
-	Dictionary properties = _snapshot_properties();
-	properties["created"] = MCPToolUtils::make_property_schema("boolean", "Whether the external script was created.");
-	properties["diagnostics"] = _diagnostics_schema();
-	PackedStringArray required = _snapshot_required(true);
-	required.push_back("created");
-	required.push_back("diagnostics");
-	return MCPToolUtils::make_object_schema(properties, required);
-}
-
-static Dictionary _get_output_schema() {
-	Dictionary properties = _snapshot_properties();
-	properties["view"] = MCPToolUtils::make_property_schema("string", "Applied script view.");
-	properties["includeComments"] = MCPToolUtils::make_property_schema("boolean", "Whether comments were included.");
-	PackedStringArray required = _snapshot_required(false);
-	required.push_back("view");
-	required.push_back("includeComments");
-	return MCPToolUtils::make_object_schema(properties, required, true);
-}
-
-static Dictionary _usages_output_schema() {
-	Dictionary properties = _snapshot_properties();
-	properties["member"] = _member_schema();
-	Dictionary locations = MCPToolUtils::make_property_schema("array", "Semantic LSP usage locations.");
-	locations["items"] = MCPToolUtils::make_object_schema(Dictionary(), PackedStringArray(), true);
-	properties["locations"] = locations;
-	properties["count"] = _non_negative_integer_schema("Returned usage location count.");
-	PackedStringArray required = _snapshot_required(false);
-	required.push_back("member");
-	required.push_back("locations");
-	required.push_back("count");
-	return MCPToolUtils::make_object_schema(properties, required);
-}
-
-static Dictionary _edit_output_schema() {
-	Dictionary properties = _snapshot_properties();
-	properties["changed"] = MCPToolUtils::make_property_schema("boolean", "Whether the authoritative buffer changed.");
-	properties["diagnostics"] = _diagnostics_schema();
-	PackedStringArray required = _snapshot_required(true);
-	required.push_back("changed");
-	required.push_back("diagnostics");
-	return MCPToolUtils::make_object_schema(properties, required);
-}
-
-static Dictionary _save_output_schema() {
-	Dictionary properties = _snapshot_properties();
-	properties["saved"] = MCPToolUtils::make_property_schema("boolean", "Whether the script was saved.");
-	properties["diagnostics"] = _diagnostics_schema();
-	PackedStringArray required = _snapshot_required(true);
-	required.push_back("saved");
-	required.push_back("diagnostics");
-	return MCPToolUtils::make_object_schema(properties, required);
-}
-
 static bool _get_required_string(const Dictionary &p_arguments, const StringName &p_name, String &r_value) {
 	const Variant value = p_arguments.get(p_name, Variant());
 	if (value.get_type() != Variant::STRING) {
@@ -284,15 +56,6 @@ static bool _get_required_string(const Dictionary &p_arguments, const StringName
 	}
 	r_value = value;
 	return !r_value.is_empty();
-}
-
-static bool _is_valid_class_path(const String &p_path) {
-	return !p_path.is_empty() && !p_path.begins_with(".") && !p_path.ends_with(".") && !p_path.contains("..");
-}
-
-static bool _is_valid_member_kind(const String &p_kind) {
-	return p_kind == "class" || p_kind == "property" || p_kind == "variable" || p_kind == "constant" ||
-			p_kind == "enum" || p_kind == "enumValue" || p_kind == "signal" || p_kind == "method" || p_kind == "parameter";
 }
 
 static String _buffer_error_code(Error p_error) {
@@ -344,57 +107,6 @@ static Dictionary _open_selected_buffer(const Dictionary &p_arguments, MCPScript
 	return err == OK ? Dictionary() : MCPToolUtils::make_error_result(_buffer_error_code(err), error);
 }
 
-static bool _validate_member_query(const Dictionary &p_member, String &r_error) {
-	if (!p_member.is_empty()) {
-		if (p_member.get("kind", Variant()).get_type() != Variant::STRING || String(p_member.get("kind", String())).is_empty() ||
-				p_member.get("name", Variant()).get_type() != Variant::STRING || String(p_member.get("name", String())).is_empty() ||
-				(p_member.has("owner") && p_member["owner"].get_type() != Variant::STRING) ||
-				(p_member.has("classPath") && (p_member["classPath"].get_type() != Variant::STRING || String(p_member["classPath"]).is_empty()))) {
-			r_error = "member requires non-empty string kind and name fields, with optional string owner and classPath fields.";
-			return false;
-		}
-		const bool parameter = String(p_member.get("kind", String())) == "parameter";
-		if (!_is_valid_member_kind(p_member.get("kind", String()))) {
-			r_error = "member kind is not supported.";
-			return false;
-		}
-		if (parameter && String(p_member.get("owner", String())).is_empty()) {
-			r_error = "A parameter member query requires its method or signal owner.";
-			return false;
-		}
-		if (!parameter && p_member.has("classPath")) {
-			r_error = "classPath is only valid for parameter member queries.";
-			return false;
-		}
-		const String class_path = p_member.get("classPath", String());
-		const String owner = p_member.get("owner", String());
-		if (parameter && owner.contains(".")) {
-			r_error = "A parameter member owner must be an unqualified method or signal name.";
-			return false;
-		}
-		if ((!class_path.is_empty() && !_is_valid_class_path(class_path)) || (!parameter && owner.contains(".") && !_is_valid_class_path(owner))) {
-			r_error = "Qualified class paths cannot start or end with a period or contain empty segments.";
-			return false;
-		}
-	}
-	return true;
-}
-
-static bool _get_script_view(const Dictionary &p_arguments, String &r_view, bool &r_include_comments, Dictionary &r_member, String &r_error) {
-	r_view = p_arguments.get("view", "documentation");
-	r_include_comments = p_arguments.get("includeComments", true);
-	const Variant member_value = p_arguments.get("member", Dictionary());
-	if ((r_view != "documentation" && r_view != "full") ||
-			(p_arguments.has("view") && p_arguments["view"].get_type() != Variant::STRING) ||
-			(p_arguments.has("includeComments") && p_arguments["includeComments"].get_type() != Variant::BOOL) ||
-			member_value.get_type() != Variant::DICTIONARY) {
-		r_error = "view, includeComments, or member has an invalid type or value.";
-		return false;
-	}
-	r_member = member_value;
-	return _validate_member_query(r_member, r_error);
-}
-
 static void _set_error(String *r_error, const String &p_message) {
 	if (r_error) {
 		*r_error = p_message;
@@ -434,17 +146,17 @@ Error MCPScriptProvider::register_tools(MCPToolRegistry *p_registry, String *r_e
 
 	const LocalVector<MCPToolUtils::ToolDescriptor> tools{
 			{ "godot.script.create", "Create and open an external GDScript.",
-					_create_schema(), MCPToolUtils::TOOL_ADDITIVE, callable_mp(this, &MCPScriptProvider::create), _create_output_schema() },
+					MCPScriptToolUtils::create_schema(), MCPToolUtils::TOOL_ADDITIVE, callable_mp(this, &MCPScriptProvider::create), MCPScriptToolUtils::create_output_schema() },
 			{ "godot.script.open", "Open an external or built-in GDScript in the Script editor.",
-					_script_selector_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPScriptProvider::open), _open_output_schema() },
+					MCPScriptToolUtils::selector_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPScriptProvider::open), MCPScriptToolUtils::open_output_schema() },
 			{ "godot.script.get", "Read a GDScript as documentation, a member, or full source.",
-					_get_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPScriptProvider::get), _get_output_schema() },
+					MCPScriptToolUtils::get_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPScriptProvider::get), MCPScriptToolUtils::get_output_schema() },
 			{ "godot.script.usages", "Find semantic LSP usages of a named GDScript member.",
-					_usages_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPScriptProvider::usages), _usages_output_schema() },
+					MCPScriptToolUtils::usages_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPScriptProvider::usages), MCPScriptToolUtils::usages_output_schema() },
 			{ "godot.script.edit", "Replace a Script editor buffer with optimistic concurrency.",
-					_edit_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPScriptProvider::edit), _edit_output_schema() },
+					MCPScriptToolUtils::edit_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPScriptProvider::edit), MCPScriptToolUtils::edit_output_schema() },
 			{ "godot.script.save", "Explicitly save an authoritative Script editor buffer.",
-					_script_selector_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPScriptProvider::save), _save_output_schema() },
+					MCPScriptToolUtils::selector_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPScriptProvider::save), MCPScriptToolUtils::save_output_schema() },
 	};
 	const Error err = MCPToolUtils::register_tools(p_registry, this, tools, r_error);
 	if (err != OK) {
@@ -552,7 +264,7 @@ Dictionary MCPScriptProvider::get(const Dictionary &p_arguments, const Dictionar
 	bool include_comments = true;
 	Dictionary member;
 	String argument_error;
-	if (!_get_script_view(p_arguments, view, include_comments, member, argument_error)) {
+	if (!MCPScriptToolUtils::parse_script_view(p_arguments, view, include_comments, member, argument_error)) {
 		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", argument_error);
 	}
 	String session_id;
@@ -599,7 +311,7 @@ Dictionary MCPScriptProvider::usages(const Dictionary &p_arguments, const Dictio
 	}
 	const Dictionary member = member_value;
 	String argument_error;
-	if (!_validate_member_query(member, argument_error)) {
+	if (!MCPScriptToolUtils::validate_member_query(member, argument_error)) {
 		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", argument_error);
 	}
 

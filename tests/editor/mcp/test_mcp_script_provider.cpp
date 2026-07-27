@@ -36,6 +36,7 @@
 
 #include "core/mcp/mcp_tool_registry.h"
 #include "editor/mcp/providers/mcp_script_provider.h"
+#include "editor/mcp/providers/mcp_script_tool_utils.h"
 
 #endif
 
@@ -55,6 +56,24 @@ static Dictionary _error_details(const Dictionary &p_result) {
 	const Dictionary structured = p_result.get("structuredContent", Dictionary());
 	const Dictionary error = structured.get("error", Dictionary());
 	return error.get("details", Dictionary());
+}
+
+TEST_CASE("[MCP][Provider] Script tool utilities validate shared member arguments") {
+	String view;
+	bool include_comments = false;
+	Dictionary member;
+	String error;
+	CHECK(MCPScriptToolUtils::parse_script_view(Dictionary(), view, include_comments, member, error));
+	CHECK(view == "documentation");
+	CHECK(include_comments);
+	CHECK(member.is_empty());
+
+	member["kind"] = "method";
+	member["name"] = "run";
+	CHECK(MCPScriptToolUtils::validate_member_query(member, error));
+	member["kind"] = "unsupported";
+	CHECK_FALSE(MCPScriptToolUtils::validate_member_query(member, error));
+	CHECK(error == "member kind is not supported.");
 }
 
 TEST_CASE("[MCP][Provider] Script tools register with optimistic edit requirements") {

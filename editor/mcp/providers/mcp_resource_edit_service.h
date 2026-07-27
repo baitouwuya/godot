@@ -1,8 +1,9 @@
 /**************************************************************************/
-/*  mcp_resource_provider.h                                               */
+/*  mcp_resource_edit_service.h                                          */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
 /**************************************************************************/
 /* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
 /* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
@@ -29,34 +30,31 @@
 
 #pragma once
 
-#include "../mcp_editor_feature.h"
-#include "mcp_resource_edit_service.h"
-#include "mcp_resource_import_service.h"
-
-#include "core/object/object.h"
+#include "core/io/resource.h"
+#include "core/object/property_info.h"
+#include "core/string/ustring.h"
+#include "core/templates/hash_map.h"
 #include "core/variant/dictionary.h"
 
-class MCPToolRegistry;
-
-class MCPResourceProvider : public Object, public MCPEditorFeature {
+class MCPResourceEditService {
 public:
-	using ImportFunction = MCPResourceImportService::ImportFunction;
-	using ScanFunction = MCPResourceImportService::ScanFunction;
+	explicit MCPResourceEditService(const String &p_project_root = String());
 
-	explicit MCPResourceProvider(const String &p_project_root = String(), ImportFunction p_import_function = nullptr, ScanFunction p_scan_function = nullptr);
-	~MCPResourceProvider();
-
-	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr) override;
-	void unregister_tools() override;
-
-	Dictionary import_options(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary import_resource(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary get_properties(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary set_property(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary save(const Dictionary &p_arguments, const Dictionary &p_context);
+	Dictionary get_properties(const Dictionary &p_arguments);
+	Dictionary set_property(const Dictionary &p_arguments);
+	Dictionary save(const Dictionary &p_arguments);
+	void clear();
 
 private:
-	MCPToolRegistry *tool_registry = nullptr;
-	MCPResourceEditService edit_service;
-	MCPResourceImportService import_service;
+	struct Selection {
+		String resource_path;
+		String absolute_path;
+		Ref<Resource> resource;
+	};
+
+	Dictionary _load(const Dictionary &p_arguments, Selection &r_selection);
+	static bool _find_property(const Ref<Resource> &p_resource, const StringName &p_name, PropertyInfo &r_property);
+
+	String project_root;
+	HashMap<String, Ref<Resource>> resource_cache;
 };

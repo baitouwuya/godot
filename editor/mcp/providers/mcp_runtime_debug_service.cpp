@@ -30,11 +30,9 @@
 
 #include "mcp_runtime_debug_service.h"
 
-#include "mcp_debug_capture.h"
 #include "mcp_path_utils.h"
 #include "mcp_runtime_input.h"
 #include "mcp_runtime_input_sequence.h"
-#include "mcp_runtime_observation_debugger_plugin.h"
 #include "mcp_runtime_target_action.h"
 #include "mcp_tool_utils.h"
 #include "mcp_variant_codec.h"
@@ -247,8 +245,8 @@ bool _read_resolved_target(const Dictionary &p_resolution, int p_index, Dictiona
 } // namespace
 
 MCPRuntimeDebugService::MCPRuntimeDebugService(MCPDebugCapture *p_debug_capture) :
+		runtime_gateway(p_debug_capture),
 		input_scheduler(p_debug_capture) {
-	debug_capture = p_debug_capture;
 }
 
 MCPRuntimeDebugService::~MCPRuntimeDebugService() {
@@ -256,67 +254,17 @@ MCPRuntimeDebugService::~MCPRuntimeDebugService() {
 }
 
 Dictionary MCPRuntimeDebugService::_make_session_identity(int p_debugger_session, uint64_t p_runtime_generation) const {
-	Dictionary identity;
-	identity["debuggerSession"] = p_debugger_session;
-	identity["runtimeGeneration"] = int64_t(p_runtime_generation);
-	return identity;
+	return runtime_gateway.make_session_identity(p_debugger_session, p_runtime_generation);
 }
 
 Dictionary MCPRuntimeDebugService::_resolve_session(const Dictionary &p_arguments, bool p_require_generation, ScriptEditorDebugger *&r_debugger,
 		int &r_debugger_session, uint64_t &r_runtime_generation) const {
-	r_debugger = nullptr;
-	r_debugger_session = -1;
-	r_runtime_generation = 0;
-	EditorDebuggerNode *debugger_node = EditorDebuggerNode::get_singleton();
-	if (!debugger_node || !debug_capture) {
-		return _error("RUNTIME_UNAVAILABLE", "The editor debugger is not available.");
-	}
-
-	if (p_arguments.has("debuggerSession")) {
-		int64_t requested_session = 0;
-		if (!MCPToolUtils::try_get_json_integer(p_arguments["debuggerSession"], 0, INT32_MAX, requested_session)) {
-			return _error("INVALID_ARGUMENTS", "debuggerSession must be a non-negative integer.");
-		}
-		if (requested_session >= debugger_node->get_debugger_count()) {
-			return _error("RUNTIME_NOT_FOUND", "The requested debugger session does not exist.");
-		}
-		ScriptEditorDebugger *candidate = debugger_node->get_debugger(int(requested_session));
-		if (!candidate || !candidate->is_session_active()) {
-			return _error("RUNTIME_NOT_RUNNING", "The requested debugger session is not active.");
-		}
-		r_debugger = candidate;
-		r_debugger_session = int(requested_session);
-	} else {
-		for (int i = 0; i < debugger_node->get_debugger_count(); i++) {
-			ScriptEditorDebugger *candidate = debugger_node->get_debugger(i);
-			if (!candidate || !candidate->is_session_active()) {
-				continue;
-			}
-			if (r_debugger) {
-				return _error("AMBIGUOUS_RUNTIME", "Multiple running project sessions are active; provide debuggerSession.");
-			}
-			r_debugger = candidate;
-			r_debugger_session = i;
-		}
-		if (!r_debugger) {
-			return _error("RUNTIME_NOT_RUNNING", "No running project debugger session is active.");
-		}
-	}
-
-	if (!debug_capture->get_runtime_generation(r_debugger_session, r_runtime_generation)) {
-		return _error("RUNTIME_STARTING", "The running project has not completed debugger initialization.");
-	}
-	if (p_require_generation) {
-		int64_t expected_generation = 0;
-		if (!p_arguments.has("runtimeGeneration") ||
-				!MCPToolUtils::try_get_json_integer(p_arguments["runtimeGeneration"], 1, INT64_MAX, expected_generation)) {
-			return _error("INVALID_ARGUMENTS", "A positive runtimeGeneration returned by get_state or get_tree is required.");
-		}
-		if (uint64_t(expected_generation) != r_runtime_generation) {
-			return _error("STALE_RUNTIME", "The running project restarted; refresh runtime state before mutating it.");
-		}
-	}
-	return Dictionary();
+	MCPRuntimeDebuggerGateway::Session session;
+	const Dictionary error = runtime_gateway.resolve_session(p_arguments, p_require_generation, session);
+	r_debugger = session.debugger;
+	r_debugger_session = session.debugger_session;
+	r_runtime_generation = session.runtime_generation;
+	return error;
 }
 
 Dictionary MCPRuntimeDebugService::get_state() const {
@@ -340,7 +288,7 @@ Dictionary MCPRuntimeDebugService::get_state() const {
 			session["breaked"] = debugger->is_breaked();
 			session["debuggable"] = debugger->is_debuggable();
 			uint64_t generation = 0;
-			if (debug_capture && debug_capture->get_runtime_generation(i, generation)) {
+			if (runtime_gateway.get_runtime_generation(i, generation)) {
 				session["runtimeGeneration"] = int64_t(generation);
 			}
 			sessions.push_back(session);
@@ -537,47 +485,7 @@ Dictionary MCPRuntimeDebugService::get_tree(const Dictionary &p_arguments) const
 
 Dictionary MCPRuntimeDebugService::_request_debugger_message(const Dictionary &p_arguments, const String &p_capture,
 		const String &p_operation, const Dictionary &p_payload, bool p_require_generation) const {
-	int timeout_msec = DEFAULT_OBSERVATION_TIMEOUT_MSEC;
-	if (!_observation_timeout_from_arguments(p_arguments, timeout_msec)) {
-		return _error("INVALID_ARGUMENTS", vformat("timeoutMs must be an integer between 50 and %d for runtime observations.", MAX_OBSERVATION_TIMEOUT_MSEC));
-	}
-	ScriptEditorDebugger *debugger = nullptr;
-	int debugger_session = -1;
-	uint64_t generation = 0;
-	const Dictionary session_error = _resolve_session(p_arguments, p_require_generation, debugger, debugger_session, generation);
-	if (!session_error.is_empty()) {
-		return session_error;
-	}
-	if (!observation_plugin) {
-		return _error("RUNTIME_DEBUGGER_UNAVAILABLE", "The MCP runtime debugger response plugin is not active.");
-	}
-	const String request_id = vformat("%d-%d", OS::get_singleton()->get_process_id(), next_observation_request_id++);
-	if (!observation_plugin->register_request(debugger_session, request_id, p_operation)) {
-		return _error("RUNTIME_DEBUGGER_BUSY", "Unable to reserve a runtime debugger request.");
-	}
-	debugger->send_message(p_capture + ":" + p_operation, Array{ request_id, p_payload });
-	const uint64_t deadline = OS::get_singleton()->get_ticks_usec() + uint64_t(timeout_msec) * 1000;
-	MCPRuntimeObservationDebuggerPlugin::Response response;
-	// Observation messages are bounded, short round trips. Long runtime jobs must use asynchronous request state.
-	while (debugger->is_session_active() && OS::get_singleton()->get_ticks_usec() < deadline) {
-		debugger->poll_peer_messages(2000);
-		if (observation_plugin->take_response(debugger_session, request_id, response)) {
-			uint64_t current_generation = 0;
-			if (!debug_capture->get_runtime_generation(debugger_session, current_generation) || current_generation != generation) {
-				return _error("STALE_RUNTIME", "The running project restarted while resolving runtime targets.");
-			}
-			if (!response.ok) {
-				return MCPToolUtils::make_error_result(response.code.is_empty() ? "RUNTIME_DEBUGGER_REQUEST_FAILED" : response.code,
-						response.message.is_empty() ? "Runtime debugger request failed." : response.message, response.data);
-			}
-			Dictionary result = _make_session_identity(debugger_session, generation);
-			result.merge(response.data, true);
-			return MCPToolUtils::make_success_result(result);
-		}
-		OS::get_singleton()->delay_usec(500);
-	}
-	observation_plugin->cancel_request(debugger_session, request_id);
-	return debugger->is_session_active() ? _error("RUNTIME_TIMEOUT", "Timed out waiting for the running project's debugger response.") : _error("RUNTIME_NOT_RUNNING", "The running project stopped before returning the debugger response.");
+	return runtime_gateway.request(p_arguments, p_capture, p_operation, p_payload, p_require_generation);
 }
 
 Dictionary MCPRuntimeDebugService::_request_observation(const Dictionary &p_arguments, const String &p_operation,
@@ -1498,9 +1406,7 @@ void MCPRuntimeDebugService::process_input() {
 		if (String(entry.value.state.get("state", String())) != "running") {
 			continue;
 		}
-		uint64_t generation = 0;
-		if (!debug_capture || !debug_capture->get_runtime_generation(entry.value.debugger_session, generation) ||
-				generation != entry.value.runtime_generation) {
+		if (!runtime_gateway.is_runtime_current(entry.value.debugger_session, entry.value.runtime_generation)) {
 			entry.value.state["state"] = "cancelled";
 			entry.value.state["failure"] = "The running project disconnected or restarted.";
 		}
@@ -1509,9 +1415,7 @@ void MCPRuntimeDebugService::process_input() {
 		if (String(entry.value.state.get("state", String())) != "running") {
 			continue;
 		}
-		uint64_t generation = 0;
-		if (!debug_capture || !debug_capture->get_runtime_generation(entry.value.debugger_session, generation) ||
-				generation != entry.value.runtime_generation) {
+		if (!runtime_gateway.is_runtime_current(entry.value.debugger_session, entry.value.runtime_generation)) {
 			entry.value.state["state"] = "cancelled";
 			entry.value.state["failure"] = "The running project disconnected or restarted.";
 		}

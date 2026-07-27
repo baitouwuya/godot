@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "mcp_runtime_debugger_gateway.h"
 #include "mcp_runtime_input_scheduler.h"
 
 #include "core/templates/hash_map.h"
@@ -37,7 +38,6 @@
 #include "core/variant/dictionary.h"
 
 class MCPDebugCapture;
-class MCPRuntimeObservationDebuggerPlugin;
 class ScriptEditorDebugger;
 
 class MCPRuntimeDebugService {
@@ -54,10 +54,8 @@ class MCPRuntimeDebugService {
 		Dictionary state;
 	};
 
-	MCPDebugCapture *debug_capture = nullptr;
-	MCPRuntimeObservationDebuggerPlugin *observation_plugin = nullptr;
+	MCPRuntimeDebuggerGateway runtime_gateway;
 	MCPRuntimeInputScheduler input_scheduler;
-	mutable uint64_t next_observation_request_id = 1;
 	uint64_t next_condition_job_id = 1;
 	HashMap<String, ConditionJobRecord> condition_jobs;
 	Vector<String> condition_job_order;
@@ -129,6 +127,6 @@ public:
 	void process_input();
 	void release_mcp_session(const String &p_mcp_session_id);
 	void shutdown_input();
-	void set_observation_plugin(MCPRuntimeObservationDebuggerPlugin *p_plugin) { observation_plugin = p_plugin; }
+	void set_observation_plugin(MCPRuntimeObservationDebuggerPlugin *p_plugin) { runtime_gateway.set_response_plugin(p_plugin); }
 	MCPRuntimeInputScheduler *get_input_scheduler() { return &input_scheduler; }
 };

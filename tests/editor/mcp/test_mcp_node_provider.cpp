@@ -33,6 +33,7 @@
 #include "core/object/script_language.h"
 #include "core/variant/callable.h"
 #include "editor/mcp/providers/mcp_node_provider.h"
+#include "editor/mcp/providers/mcp_node_tool_utils.h"
 #include "editor/mcp/providers/mcp_undo_redo_action.h"
 #include "editor/mcp/providers/mcp_variant_codec.h"
 #include "scene/gui/rich_text_label.h"
@@ -181,6 +182,24 @@ static Dictionary _find_layout_entry(const Array &p_layout, const String &p_kind
 	return Dictionary();
 }
 
+TEST_CASE("[MCP][Provider] Node tool utilities share signal flag constraints") {
+	Dictionary arguments;
+	arguments["path"] = "Child";
+	String path;
+	CHECK(MCPNodeToolUtils::get_required_string(arguments, "path", path));
+	CHECK(path == "Child");
+
+	uint32_t flags = UINT32_MAX;
+	String error;
+	CHECK(MCPNodeToolUtils::get_signal_flags(Dictionary(), flags, error));
+	CHECK(flags == 0);
+	arguments["flags"] = Object::CONNECT_DEFERRED | Object::CONNECT_ONE_SHOT;
+	CHECK(MCPNodeToolUtils::get_signal_flags(arguments, flags, error));
+	CHECK(flags == (Object::CONNECT_DEFERRED | Object::CONNECT_ONE_SHOT));
+	arguments["flags"] = 2;
+	CHECK_FALSE(MCPNodeToolUtils::get_signal_flags(arguments, flags, error));
+}
+
 TEST_CASE("[MCP][Provider] Node tools expose encoded property and undoable mutation schemas") {
 	MCPToolRegistry registry;
 	MCPNodeProvider *provider = memnew(MCPNodeProvider);
@@ -218,7 +237,11 @@ TEST_CASE("[MCP][Provider] Node tools expose encoded property and undoable mutat
 	CHECK(PackedStringArray(create_output.get("required", PackedStringArray())).has("childCount"));
 	const Dictionary connect_schema = Dictionary(definitions[8]).get("inputSchema", Dictionary());
 	CHECK(Dictionary(connect_schema.get("properties", Dictionary())).has("flags"));
-	CHECK(int(Dictionary(Dictionary(connect_schema.get("properties", Dictionary())).get("flags", Dictionary())).get("minimum", -1)) == 0);
+	const Dictionary flags_schema = Dictionary(connect_schema.get("properties", Dictionary())).get("flags", Dictionary());
+	const Array allowed_flags = flags_schema.get("enum", Array());
+	CHECK(allowed_flags.size() == 4);
+	CHECK(allowed_flags.has(0));
+	CHECK(allowed_flags.has(Object::CONNECT_DEFERRED | Object::CONNECT_ONE_SHOT));
 	const Dictionary groups_output = Dictionary(definitions[4]).get("outputSchema", Dictionary());
 	CHECK(Dictionary(groups_output.get("properties", Dictionary())).has("groups"));
 	const Dictionary connections_output = Dictionary(definitions[7]).get("outputSchema", Dictionary());
@@ -231,6 +254,15 @@ TEST_CASE("[MCP][Provider] Node tools expose encoded property and undoable mutat
 	const MCPToolRegistry::CallResult unexpected_result = registry.call_tool("godot.node.create", unexpected_arguments, context);
 	CHECK(_error_code(unexpected_result) == "INVALID_ARGUMENTS");
 	CHECK(_error_details(unexpected_result).get("keyword", String()) == "additionalProperties");
+	Dictionary invalid_flags;
+	invalid_flags["path"] = ".";
+	invalid_flags["signal"] = "ready";
+	invalid_flags["targetPath"] = ".";
+	invalid_flags["method"] = "queue_free";
+	invalid_flags["flags"] = 2;
+	const MCPToolRegistry::CallResult invalid_flags_result = registry.call_tool("godot.node.connect_signal", invalid_flags, context);
+	CHECK(_error_code(invalid_flags_result) == "INVALID_ARGUMENTS");
+	CHECK(_error_details(invalid_flags_result).get("keyword", String()) == "enum");
 	const MCPToolRegistry::CallResult invalid_call = registry.call_tool("godot.node.create", Dictionary(), context);
 	REQUIRE(invalid_call.status == MCPToolRegistry::CALL_OK);
 	CHECK(bool(invalid_call.result.get("isError", false)));

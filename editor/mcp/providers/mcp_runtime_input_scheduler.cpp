@@ -61,7 +61,7 @@ String MCPRuntimeInputScheduler::_new_request_id() {
 	return "request-" + String::num_uint64(next_request_id++);
 }
 
-Error MCPRuntimeInputScheduler::_request(ScriptEditorDebugger *p_debugger, const String &p_message, const String &p_operation,
+Error MCPRuntimeInputScheduler::_request(const String &p_mcp_session_id, ScriptEditorDebugger *p_debugger, const String &p_message, const String &p_operation,
 		const Array &p_arguments, Dictionary &r_data, String &r_error, int p_timeout_msec) {
 	r_data.clear();
 	r_error = String();
@@ -71,6 +71,7 @@ Error MCPRuntimeInputScheduler::_request(ScriptEditorDebugger *p_debugger, const
 	}
 	const String request_id = _new_request_id();
 	Response pending;
+	pending.mcp_session_id = p_mcp_session_id;
 	if (EditorDebuggerNode *debugger_node = EditorDebuggerNode::get_singleton()) {
 		for (int i = 0; i < debugger_node->get_debugger_count(); i++) {
 			if (debugger_node->get_debugger(i) == p_debugger) {
@@ -113,6 +114,56 @@ Error MCPRuntimeInputScheduler::_request(ScriptEditorDebugger *p_debugger, const
 	return ERR_TIMEOUT;
 }
 
+bool MCPRuntimeInputScheduler::_is_terminal(const SequenceRecord &p_record) {
+	const String state = p_record.state.get("state", String());
+	return state == "completed" || state == "cancelled" || state == "failed" || state == "stale";
+}
+
+bool MCPRuntimeInputScheduler::_prepare_sequence_capacity() {
+	while (sequences.size() >= MAX_RETAINED_SEQUENCES) {
+		int remove_index = -1;
+		for (int i = 0; i < sequence_order.size(); i++) {
+			const SequenceRecord *record = sequences.getptr(sequence_order[i]);
+			if (!record || _is_terminal(*record)) {
+				remove_index = i;
+				break;
+			}
+		}
+		if (remove_index < 0) {
+			return false;
+		}
+		sequences.erase(sequence_order[remove_index]);
+		sequence_order.remove_at(remove_index);
+	}
+	return true;
+}
+
+void MCPRuntimeInputScheduler::_release_local_session(const String &p_mcp_session_id) {
+	Vector<String> response_ids;
+	for (const KeyValue<String, Response> &entry : responses) {
+		if (entry.value.mcp_session_id == p_mcp_session_id) {
+			response_ids.push_back(entry.key);
+		}
+	}
+	for (const String &response_id : response_ids) {
+		responses.erase(response_id);
+	}
+
+	for (int i = sequence_order.size() - 1; i >= 0; i--) {
+		const SequenceRecord *record = sequences.getptr(sequence_order[i]);
+		if (!record || record->mcp_session_id == p_mcp_session_id) {
+			sequences.erase(sequence_order[i]);
+			sequence_order.remove_at(i);
+		}
+	}
+}
+
+void MCPRuntimeInputScheduler::_clear_local_state() {
+	responses.clear();
+	sequences.clear();
+	sequence_order.clear();
+}
+
 Array MCPRuntimeInputScheduler::_serialize_events(const Vector<MCPRuntimeInput::EncodedEvent> &p_events) const {
 	Array events;
 	for (const MCPRuntimeInput::EncodedEvent &event : p_events) {
@@ -148,7 +199,7 @@ Error MCPRuntimeInputScheduler::dispatch_immediate(const String &p_mcp_session_i
 	r_dispatched = 0;
 	Dictionary data;
 	const Array arguments{ "direct:" + p_mcp_session_id, p_mcp_session_id, _serialize_events(p_events) };
-	const Error error = _request(p_debugger, "send", "send", arguments, data, r_error, p_timeout_msec);
+	const Error error = _request(p_mcp_session_id, p_debugger, "send", "send", arguments, data, r_error, p_timeout_msec);
 	if (error == OK) {
 		r_dispatched = int(data.get("eventCount", 0));
 	}
@@ -157,6 +208,10 @@ Error MCPRuntimeInputScheduler::dispatch_immediate(const String &p_mcp_session_i
 
 Error MCPRuntimeInputScheduler::start_sequence(const String &p_mcp_session_id, int p_debugger_session, uint64_t p_runtime_generation,
 		const Vector<MCPRuntimeInputSequence::Step> &p_steps, Dictionary &r_result, String &r_error, int p_timeout_msec) {
+	if (!_prepare_sequence_capacity()) {
+		r_error = "The retained runtime input sequence limit is full.";
+		return ERR_BUSY;
+	}
 	ScriptEditorDebugger *debugger = nullptr;
 	if (!_resolve_debugger(p_debugger_session, p_runtime_generation, debugger)) {
 		r_error = "The running project disconnected or restarted.";
@@ -165,7 +220,7 @@ Error MCPRuntimeInputScheduler::start_sequence(const String &p_mcp_session_id, i
 	const String sequence_id = "input-" + String::num_uint64(next_sequence_id++);
 	const Array arguments{ sequence_id, "sequence:" + sequence_id, p_mcp_session_id, _serialize_steps(p_steps) };
 	Dictionary data;
-	const Error error = _request(debugger, "sequence_start", "sequence_start", arguments, data, r_error, p_timeout_msec);
+	const Error error = _request(p_mcp_session_id, debugger, "sequence_start", "sequence_start", arguments, data, r_error, p_timeout_msec);
 	if (error != OK) {
 		return error;
 	}
@@ -177,6 +232,7 @@ Error MCPRuntimeInputScheduler::start_sequence(const String &p_mcp_session_id, i
 	record.runtime_generation = p_runtime_generation;
 	record.state = data;
 	sequences[sequence_id] = record;
+	sequence_order.push_back(sequence_id);
 	r_result = data;
 	return OK;
 }
@@ -195,7 +251,7 @@ Error MCPRuntimeInputScheduler::get_sequence(const String &p_mcp_session_id, con
 		return OK;
 	}
 	Dictionary data;
-	const Error error = _request(debugger, "sequence_query", "sequence_query", Array{ p_sequence_id, p_mcp_session_id }, data, r_error);
+	const Error error = _request(p_mcp_session_id, debugger, "sequence_query", "sequence_query", Array{ p_sequence_id, p_mcp_session_id }, data, r_error);
 	if (error != OK) {
 		return error;
 	}
@@ -223,7 +279,7 @@ Error MCPRuntimeInputScheduler::cancel_sequence(const String &p_mcp_session_id, 
 		return ERR_CONNECTION_ERROR;
 	}
 	Dictionary data;
-	const Error error = _request(debugger, "sequence_cancel", "sequence_cancel", Array{ p_sequence_id, p_mcp_session_id }, data, r_error);
+	const Error error = _request(p_mcp_session_id, debugger, "sequence_cancel", "sequence_cancel", Array{ p_sequence_id, p_mcp_session_id }, data, r_error);
 	if (error != OK) {
 		return error;
 	}
@@ -243,7 +299,7 @@ Error MCPRuntimeInputScheduler::release_session_inputs(const String &p_mcp_sessi
 		return ERR_CONNECTION_ERROR;
 	}
 	Dictionary data;
-	const Error error = _request(debugger, "release_session", "release_session", Array{ p_mcp_session_id }, data, r_error);
+	const Error error = _request(p_mcp_session_id, debugger, "release_session", "release_session", Array{ p_mcp_session_id }, data, r_error);
 	if (error == OK) {
 		r_released = int(data.get("releasedCount", 0));
 		for (KeyValue<String, SequenceRecord> &entry : sequences) {
@@ -258,28 +314,28 @@ Error MCPRuntimeInputScheduler::release_session_inputs(const String &p_mcp_sessi
 
 void MCPRuntimeInputScheduler::release_mcp_session(const String &p_mcp_session_id) {
 	EditorDebuggerNode *debugger_node = EditorDebuggerNode::get_singleton();
-	if (!debugger_node) {
-		return;
-	}
-	for (int i = 0; i < debugger_node->get_debugger_count(); i++) {
-		ScriptEditorDebugger *debugger = debugger_node->get_debugger(i);
-		if (debugger && debugger->is_session_active()) {
-			debugger->send_message("mcp_input:release_session", Array{ String(), p_mcp_session_id });
+	if (debugger_node) {
+		for (int i = 0; i < debugger_node->get_debugger_count(); i++) {
+			ScriptEditorDebugger *debugger = debugger_node->get_debugger(i);
+			if (debugger && debugger->is_session_active()) {
+				debugger->send_message("mcp_input:release_session", Array{ String(), p_mcp_session_id });
+			}
 		}
 	}
+	_release_local_session(p_mcp_session_id);
 }
 
 void MCPRuntimeInputScheduler::release_all() {
 	EditorDebuggerNode *debugger_node = EditorDebuggerNode::get_singleton();
-	if (!debugger_node) {
-		return;
-	}
-	for (int i = 0; i < debugger_node->get_debugger_count(); i++) {
-		ScriptEditorDebugger *debugger = debugger_node->get_debugger(i);
-		if (debugger && debugger->is_session_active()) {
-			debugger->send_message("mcp_input:release_all", Array{ String() });
+	if (debugger_node) {
+		for (int i = 0; i < debugger_node->get_debugger_count(); i++) {
+			ScriptEditorDebugger *debugger = debugger_node->get_debugger(i);
+			if (debugger && debugger->is_session_active()) {
+				debugger->send_message("mcp_input:release_all", Array{ String() });
+			}
 		}
 	}
+	_clear_local_state();
 }
 
 void MCPRuntimeInputScheduler::process() {

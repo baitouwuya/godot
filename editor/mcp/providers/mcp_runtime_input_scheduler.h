@@ -32,15 +32,18 @@
 #include "mcp_runtime_input_sequence.h"
 
 #include "core/templates/hash_map.h"
+#include "core/templates/vector.h"
 
 class MCPDebugCapture;
 class ScriptEditorDebugger;
+struct MCPRuntimeInputSchedulerTestAccess;
 
 class MCPRuntimeInputScheduler {
 	struct Response {
 		bool received = false;
 		bool ok = false;
 		int debugger_session = -1;
+		String mcp_session_id;
 		String operation;
 		String code;
 		String message;
@@ -55,21 +58,29 @@ class MCPRuntimeInputScheduler {
 	};
 
 	static constexpr int RESPONSE_TIMEOUT_MSEC = 1000;
+	static constexpr int MAX_RETAINED_SEQUENCES = 128;
 	static constexpr uint64_t HEARTBEAT_INTERVAL_USEC = 1000 * 1000;
 
 	MCPDebugCapture *debug_capture = nullptr;
 	HashMap<String, Response> responses;
 	HashMap<String, SequenceRecord> sequences;
+	Vector<String> sequence_order;
 	uint64_t next_request_id = 1;
 	uint64_t next_sequence_id = 1;
 	uint64_t last_heartbeat_usec = 0;
 
 	bool _resolve_debugger(int p_debugger_session, uint64_t p_runtime_generation, ScriptEditorDebugger *&r_debugger) const;
 	String _new_request_id();
-	Error _request(ScriptEditorDebugger *p_debugger, const String &p_message, const String &p_operation, const Array &p_arguments,
+	Error _request(const String &p_mcp_session_id, ScriptEditorDebugger *p_debugger, const String &p_message, const String &p_operation, const Array &p_arguments,
 			Dictionary &r_data, String &r_error, int p_timeout_msec = RESPONSE_TIMEOUT_MSEC);
+	static bool _is_terminal(const SequenceRecord &p_record);
+	bool _prepare_sequence_capacity();
+	void _release_local_session(const String &p_mcp_session_id);
+	void _clear_local_state();
 	Array _serialize_events(const Vector<MCPRuntimeInput::EncodedEvent> &p_events) const;
 	Array _serialize_steps(const Vector<MCPRuntimeInputSequence::Step> &p_steps) const;
+
+	friend struct MCPRuntimeInputSchedulerTestAccess;
 
 public:
 	explicit MCPRuntimeInputScheduler(MCPDebugCapture *p_debug_capture);

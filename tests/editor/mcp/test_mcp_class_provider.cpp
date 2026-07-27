@@ -33,6 +33,7 @@
 #include "core/object/script_language.h"
 #include "editor/doc/doc_tools.h"
 #include "editor/mcp/providers/mcp_class_provider.h"
+#include "editor/mcp/providers/mcp_class_tool_utils.h"
 #include "tests/test_macros.h"
 
 TEST_FORCE_LINK(test_mcp_class_provider);
@@ -145,13 +146,21 @@ TEST_CASE("[MCP][Provider] Class documentation tools expose strict schemas") {
 	CHECK(names[1] == "godot.class.get_documentation");
 	const Array definitions = registry.get_tool_definitions();
 	REQUIRE(definitions.size() == 2);
+	const Dictionary search_input = Dictionary(definitions[0]).get("inputSchema", Dictionary());
+	const Dictionary search_input_properties = search_input.get("properties", Dictionary());
+	CHECK(Dictionary(search_input_properties.get("source", Dictionary())).get("default", String()) == "all");
+	CHECK_FALSE(bool(Dictionary(search_input_properties.get("includeDeprecated", Dictionary())).get("default", true)));
+	CHECK(int(Dictionary(search_input_properties.get("limit", Dictionary())).get("default", 0)) == 20);
 	const Dictionary search_output = Dictionary(definitions[0]).get("outputSchema", Dictionary());
 	CHECK(Dictionary(search_output.get("properties", Dictionary())).has("matches"));
 	CHECK(PackedStringArray(search_output.get("required", PackedStringArray())).has("count"));
 	CHECK_FALSE(bool(search_output.get("additionalProperties", true)));
 	const Dictionary documentation_input = Dictionary(definitions[1]).get("inputSchema", Dictionary());
-	const Dictionary documentation_name = Dictionary(documentation_input.get("properties", Dictionary())).get("name", Dictionary());
+	const Dictionary documentation_input_properties = documentation_input.get("properties", Dictionary());
+	const Dictionary documentation_name = documentation_input_properties.get("name", Dictionary());
 	CHECK(int(documentation_name.get("minLength", 0)) == 1);
+	CHECK(Dictionary(documentation_input_properties.get("view", Dictionary())).get("default", String()) == "summary");
+	CHECK(Dictionary(documentation_input_properties.get("section", Dictionary())).get("default", String()) == "overview");
 	const Dictionary documentation_output = Dictionary(definitions[1]).get("outputSchema", Dictionary());
 	CHECK(PackedStringArray(documentation_output.get("required", PackedStringArray())).has("inheritance"));
 	CHECK(bool(documentation_output.get("additionalProperties", false)));
@@ -165,6 +174,49 @@ TEST_CASE("[MCP][Provider] Class documentation tools expose strict schemas") {
 	provider->unregister_tools();
 	CHECK(registry.get_tool_names().is_empty());
 	memdelete(provider);
+}
+
+TEST_CASE("[MCP][Provider] Class tool contracts share documentation option defaults and validation") {
+	String error_message;
+	MCPClassDocumentation::SearchOptions search_options;
+	CHECK(MCPClassToolUtils::parse_search_options(Dictionary(), search_options, error_message));
+	CHECK(search_options.query.is_empty());
+	CHECK(search_options.source == "all");
+	CHECK(search_options.inherits.is_empty());
+	CHECK_FALSE(search_options.include_deprecated);
+	CHECK(search_options.limit == 20);
+
+	Dictionary search_arguments;
+	search_arguments["query"] = "Node";
+	search_arguments["source"] = "script";
+	search_arguments["inherits"] = "Node";
+	search_arguments["includeDeprecated"] = true;
+	search_arguments["limit"] = 100;
+	CHECK(MCPClassToolUtils::parse_search_options(search_arguments, search_options, error_message));
+	CHECK(search_options.query == "Node");
+	CHECK(search_options.source == "script");
+	CHECK(search_options.inherits == "Node");
+	CHECK(search_options.include_deprecated);
+	CHECK(search_options.limit == 100);
+	search_arguments["limit"] = 101;
+	CHECK_FALSE(MCPClassToolUtils::parse_search_options(search_arguments, search_options, error_message));
+	CHECK(error_message == "Class search arguments are invalid.");
+
+	MCPClassDocumentation::RenderOptions render_options;
+	Dictionary render_arguments;
+	render_arguments["name"] = "Node";
+	CHECK(MCPClassToolUtils::parse_render_options(render_arguments, render_options, error_message));
+	CHECK(render_options.class_name == "Node");
+	CHECK(render_options.view == "summary");
+	CHECK(render_options.section == "overview");
+	CHECK(render_options.member.is_empty());
+	render_arguments["section"] = "missing";
+	CHECK_FALSE(MCPClassToolUtils::parse_render_options(render_arguments, render_options, error_message));
+	CHECK(error_message == "Unknown class documentation section: missing");
+
+	const Dictionary unavailable = MCPClassToolUtils::make_documentation_error_result(ERR_UNCONFIGURED, "Unavailable.");
+	const Dictionary structured = unavailable.get("structuredContent", Dictionary());
+	CHECK(Dictionary(structured.get("error", Dictionary())).get("code", String()) == "DOCUMENTATION_UNAVAILABLE");
 }
 
 TEST_CASE("[MCP][Provider] Class search supports fuzzy source and inheritance filters") {

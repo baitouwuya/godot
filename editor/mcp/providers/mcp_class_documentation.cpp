@@ -356,9 +356,12 @@ static Dictionary _make_counts(const DocData::ClassDoc &p_doc) {
 	return counts;
 }
 
-Error search(DocTools *p_docs, const String &p_query, const String &p_source, const String &p_inherits,
-		bool p_include_deprecated, int p_limit, const HashMap<String, DocData::ClassDoc> &p_supplemental_docs,
+Error search(DocTools *p_docs, const SearchOptions &p_options, const HashMap<String, DocData::ClassDoc> &p_supplemental_docs,
 		Dictionary &r_result, String *r_error) {
+	const String &source = p_options.source;
+	const String &inherits = p_options.inherits;
+	const bool include_deprecated = p_options.include_deprecated;
+	const int limit = p_options.limit;
 	r_result = Dictionary();
 	if (r_error) {
 		*r_error = String();
@@ -366,26 +369,26 @@ Error search(DocTools *p_docs, const String &p_query, const String &p_source, co
 	if (!p_docs) {
 		return _fail("Editor class documentation is not available.", r_error, ERR_UNCONFIGURED);
 	}
-	if (!p_inherits.is_empty() && !_find_doc(p_docs, p_supplemental_docs, p_inherits)) {
-		return _fail("Base class documentation was not found: " + p_inherits, r_error, ERR_DOES_NOT_EXIST);
+	if (!inherits.is_empty() && !_find_doc(p_docs, p_supplemental_docs, inherits)) {
+		return _fail("Base class documentation was not found: " + inherits, r_error, ERR_DOES_NOT_EXIST);
 	}
 
-	const String query = p_query.strip_edges();
+	const String query = p_options.query.strip_edges();
 	PackedStringArray candidates;
 	for (const KeyValue<String, DocData::ClassDoc> &entry : p_docs->class_list) {
 		const DocData::ClassDoc &doc = entry.value;
-		if (doc.name.is_empty() || !_source_matches(doc, p_source) ||
-				(!p_include_deprecated && doc.is_deprecated) ||
-				(!p_inherits.is_empty() && !_inherits_from(p_docs, p_supplemental_docs, doc, p_inherits))) {
+		if (doc.name.is_empty() || !_source_matches(doc, source) ||
+				(!include_deprecated && doc.is_deprecated) ||
+				(!inherits.is_empty() && !_inherits_from(p_docs, p_supplemental_docs, doc, inherits))) {
 			continue;
 		}
 		candidates.push_back(doc.name);
 	}
 	for (const KeyValue<String, DocData::ClassDoc> &entry : p_supplemental_docs) {
 		const DocData::ClassDoc &doc = entry.value;
-		if (doc.name.is_empty() || p_docs->class_list.has(doc.name) || !_source_matches(doc, p_source) ||
-				(!p_include_deprecated && doc.is_deprecated) ||
-				(!p_inherits.is_empty() && !_inherits_from(p_docs, p_supplemental_docs, doc, p_inherits))) {
+		if (doc.name.is_empty() || p_docs->class_list.has(doc.name) || !_source_matches(doc, source) ||
+				(!include_deprecated && doc.is_deprecated) ||
+				(!inherits.is_empty() && !_inherits_from(p_docs, p_supplemental_docs, doc, inherits))) {
 			continue;
 		}
 		candidates.push_back(doc.name);
@@ -394,13 +397,13 @@ Error search(DocTools *p_docs, const String &p_query, const String &p_source, co
 
 	PackedStringArray names;
 	if (query.is_empty()) {
-		for (int i = 0; i < MIN(p_limit, candidates.size()); i++) {
+		for (int i = 0; i < MIN(limit, candidates.size()); i++) {
 			names.push_back(candidates[i]);
 		}
 	} else {
 		FuzzySearch fuzzy_search;
 		fuzzy_search.set_query(query);
-		fuzzy_search.max_results = p_limit;
+		fuzzy_search.max_results = limit;
 		fuzzy_search.allow_subsequences = true;
 		fuzzy_search.max_misses = 2;
 		Vector<FuzzySearchResult> matches;
@@ -418,17 +421,20 @@ Error search(DocTools *p_docs, const String &p_query, const String &p_source, co
 		}
 	}
 	r_result["query"] = query;
-	r_result["source"] = p_source;
-	if (!p_inherits.is_empty()) {
-		r_result["inherits"] = p_inherits;
+	r_result["source"] = source;
+	if (!inherits.is_empty()) {
+		r_result["inherits"] = inherits;
 	}
 	r_result["count"] = matches.size();
 	r_result["matches"] = matches;
 	return OK;
 }
 
-Error render(DocTools *p_docs, const String &p_class_name, const String &p_view, const String &p_section,
-		const String &p_member, Dictionary &r_result, String *r_error) {
+Error render(DocTools *p_docs, const RenderOptions &p_options, Dictionary &r_result, String *r_error) {
+	const String &class_name = p_options.class_name;
+	const String &view = p_options.view;
+	const String &section = p_options.section;
+	const String &member = p_options.member;
 	r_result = Dictionary();
 	if (r_error) {
 		*r_error = String();
@@ -436,17 +442,17 @@ Error render(DocTools *p_docs, const String &p_class_name, const String &p_view,
 	if (!p_docs) {
 		return _fail("Editor class documentation is not available.", r_error, ERR_UNCONFIGURED);
 	}
-	const DocData::ClassDoc *doc = p_docs->class_list.getptr(p_class_name);
+	const DocData::ClassDoc *doc = p_docs->class_list.getptr(class_name);
 	if (!doc) {
-		return _fail("Class documentation was not found: " + p_class_name, r_error, ERR_DOES_NOT_EXIST);
+		return _fail("Class documentation was not found: " + class_name, r_error, ERR_DOES_NOT_EXIST);
 	}
 	if (doc->is_script_doc) {
 		return _fail("Use godot.script.get for authoritative project script documentation.", r_error, ERR_UNAVAILABLE);
 	}
-	if (p_section == "overview" && !p_member.is_empty()) {
+	if (section == "overview" && !member.is_empty()) {
 		return _fail("member cannot be used with the overview section.", r_error);
 	}
-	if (p_section == "all" && !p_member.is_empty()) {
+	if (section == "all" && !member.is_empty()) {
 		return _fail("Select a specific section when requesting one member.", r_error);
 	}
 
@@ -490,48 +496,48 @@ Error render(DocTools *p_docs, const String &p_class_name, const String &p_view,
 		}
 		r_result["tutorials"] = tutorials;
 	}
-	if (p_section == "overview") {
+	if (section == "overview") {
 		return OK;
 	}
 
-	const bool full = p_view == "full";
-	bool matched = p_member.is_empty();
-	if (p_section == "all" || p_section == "constructors") {
-		r_result["constructors"] = _select_members(doc->constructors, p_member,
+	const bool full = view == "full";
+	bool matched = member.is_empty();
+	if (section == "all" || section == "constructors") {
+		r_result["constructors"] = _select_members(doc->constructors, member,
 				[full](const DocData::MethodDoc &method) { return _make_method(method, "constructor", full); }, matched);
 	}
-	if (p_section == "all" || p_section == "methods") {
-		r_result["methods"] = _select_members(doc->methods, p_member,
+	if (section == "all" || section == "methods") {
+		r_result["methods"] = _select_members(doc->methods, member,
 				[full](const DocData::MethodDoc &method) { return _make_method(method, "method", full); }, matched);
 	}
-	if (p_section == "all" || p_section == "operators") {
-		r_result["operators"] = _select_members(doc->operators, p_member,
+	if (section == "all" || section == "operators") {
+		r_result["operators"] = _select_members(doc->operators, member,
 				[full](const DocData::MethodDoc &method) { return _make_method(method, "operator", full); }, matched);
 	}
-	if (p_section == "all" || p_section == "signals") {
-		r_result["signals"] = _select_members(doc->signals, p_member,
+	if (section == "all" || section == "signals") {
+		r_result["signals"] = _select_members(doc->signals, member,
 				[full](const DocData::MethodDoc &method) { return _make_method(method, "signal", full); }, matched);
 	}
-	if (p_section == "all" || p_section == "properties") {
-		r_result["properties"] = _select_members(doc->properties, p_member,
+	if (section == "all" || section == "properties") {
+		r_result["properties"] = _select_members(doc->properties, member,
 				[full](const DocData::PropertyDoc &property) { return _make_property(property, full); }, matched);
 	}
-	if (p_section == "all" || p_section == "constants") {
-		r_result["constants"] = _make_constants(*doc, p_member, full, matched);
+	if (section == "all" || section == "constants") {
+		r_result["constants"] = _make_constants(*doc, member, full, matched);
 	}
-	if (p_section == "all" || p_section == "enums") {
-		r_result["enums"] = _make_enums(*doc, p_member, full, matched);
+	if (section == "all" || section == "enums") {
+		r_result["enums"] = _make_enums(*doc, member, full, matched);
 	}
-	if (p_section == "all" || p_section == "themeItems") {
-		r_result["themeItems"] = _select_members(doc->theme_properties, p_member,
+	if (section == "all" || section == "themeItems") {
+		r_result["themeItems"] = _select_members(doc->theme_properties, member,
 				[full](const DocData::ThemeItemDoc &item) { return _make_theme_item(item, full); }, matched);
 	}
-	if (p_section == "all" || p_section == "annotations") {
-		r_result["annotations"] = _select_members(doc->annotations, p_member,
+	if (section == "all" || section == "annotations") {
+		r_result["annotations"] = _select_members(doc->annotations, member,
 				[full](const DocData::MethodDoc &method) { return _make_method(method, "annotation", full); }, matched);
 	}
 	if (!matched) {
-		return _fail("Class member documentation was not found: " + p_member, r_error, ERR_DOES_NOT_EXIST);
+		return _fail("Class member documentation was not found: " + member, r_error, ERR_DOES_NOT_EXIST);
 	}
 	return OK;
 }

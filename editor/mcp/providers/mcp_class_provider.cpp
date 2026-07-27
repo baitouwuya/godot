@@ -31,6 +31,7 @@
 #include "mcp_class_provider.h"
 
 #include "mcp_class_documentation.h"
+#include "mcp_class_tool_utils.h"
 #include "mcp_tool_utils.h"
 
 #include "core/doc_data.h"
@@ -41,113 +42,6 @@
 #include "editor/doc/editor_help.h"
 
 namespace {
-
-static Dictionary _search_schema() {
-	Dictionary properties;
-	properties["query"] = MCPToolUtils::make_property_schema("string", "Optional fuzzy class-name query. Empty lists classes alphabetically.");
-	PackedStringArray sources;
-	sources.push_back("all");
-	sources.push_back("native");
-	sources.push_back("script");
-	properties["source"] = MCPToolUtils::make_enum_schema(sources, "Filter native or script documentation.", "all");
-	properties["inherits"] = MCPToolUtils::make_property_schema("string", "Optional base class; matches descendants at any depth.");
-	Dictionary include_deprecated = MCPToolUtils::make_property_schema("boolean", "Include deprecated classes.");
-	include_deprecated["default"] = false;
-	properties["includeDeprecated"] = include_deprecated;
-	Dictionary limit = MCPToolUtils::make_property_schema("integer", "Maximum result count from 1 to 100.");
-	limit["minimum"] = 1;
-	limit["maximum"] = 100;
-	limit["default"] = 20;
-	properties["limit"] = limit;
-	return MCPToolUtils::make_object_schema(properties, PackedStringArray());
-}
-
-static Dictionary _documentation_schema() {
-	Dictionary properties;
-	Dictionary name = MCPToolUtils::make_property_schema("string", "Exact documented class name.");
-	name["minLength"] = 1;
-	properties["name"] = name;
-	PackedStringArray views;
-	views.push_back("summary");
-	views.push_back("full");
-	properties["view"] = MCPToolUtils::make_enum_schema(views, "full includes member descriptions; summary keeps compact signatures.", "summary");
-	PackedStringArray sections;
-	sections.push_back("overview");
-	sections.push_back("all");
-	sections.push_back("constructors");
-	sections.push_back("methods");
-	sections.push_back("operators");
-	sections.push_back("signals");
-	sections.push_back("properties");
-	sections.push_back("constants");
-	sections.push_back("enums");
-	sections.push_back("themeItems");
-	sections.push_back("annotations");
-	properties["section"] = MCPToolUtils::make_enum_schema(sections, "Class documentation section.", "overview");
-	properties["member"] = MCPToolUtils::make_property_schema("string", "Optional exact member name within the selected section.");
-	PackedStringArray required;
-	required.push_back("name");
-	return MCPToolUtils::make_object_schema(properties, required);
-}
-
-static Dictionary _search_output_schema() {
-	Dictionary source = MCPToolUtils::make_property_schema("string", "Applied documentation source filter.");
-	source["enum"] = PackedStringArray{ "all", "native", "script" };
-	Dictionary count = MCPToolUtils::make_property_schema("integer", "Number of returned class matches.");
-	count["minimum"] = 0;
-	Dictionary match;
-	match["type"] = "object";
-	match["additionalProperties"] = true;
-	Dictionary matches = MCPToolUtils::make_property_schema("array", "Matching class summaries.");
-	matches["items"] = match;
-	matches["maxItems"] = 100;
-
-	Dictionary properties;
-	properties["query"] = MCPToolUtils::make_property_schema("string", "Normalized class search query.");
-	properties["source"] = source;
-	properties["inherits"] = MCPToolUtils::make_property_schema("string", "Applied inheritance filter when provided.");
-	properties["count"] = count;
-	properties["matches"] = matches;
-	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "query", "source", "count", "matches" });
-}
-
-static Dictionary _documentation_output_schema() {
-	Dictionary string_array = MCPToolUtils::make_property_schema("array", "Ordered class names.");
-	string_array["items"] = MCPToolUtils::make_property_schema("string", "Class name.");
-	Dictionary counts;
-	counts["type"] = "object";
-	counts["additionalProperties"] = true;
-
-	Dictionary properties;
-	properties["name"] = MCPToolUtils::make_property_schema("string", "Documented class name.");
-	properties["source"] = MCPToolUtils::make_property_schema("string", "Documentation source.");
-	properties["inherits"] = MCPToolUtils::make_property_schema("string", "Immediate base class name.");
-	properties["inheritance"] = string_array;
-	properties["counts"] = counts;
-	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "name", "source", "inherits", "inheritance", "counts" }, true);
-}
-
-static bool _get_string(const Dictionary &p_arguments, const StringName &p_name, const String &p_default,
-		bool p_allow_empty, String &r_value) {
-	const Variant value = p_arguments.get(p_name, p_default);
-	if (value.get_type() != Variant::STRING || (!p_allow_empty && String(value).is_empty())) {
-		return false;
-	}
-	r_value = value;
-	return true;
-}
-
-static Dictionary _documentation_error(Error p_error, const String &p_message) {
-	String code = "CLASS_DOCUMENTATION_FAILED";
-	if (p_error == ERR_DOES_NOT_EXIST) {
-		code = "DOCUMENTATION_NOT_FOUND";
-	} else if (p_error == ERR_INVALID_PARAMETER) {
-		code = "INVALID_ARGUMENTS";
-	} else if (p_error == ERR_UNCONFIGURED) {
-		code = "DOCUMENTATION_UNAVAILABLE";
-	}
-	return MCPToolUtils::make_error_result(code, p_message);
-}
 
 static void _set_error(String *r_error, const String &p_message) {
 	if (r_error) {
@@ -202,9 +96,9 @@ Error MCPClassProvider::register_tools(MCPToolRegistry *p_registry, String *r_er
 
 	const LocalVector<MCPToolUtils::ToolDescriptor> tools{
 		{ "godot.class.search", "Search native and project script classes.",
-				_search_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPClassProvider::search), _search_output_schema() },
+				MCPClassToolUtils::search_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPClassProvider::search), MCPClassToolUtils::search_output_schema() },
 		{ "godot.class.get_documentation", "Read structured Godot class documentation.",
-				_documentation_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPClassProvider::get_documentation), _documentation_output_schema() },
+				MCPClassToolUtils::documentation_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPClassProvider::get_documentation), MCPClassToolUtils::documentation_output_schema() },
 	};
 	const Error err = MCPToolUtils::register_tools(p_registry, this, tools, r_error);
 	if (err != OK) {
@@ -223,56 +117,34 @@ void MCPClassProvider::unregister_tools() {
 }
 
 Dictionary MCPClassProvider::search(const Dictionary &p_arguments, const Dictionary &) {
-	String query;
-	String source;
-	String inherits;
-	const Variant include_deprecated = p_arguments.get("includeDeprecated", false);
-	int64_t limit = 20;
-	if (!_get_string(p_arguments, "query", String(), true, query) ||
-			!_get_string(p_arguments, "source", "all", false, source) ||
-			!_get_string(p_arguments, "inherits", String(), true, inherits) ||
-			include_deprecated.get_type() != Variant::BOOL ||
-			!MCPToolUtils::try_get_json_integer(p_arguments.get("limit", 20), 1, 100, limit) ||
-			(source != "all" && source != "native" && source != "script")) {
-		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "Class search arguments are invalid.");
+	MCPClassDocumentation::SearchOptions options;
+	String argument_error;
+	if (!MCPClassToolUtils::parse_search_options(p_arguments, options, argument_error)) {
+		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", argument_error);
 	}
 
 	Dictionary result;
 	String documentation_error;
 	DocTools *docs = _get_doc_tools();
 	const HashMap<String, DocData::ClassDoc> supplemental_docs = _get_undocumented_global_classes(docs);
-	const Error err = MCPClassDocumentation::search(docs, query, source, inherits,
-			include_deprecated, int(limit), supplemental_docs, result, &documentation_error);
-	return err == OK ? MCPToolUtils::make_success_result(result) : _documentation_error(err, documentation_error);
+	const Error err = MCPClassDocumentation::search(docs, options, supplemental_docs, result, &documentation_error);
+	return err == OK ? MCPToolUtils::make_success_result(result) : MCPClassToolUtils::make_documentation_error_result(err, documentation_error);
 }
 
 Dictionary MCPClassProvider::get_documentation(const Dictionary &p_arguments, const Dictionary &) {
-	String name;
-	String view;
-	String section;
-	String member;
-	if (!_get_string(p_arguments, "name", String(), false, name) ||
-			!_get_string(p_arguments, "view", "summary", false, view) ||
-			!_get_string(p_arguments, "section", "overview", false, section) ||
-			!_get_string(p_arguments, "member", String(), true, member) ||
-			(view != "summary" && view != "full")) {
-		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "Class documentation arguments are invalid.");
-	}
-	const PackedStringArray valid_sections = {
-		"overview", "all", "constructors", "methods", "operators", "signals",
-		"properties", "constants", "enums", "themeItems", "annotations"
-	};
-	if (!valid_sections.has(section)) {
-		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "Unknown class documentation section: " + section);
+	MCPClassDocumentation::RenderOptions options;
+	String argument_error;
+	if (!MCPClassToolUtils::parse_render_options(p_arguments, options, argument_error)) {
+		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", argument_error);
 	}
 
 	DocTools *docs = _get_doc_tools();
-	const DocData::ClassDoc *class_doc = docs ? docs->class_list.getptr(name) : nullptr;
-	const bool undocumented_global_class = !class_doc && ScriptServer::is_global_class(name);
+	const DocData::ClassDoc *class_doc = docs ? docs->class_list.getptr(options.class_name) : nullptr;
+	const bool undocumented_global_class = !class_doc && ScriptServer::is_global_class(options.class_name);
 	if ((class_doc && class_doc->is_script_doc) || undocumented_global_class) {
 		Dictionary details;
-		details["className"] = name;
-		const String script_path = class_doc ? class_doc->script_path : ScriptServer::get_global_class_path(name);
+		details["className"] = options.class_name;
+		const String script_path = class_doc ? class_doc->script_path : ScriptServer::get_global_class_path(options.class_name);
 		if (!script_path.is_empty()) {
 			details["path"] = script_path;
 		}
@@ -283,6 +155,6 @@ Dictionary MCPClassProvider::get_documentation(const Dictionary &p_arguments, co
 
 	Dictionary result;
 	String documentation_error;
-	const Error err = MCPClassDocumentation::render(docs, name, view, section, member, result, &documentation_error);
-	return err == OK ? MCPToolUtils::make_success_result(result) : _documentation_error(err, documentation_error);
+	const Error err = MCPClassDocumentation::render(docs, options, result, &documentation_error);
+	return err == OK ? MCPToolUtils::make_success_result(result) : MCPClassToolUtils::make_documentation_error_result(err, documentation_error);
 }

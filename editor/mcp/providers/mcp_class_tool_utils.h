@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  mcp_class_documentation.h                                             */
+/*  mcp_class_tool_utils.h                                                */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,32 +30,17 @@
 
 #pragma once
 
-#include "core/doc_data.h"
-#include "core/error/error_list.h"
-#include "core/templates/hash_map.h"
-#include "core/variant/dictionary.h"
+#include "mcp_class_documentation.h"
 
-class DocTools;
+namespace MCPClassToolUtils {
 
-namespace MCPClassDocumentation {
+Dictionary search_schema();
+Dictionary documentation_schema();
+Dictionary search_output_schema();
+Dictionary documentation_output_schema();
 
-struct SearchOptions {
-	String query;
-	String source = "all";
-	String inherits;
-	bool include_deprecated = false;
-	int limit = 20;
-};
+bool parse_search_options(const Dictionary &p_arguments, MCPClassDocumentation::SearchOptions &r_options, String &r_error_message);
+bool parse_render_options(const Dictionary &p_arguments, MCPClassDocumentation::RenderOptions &r_options, String &r_error_message);
+Dictionary make_documentation_error_result(Error p_error, const String &p_message);
 
-struct RenderOptions {
-	String class_name;
-	String view = "summary";
-	String section = "overview";
-	String member;
-};
-
-Error search(DocTools *p_docs, const SearchOptions &p_options, const HashMap<String, DocData::ClassDoc> &p_supplemental_docs,
-		Dictionary &r_result, String *r_error = nullptr);
-Error render(DocTools *p_docs, const RenderOptions &p_options, Dictionary &r_result, String *r_error = nullptr);
-
-} // namespace MCPClassDocumentation
+} // namespace MCPClassToolUtils

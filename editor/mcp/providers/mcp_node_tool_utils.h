@@ -36,6 +36,11 @@ namespace MCPNodeToolUtils {
 
 Dictionary path_schema();
 Dictionary create_schema();
+Dictionary rename_schema();
+Dictionary reparent_schema();
+Dictionary move_schema();
+Dictionary duplicate_schema();
+Dictionary instantiate_scene_schema();
 Dictionary set_property_schema();
 Dictionary attach_script_schema();
 Dictionary group_schema(bool p_add);
@@ -44,6 +49,8 @@ Dictionary signal_mutation_schema(bool p_connect);
 
 Dictionary node_properties_output_schema();
 Dictionary node_property_output_schema();
+Dictionary structure_output_schema(bool p_include_previous_path);
+Dictionary delete_output_schema();
 Dictionary attach_script_output_schema();
 Dictionary groups_output_schema();
 Dictionary group_mutation_output_schema(bool p_include_persistent);
@@ -51,6 +58,8 @@ Dictionary connections_output_schema();
 Dictionary signal_mutation_output_schema(bool p_include_flags);
 
 bool get_required_string(const Dictionary &p_arguments, const StringName &p_name, String &r_value);
+bool get_optional_string(const Dictionary &p_arguments, const StringName &p_name, const String &p_default, String &r_value);
+bool get_index(const Dictionary &p_arguments, int &r_index);
 bool get_signal_flags(const Dictionary &p_arguments, uint32_t &r_flags, String &r_error);
 
 } // namespace MCPNodeToolUtils

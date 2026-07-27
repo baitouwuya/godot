@@ -122,6 +122,9 @@ TEST_CASE("[MCP][Provider] Node structure tools expose strict schemas") {
 	CHECK(names[4] == "godot.node.duplicate");
 	CHECK(names[5] == "godot.node.instantiate_scene");
 	const Array definitions = registry.get_tool_definitions();
+	const Dictionary delete_input = Dictionary(definitions[0]).get("inputSchema", Dictionary());
+	const Dictionary delete_path = Dictionary(delete_input.get("properties", Dictionary())).get("path", Dictionary());
+	CHECK(int(delete_path.get("minLength", 0)) == 1);
 	const Dictionary delete_output = Dictionary(definitions[0]).get("outputSchema", Dictionary());
 	CHECK_FALSE(bool(delete_output.get("additionalProperties", true)));
 	CHECK(Dictionary(delete_output.get("properties", Dictionary())).has("deleted"));
@@ -132,6 +135,14 @@ TEST_CASE("[MCP][Provider] Node structure tools expose strict schemas") {
 	CHECK(rename_properties.has("previousPath"));
 	CHECK(rename_properties.has("parentPath"));
 	CHECK(rename_properties.has("index"));
+	const Dictionary reparent_input = Dictionary(definitions[2]).get("inputSchema", Dictionary());
+	const Dictionary reparent_properties = reparent_input.get("properties", Dictionary());
+	CHECK(int(Dictionary(reparent_properties.get("index", Dictionary())).get("minimum", 0)) == -1);
+	CHECK(int(Dictionary(reparent_properties.get("index", Dictionary())).get("default", 0)) == -1);
+	CHECK(bool(Dictionary(reparent_properties.get("keepGlobalTransform", Dictionary())).get("default", false)));
+	const Dictionary instantiate_input = Dictionary(definitions[5]).get("inputSchema", Dictionary());
+	const Dictionary scene_path = Dictionary(instantiate_input.get("properties", Dictionary())).get("scenePath", Dictionary());
+	CHECK(int(scene_path.get("minLength", 0)) == 1);
 
 	Dictionary invalid;
 	invalid["path"] = "Child";

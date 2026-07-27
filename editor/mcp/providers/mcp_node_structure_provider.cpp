@@ -31,6 +31,7 @@
 #include "mcp_node_structure_provider.h"
 
 #include "mcp_node_structure_operations.h"
+#include "mcp_node_tool_utils.h"
 #include "mcp_path_utils.h"
 #include "mcp_scene_utils.h"
 #include "mcp_tool_utils.h"
@@ -45,122 +46,6 @@
 #include "scene/resources/packed_scene.h"
 
 namespace {
-
-static Dictionary _path_schema() {
-	Dictionary properties;
-	properties["path"] = MCPToolUtils::make_property_schema("string", "Node path relative to the edited scene root.");
-	PackedStringArray required;
-	required.push_back("path");
-	return MCPToolUtils::make_object_schema(properties, required);
-}
-
-static Dictionary _rename_schema() {
-	Dictionary properties;
-	properties["path"] = MCPToolUtils::make_property_schema("string", "Node path relative to the edited scene root.");
-	properties["name"] = MCPToolUtils::make_property_schema("string", "New node name.");
-	PackedStringArray required;
-	required.push_back("path");
-	required.push_back("name");
-	return MCPToolUtils::make_object_schema(properties, required);
-}
-
-static Dictionary _reparent_schema() {
-	Dictionary properties;
-	properties["path"] = MCPToolUtils::make_property_schema("string", "Node path relative to the edited scene root.");
-	properties["parentPath"] = MCPToolUtils::make_property_schema("string", "New parent path relative to the edited scene root.");
-	properties["index"] = MCPToolUtils::make_property_schema("integer", "Optional 0-based child index. -1 appends the node.");
-	properties["keepGlobalTransform"] = MCPToolUtils::make_property_schema("boolean", "Preserve the global transform when supported. Defaults to true.");
-	PackedStringArray required;
-	required.push_back("path");
-	required.push_back("parentPath");
-	return MCPToolUtils::make_object_schema(properties, required);
-}
-
-static Dictionary _move_schema() {
-	Dictionary properties;
-	properties["path"] = MCPToolUtils::make_property_schema("string", "Node path relative to the edited scene root.");
-	properties["index"] = MCPToolUtils::make_property_schema("integer", "0-based child index. -1 moves the node to the end.");
-	PackedStringArray required;
-	required.push_back("path");
-	required.push_back("index");
-	return MCPToolUtils::make_object_schema(properties, required);
-}
-
-static Dictionary _duplicate_schema() {
-	Dictionary properties;
-	properties["path"] = MCPToolUtils::make_property_schema("string", "Node path to duplicate.");
-	properties["parentPath"] = MCPToolUtils::make_property_schema("string", "Optional destination parent. Defaults to the source parent.");
-	properties["name"] = MCPToolUtils::make_property_schema("string", "Optional name for the duplicate.");
-	properties["index"] = MCPToolUtils::make_property_schema("integer", "Optional 0-based child index. -1 appends the duplicate.");
-	PackedStringArray required;
-	required.push_back("path");
-	return MCPToolUtils::make_object_schema(properties, required);
-}
-
-static Dictionary _instantiate_schema() {
-	Dictionary properties;
-	properties["scenePath"] = MCPToolUtils::make_property_schema("string", "PackedScene path beginning with res://.");
-	properties["parentPath"] = MCPToolUtils::make_property_schema("string", "Optional destination parent. Defaults to the edited scene root.");
-	properties["name"] = MCPToolUtils::make_property_schema("string", "Optional name for the instantiated scene root.");
-	properties["index"] = MCPToolUtils::make_property_schema("integer", "Optional 0-based child index. -1 appends the instance.");
-	PackedStringArray required;
-	required.push_back("scenePath");
-	return MCPToolUtils::make_object_schema(properties, required);
-}
-
-static Dictionary _node_output_schema(bool p_include_previous_path) {
-	Dictionary properties = MCPSceneUtils::make_node_summary_schema_properties();
-	properties["previousPath"] = MCPToolUtils::make_property_schema("string", "Node path before the operation.");
-	properties["parentPath"] = MCPToolUtils::make_property_schema("string", "Parent node path after the operation.");
-	Dictionary index = MCPToolUtils::make_property_schema("integer", "0-based child index after the operation.");
-	index["minimum"] = 0;
-	properties["index"] = index;
-	PackedStringArray required{ "path", "name", "type", "childCount", "editable", "internal", "owner" };
-	if (p_include_previous_path) {
-		required.push_back("previousPath");
-	}
-	return MCPToolUtils::make_object_schema(properties, required);
-}
-
-static Dictionary _delete_output_schema() {
-	Dictionary deleted_properties = MCPSceneUtils::make_node_summary_schema_properties();
-	deleted_properties["parentPath"] = MCPToolUtils::make_property_schema("string", "Parent node path before deletion.");
-	Dictionary index = MCPToolUtils::make_property_schema("integer", "0-based child index before deletion.");
-	index["minimum"] = 0;
-	deleted_properties["index"] = index;
-	const Dictionary deleted = MCPToolUtils::make_object_schema(deleted_properties,
-			PackedStringArray{ "path", "name", "type", "childCount", "editable", "internal", "owner", "parentPath", "index" });
-	Dictionary properties;
-	properties["deleted"] = deleted;
-	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "deleted" });
-}
-
-static bool _get_required_string(const Dictionary &p_arguments, const StringName &p_name, String &r_value) {
-	const Variant value = p_arguments.get(p_name, Variant());
-	if (value.get_type() != Variant::STRING || String(value).is_empty()) {
-		return false;
-	}
-	r_value = value;
-	return true;
-}
-
-static bool _get_optional_string(const Dictionary &p_arguments, const StringName &p_name, const String &p_default, String &r_value) {
-	const Variant value = p_arguments.get(p_name, p_default);
-	if (value.get_type() != Variant::STRING) {
-		return false;
-	}
-	r_value = value;
-	return true;
-}
-
-static bool _get_index(const Dictionary &p_arguments, int &r_index) {
-	int64_t index = -1;
-	if (!MCPToolUtils::try_get_json_integer(p_arguments.get("index", -1), -1, INT32_MAX, index)) {
-		return false;
-	}
-	r_index = int(index);
-	return true;
-}
 
 static Dictionary _invalid_arguments(const String &p_message) {
 	return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", p_message);
@@ -240,17 +125,17 @@ Error MCPNodeStructureProvider::register_tools(MCPToolRegistry *p_registry, Stri
 
 	const LocalVector<MCPToolUtils::ToolDescriptor> tools{
 		{ "godot.node.delete", "Delete a node through editor undo/redo.",
-				_path_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPNodeStructureProvider::delete_node), _delete_output_schema() },
+				MCPNodeToolUtils::path_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPNodeStructureProvider::delete_node), MCPNodeToolUtils::delete_output_schema() },
 		{ "godot.node.rename", "Rename a node and update scene path references through editor undo/redo.",
-				_rename_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPNodeStructureProvider::rename_node), _node_output_schema(true) },
+				MCPNodeToolUtils::rename_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPNodeStructureProvider::rename_node), MCPNodeToolUtils::structure_output_schema(true) },
 		{ "godot.node.reparent", "Reparent a node and update scene path references through editor undo/redo.",
-				_reparent_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPNodeStructureProvider::reparent_node), _node_output_schema(true) },
+				MCPNodeToolUtils::reparent_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPNodeStructureProvider::reparent_node), MCPNodeToolUtils::structure_output_schema(true) },
 		{ "godot.node.move", "Move a node to a sibling index through editor undo/redo.",
-				_move_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPNodeStructureProvider::move_node), _node_output_schema(false) },
+				MCPNodeToolUtils::move_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPNodeStructureProvider::move_node), MCPNodeToolUtils::structure_output_schema(false) },
 		{ "godot.node.duplicate", "Duplicate an editable node subtree through editor undo/redo.",
-				_duplicate_schema(), MCPToolUtils::TOOL_ADDITIVE, callable_mp(this, &MCPNodeStructureProvider::duplicate_node), _node_output_schema(false) },
+				MCPNodeToolUtils::duplicate_schema(), MCPToolUtils::TOOL_ADDITIVE, callable_mp(this, &MCPNodeStructureProvider::duplicate_node), MCPNodeToolUtils::structure_output_schema(false) },
 		{ "godot.node.instantiate_scene", "Instantiate a project PackedScene through editor undo/redo.",
-				_instantiate_schema(), MCPToolUtils::TOOL_ADDITIVE, callable_mp(this, &MCPNodeStructureProvider::instantiate_scene), _node_output_schema(false) },
+				MCPNodeToolUtils::instantiate_scene_schema(), MCPToolUtils::TOOL_ADDITIVE, callable_mp(this, &MCPNodeStructureProvider::instantiate_scene), MCPNodeToolUtils::structure_output_schema(false) },
 	};
 	const Error err = MCPToolUtils::register_tools(p_registry, this, tools, r_error);
 	if (err != OK) {
@@ -271,7 +156,7 @@ void MCPNodeStructureProvider::unregister_tools() {
 Dictionary MCPNodeStructureProvider::delete_node(const Dictionary &p_arguments, const Dictionary &) {
 	Dictionary validation_error;
 	String path;
-	if (!_get_required_string(p_arguments, "path", path)) {
+	if (!MCPNodeToolUtils::get_required_string(p_arguments, "path", path)) {
 		return _invalid_arguments("A non-empty string path is required.");
 	}
 	Node *scene_root = _get_scene_root();
@@ -300,7 +185,7 @@ Dictionary MCPNodeStructureProvider::rename_node(const Dictionary &p_arguments, 
 	Dictionary validation_error;
 	String path;
 	String name;
-	if (!_get_required_string(p_arguments, "path", path) || !_get_required_string(p_arguments, "name", name)) {
+	if (!MCPNodeToolUtils::get_required_string(p_arguments, "path", path) || !MCPNodeToolUtils::get_required_string(p_arguments, "name", name)) {
 		return _invalid_arguments("Non-empty path and name strings are required.");
 	}
 	Node *scene_root = _get_scene_root();
@@ -324,8 +209,8 @@ Dictionary MCPNodeStructureProvider::reparent_node(const Dictionary &p_arguments
 	String parent_path;
 	int index = -1;
 	const Variant keep_value = p_arguments.get("keepGlobalTransform", true);
-	if (!_get_required_string(p_arguments, "path", path) || !_get_required_string(p_arguments, "parentPath", parent_path) ||
-			!_get_index(p_arguments, index) || keep_value.get_type() != Variant::BOOL) {
+	if (!MCPNodeToolUtils::get_required_string(p_arguments, "path", path) || !MCPNodeToolUtils::get_required_string(p_arguments, "parentPath", parent_path) ||
+			!MCPNodeToolUtils::get_index(p_arguments, index) || keep_value.get_type() != Variant::BOOL) {
 		return _invalid_arguments("path, parentPath, index, or keepGlobalTransform has an invalid type or value.");
 	}
 	Node *scene_root = _get_scene_root();
@@ -352,7 +237,7 @@ Dictionary MCPNodeStructureProvider::move_node(const Dictionary &p_arguments, co
 	Dictionary validation_error;
 	String path;
 	int index = -1;
-	if (!_get_required_string(p_arguments, "path", path) || !_get_index(p_arguments, index)) {
+	if (!MCPNodeToolUtils::get_required_string(p_arguments, "path", path) || !MCPNodeToolUtils::get_index(p_arguments, index)) {
 		return _invalid_arguments("A non-empty path and integer index are required.");
 	}
 	Node *scene_root = _get_scene_root();
@@ -375,8 +260,8 @@ Dictionary MCPNodeStructureProvider::duplicate_node(const Dictionary &p_argument
 	String parent_path;
 	String name;
 	int index = -1;
-	if (!_get_required_string(p_arguments, "path", path) || !_get_optional_string(p_arguments, "parentPath", String(), parent_path) ||
-			!_get_optional_string(p_arguments, "name", String(), name) || !_get_index(p_arguments, index)) {
+	if (!MCPNodeToolUtils::get_required_string(p_arguments, "path", path) || !MCPNodeToolUtils::get_optional_string(p_arguments, "parentPath", String(), parent_path) ||
+			!MCPNodeToolUtils::get_optional_string(p_arguments, "name", String(), name) || !MCPNodeToolUtils::get_index(p_arguments, index)) {
 		return _invalid_arguments("path, parentPath, name, or index has an invalid type or value.");
 	}
 	Node *scene_root = _get_scene_root();
@@ -405,8 +290,8 @@ Dictionary MCPNodeStructureProvider::instantiate_scene(const Dictionary &p_argum
 	String parent_path;
 	String name;
 	int index = -1;
-	if (!_get_required_string(p_arguments, "scenePath", scene_path) || !_get_optional_string(p_arguments, "parentPath", ".", parent_path) ||
-			!_get_optional_string(p_arguments, "name", String(), name) || !_get_index(p_arguments, index)) {
+	if (!MCPNodeToolUtils::get_required_string(p_arguments, "scenePath", scene_path) || !MCPNodeToolUtils::get_optional_string(p_arguments, "parentPath", ".", parent_path) ||
+			!MCPNodeToolUtils::get_optional_string(p_arguments, "name", String(), name) || !MCPNodeToolUtils::get_index(p_arguments, index)) {
 		return _invalid_arguments("scenePath, parentPath, name, or index has an invalid type or value.");
 	}
 	String normalized_path;

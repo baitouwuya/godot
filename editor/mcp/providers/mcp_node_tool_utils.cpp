@@ -69,6 +69,60 @@ Dictionary create_schema() {
 	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "type" });
 }
 
+Dictionary rename_schema() {
+	Dictionary properties;
+	properties["path"] = _required_string_schema("Node path relative to the edited scene root.");
+	properties["name"] = _required_string_schema("New node name.");
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "path", "name" });
+}
+
+Dictionary reparent_schema() {
+	Dictionary properties;
+	properties["path"] = _required_string_schema("Node path relative to the edited scene root.");
+	properties["parentPath"] = _required_string_schema("New parent path relative to the edited scene root.");
+	Dictionary index = MCPToolUtils::make_property_schema("integer", "Optional 0-based child index. -1 appends the node.");
+	index["minimum"] = -1;
+	index["default"] = -1;
+	properties["index"] = index;
+	Dictionary keep_global_transform = MCPToolUtils::make_property_schema("boolean", "Preserve the global transform when supported. Defaults to true.");
+	keep_global_transform["default"] = true;
+	properties["keepGlobalTransform"] = keep_global_transform;
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "path", "parentPath" });
+}
+
+Dictionary move_schema() {
+	Dictionary properties;
+	properties["path"] = _required_string_schema("Node path relative to the edited scene root.");
+	Dictionary index = MCPToolUtils::make_property_schema("integer", "0-based child index. -1 moves the node to the end.");
+	index["minimum"] = -1;
+	properties["index"] = index;
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "path", "index" });
+}
+
+Dictionary duplicate_schema() {
+	Dictionary properties;
+	properties["path"] = _required_string_schema("Node path to duplicate.");
+	properties["parentPath"] = MCPToolUtils::make_property_schema("string", "Optional destination parent. Defaults to the source parent.");
+	properties["name"] = MCPToolUtils::make_property_schema("string", "Optional name for the duplicate.");
+	Dictionary index = MCPToolUtils::make_property_schema("integer", "Optional 0-based child index. -1 appends the duplicate.");
+	index["minimum"] = -1;
+	index["default"] = -1;
+	properties["index"] = index;
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "path" });
+}
+
+Dictionary instantiate_scene_schema() {
+	Dictionary properties;
+	properties["scenePath"] = _required_string_schema("PackedScene path beginning with res://.");
+	properties["parentPath"] = MCPToolUtils::make_property_schema("string", "Optional destination parent. Defaults to the edited scene root.");
+	properties["name"] = MCPToolUtils::make_property_schema("string", "Optional name for the instantiated scene root.");
+	Dictionary index = MCPToolUtils::make_property_schema("integer", "Optional 0-based child index. -1 appends the instance.");
+	index["minimum"] = -1;
+	index["default"] = -1;
+	properties["index"] = index;
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "scenePath" });
+}
+
 Dictionary set_property_schema() {
 	Dictionary properties;
 	properties["path"] = _required_string_schema("Node path relative to the edited scene root.");
@@ -141,6 +195,33 @@ Dictionary node_property_output_schema() {
 	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "path", "property", "value" });
 }
 
+Dictionary structure_output_schema(bool p_include_previous_path) {
+	Dictionary properties = MCPSceneUtils::make_node_summary_schema_properties();
+	properties["previousPath"] = MCPToolUtils::make_property_schema("string", "Node path before the operation.");
+	properties["parentPath"] = MCPToolUtils::make_property_schema("string", "Parent node path after the operation.");
+	Dictionary index = MCPToolUtils::make_property_schema("integer", "0-based child index after the operation.");
+	index["minimum"] = 0;
+	properties["index"] = index;
+	PackedStringArray required{ "path", "name", "type", "childCount", "editable", "internal", "owner" };
+	if (p_include_previous_path) {
+		required.push_back("previousPath");
+	}
+	return MCPToolUtils::make_object_schema(properties, required);
+}
+
+Dictionary delete_output_schema() {
+	Dictionary deleted_properties = MCPSceneUtils::make_node_summary_schema_properties();
+	deleted_properties["parentPath"] = MCPToolUtils::make_property_schema("string", "Parent node path before deletion.");
+	Dictionary index = MCPToolUtils::make_property_schema("integer", "0-based child index before deletion.");
+	index["minimum"] = 0;
+	deleted_properties["index"] = index;
+	const Dictionary deleted = MCPToolUtils::make_object_schema(deleted_properties,
+			PackedStringArray{ "path", "name", "type", "childCount", "editable", "internal", "owner", "parentPath", "index" });
+	Dictionary properties;
+	properties["deleted"] = deleted;
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "deleted" });
+}
+
 Dictionary attach_script_output_schema() {
 	Dictionary properties;
 	properties["path"] = MCPToolUtils::make_property_schema("string", "Node path.");
@@ -205,6 +286,24 @@ bool get_required_string(const Dictionary &p_arguments, const StringName &p_name
 		return false;
 	}
 	r_value = value;
+	return true;
+}
+
+bool get_optional_string(const Dictionary &p_arguments, const StringName &p_name, const String &p_default, String &r_value) {
+	const Variant value = p_arguments.get(p_name, p_default);
+	if (value.get_type() != Variant::STRING) {
+		return false;
+	}
+	r_value = value;
+	return true;
+}
+
+bool get_index(const Dictionary &p_arguments, int &r_index) {
+	int64_t index = -1;
+	if (!MCPToolUtils::try_get_json_integer(p_arguments.get("index", -1), -1, INT32_MAX, index)) {
+		return false;
+	}
+	r_index = int(index);
 	return true;
 }
 

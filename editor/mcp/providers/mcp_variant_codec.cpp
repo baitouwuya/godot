@@ -35,8 +35,12 @@
 #include "core/io/json.h"
 #include "core/io/resource.h"
 #include "core/io/resource_loader.h"
+#include "core/math/math_funcs.h"
 
 namespace {
+
+static constexpr const char *ENCODED_VARIANT_KEY = "__godot_mcp_encoded_variant__";
+static constexpr const char *RESOURCE_PATH_KEY = "__godot_mcp_resource_path__";
 
 static Error _fail(const String &p_message, String *r_error, Error p_error = ERR_INVALID_DATA) {
 	if (r_error) {
@@ -47,6 +51,99 @@ static Error _fail(const String &p_message, String *r_error, Error p_error = ERR
 
 static bool _is_unsafe_type(Variant::Type p_type) {
 	return p_type == Variant::OBJECT || p_type == Variant::CALLABLE || p_type == Variant::SIGNAL || p_type == Variant::RID;
+}
+
+static bool _has_legacy_string_prefix(const String &p_value) {
+	return p_value.begins_with("i:") || p_value.begins_with("f:") || p_value.begins_with("s:") ||
+			p_value.begins_with("sn:") || p_value.begins_with("np:");
+}
+
+static bool _looks_like_legacy_native_dictionary(const Dictionary &p_dictionary) {
+	if (!p_dictionary.has("type")) {
+		return false;
+	}
+	const Variant type_value = p_dictionary["type"];
+	if (type_value.get_type() != Variant::STRING && type_value.get_type() != Variant::STRING_NAME) {
+		return false;
+	}
+	return Variant::get_type_by_name(type_value) != Variant::VARIANT_MAX;
+}
+
+static Dictionary _wrap_native_encoding(const Variant &p_value) {
+	Dictionary wrapped;
+	wrapped[ENCODED_VARIANT_KEY] = JSON::from_native(p_value, false);
+	return wrapped;
+}
+
+static Error _encode_json_value(const Variant &p_value, Variant &r_value, String *r_error, int p_depth) {
+	if (p_depth > Variant::MAX_RECURSION_DEPTH) {
+		return _fail("Variant nesting exceeds the supported depth.", r_error);
+	}
+
+	switch (p_value.get_type()) {
+		case Variant::NIL:
+		case Variant::BOOL:
+		case Variant::INT: {
+			r_value = p_value;
+			return OK;
+		}
+		case Variant::FLOAT: {
+			const double value = p_value;
+			r_value = Math::is_finite(value) ? p_value : Variant(_wrap_native_encoding(p_value));
+			return OK;
+		}
+		case Variant::STRING: {
+			const String value = p_value;
+			r_value = _has_legacy_string_prefix(value) ? Variant(_wrap_native_encoding(p_value)) : p_value;
+			return OK;
+		}
+		case Variant::ARRAY: {
+			const Array source = p_value;
+			if (source.is_typed()) {
+				r_value = _wrap_native_encoding(p_value);
+				return OK;
+			}
+			Array encoded;
+			encoded.resize(source.size());
+			for (int i = 0; i < source.size(); i++) {
+				Variant value;
+				const Error error = _encode_json_value(source[i], value, r_error, p_depth + 1);
+				if (error != OK) {
+					return error;
+				}
+				encoded[i] = value;
+			}
+			r_value = encoded;
+			return OK;
+		}
+		case Variant::DICTIONARY: {
+			const Dictionary source = p_value;
+			if (source.is_typed() || source.has(ENCODED_VARIANT_KEY) || source.has(RESOURCE_PATH_KEY) ||
+					_looks_like_legacy_native_dictionary(source)) {
+				r_value = _wrap_native_encoding(p_value);
+				return OK;
+			}
+			Dictionary encoded;
+			for (const KeyValue<Variant, Variant> &entry : source) {
+				if (!entry.key.is_string()) {
+					r_value = _wrap_native_encoding(p_value);
+					return OK;
+				}
+				Variant value;
+				const Error error = _encode_json_value(entry.value, value, r_error, p_depth + 1);
+				if (error != OK) {
+					return error;
+				}
+				encoded[entry.key] = value;
+			}
+			r_value = encoded;
+			return OK;
+		}
+		default: {
+			r_value = _wrap_native_encoding(p_value);
+			return OK;
+		}
+	}
 }
 
 static Error _sanitize_native(const Variant &p_value, Variant &r_value, String *r_error, int p_depth) {
@@ -78,7 +175,7 @@ static Error _sanitize_native(const Variant &p_value, Variant &r_value, String *
 			}
 
 			Dictionary resource_reference;
-			resource_reference[SNAME("__godot_mcp_resource_path__")] = resource_path;
+			resource_reference[RESOURCE_PATH_KEY] = resource_path;
 			r_value = resource_reference;
 			return OK;
 		}
@@ -191,8 +288,8 @@ static Error _restore_resource_references(const Variant &p_value, Variant &r_val
 
 	if (p_value.get_type() == Variant::DICTIONARY) {
 		const Dictionary source = p_value;
-		if (source.size() == 1 && source.has(SNAME("__godot_mcp_resource_path__"))) {
-			const Variant path_value = source[SNAME("__godot_mcp_resource_path__")];
+		if (source.size() == 1 && source.has(RESOURCE_PATH_KEY)) {
+			const Variant path_value = source[RESOURCE_PATH_KEY];
 			if (path_value.get_type() != Variant::STRING) {
 				return _fail("Resource reference path must be a string.", r_error);
 			}
@@ -252,6 +349,71 @@ static Error _restore_resource_references(const Variant &p_value, Variant &r_val
 	return OK;
 }
 
+static Error _decode_native_encoding(const Variant &p_encoded_value, Variant &r_value, String *r_error) {
+	Error error = _validate_encoded_tags(p_encoded_value, r_error, 0);
+	if (error != OK) {
+		return error;
+	}
+
+	const Variant native_value = JSON::to_native(p_encoded_value, false);
+	if (JSON::from_native(native_value, false) != p_encoded_value) {
+		return _fail("Encoded Variant is malformed or not in canonical form.", r_error);
+	}
+	return _restore_resource_references(native_value, r_value, r_error, 0);
+}
+
+static Error _decode_json_value(const Variant &p_encoded_value, Variant &r_value, String *r_error, int p_depth) {
+	if (p_depth > Variant::MAX_RECURSION_DEPTH) {
+		return _fail("Encoded Variant nesting exceeds the supported depth.", r_error);
+	}
+
+	if (p_encoded_value.get_type() == Variant::STRING && _has_legacy_string_prefix(p_encoded_value)) {
+		return _decode_native_encoding(p_encoded_value, r_value, r_error);
+	}
+	if (p_encoded_value.get_type() == Variant::DICTIONARY) {
+		const Dictionary source = p_encoded_value;
+		if (source.size() == 1 && source.has(ENCODED_VARIANT_KEY)) {
+			return _decode_native_encoding(source[ENCODED_VARIANT_KEY], r_value, r_error);
+		}
+		if (_looks_like_legacy_native_dictionary(source)) {
+			return _decode_native_encoding(source, r_value, r_error);
+		}
+		Dictionary decoded;
+		for (const KeyValue<Variant, Variant> &entry : source) {
+			Variant value;
+			const Error error = _decode_json_value(entry.value, value, r_error, p_depth + 1);
+			if (error != OK) {
+				return error;
+			}
+			decoded[entry.key] = value;
+		}
+		r_value = decoded;
+		return OK;
+	}
+	if (p_encoded_value.get_type() == Variant::ARRAY) {
+		const Array source = p_encoded_value;
+		Array decoded;
+		decoded.resize(source.size());
+		for (int i = 0; i < source.size(); i++) {
+			Variant value;
+			const Error error = _decode_json_value(source[i], value, r_error, p_depth + 1);
+			if (error != OK) {
+				return error;
+			}
+			decoded[i] = value;
+		}
+		r_value = decoded;
+		return OK;
+	}
+	if (p_encoded_value.get_type() == Variant::NIL || p_encoded_value.get_type() == Variant::BOOL ||
+			p_encoded_value.get_type() == Variant::INT || p_encoded_value.get_type() == Variant::FLOAT ||
+			p_encoded_value.get_type() == Variant::STRING) {
+		r_value = p_encoded_value;
+		return OK;
+	}
+	return _fail("Encoded Variant contains a non-JSON native value.", r_error);
+}
+
 } // namespace
 
 Error MCPVariantCodec::encode(const Variant &p_value, Variant &r_encoded_value, String *r_error) {
@@ -265,8 +427,7 @@ Error MCPVariantCodec::encode(const Variant &p_value, Variant &r_encoded_value, 
 	if (err != OK) {
 		return err;
 	}
-	r_encoded_value = JSON::from_native(sanitized, false);
-	return OK;
+	return _encode_json_value(sanitized, r_encoded_value, r_error, 0);
 }
 
 Error MCPVariantCodec::decode(const Variant &p_encoded_value, Variant &r_value, String *r_error) {
@@ -275,14 +436,5 @@ Error MCPVariantCodec::decode(const Variant &p_encoded_value, Variant &r_value, 
 		*r_error = String();
 	}
 
-	Error err = _validate_encoded_tags(p_encoded_value, r_error, 0);
-	if (err != OK) {
-		return err;
-	}
-
-	const Variant native_value = JSON::to_native(p_encoded_value, false);
-	if (JSON::from_native(native_value, false) != p_encoded_value) {
-		return _fail("Encoded Variant is malformed or not in canonical form.", r_error);
-	}
-	return _restore_resource_references(native_value, r_value, r_error, 0);
+	return _decode_json_value(p_encoded_value, r_value, r_error, 0);
 }

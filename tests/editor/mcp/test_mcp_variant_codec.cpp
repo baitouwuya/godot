@@ -56,6 +56,43 @@ TEST_CASE("[MCP][Provider] Safe native Variants round-trip through JSON native e
 	CHECK(decoded == source);
 }
 
+TEST_CASE("[MCP][Provider] JSON-native Variant values stay readable without type prefixes") {
+	Dictionary source;
+	source["path"] = "res://main.tscn";
+	source["count"] = int64_t(7);
+	source["values"] = Array{ true, 2.5, "ready" };
+
+	Variant encoded;
+	String error;
+	REQUIRE(MCPVariantCodec::encode(source, encoded, &error) == OK);
+	REQUIRE(encoded.get_type() == Variant::DICTIONARY);
+	const Dictionary encoded_dictionary = encoded;
+	CHECK(encoded_dictionary.get("path", String()) == "res://main.tscn");
+	CHECK(int64_t(encoded_dictionary.get("count", int64_t(0))) == int64_t(7));
+	CHECK(Array(encoded_dictionary.get("values", Array())) == Array{ true, 2.5, "ready" });
+
+	Variant decoded;
+	REQUIRE(MCPVariantCodec::decode(encoded, decoded, &error) == OK);
+	CHECK(decoded == source);
+}
+
+TEST_CASE("[MCP][Provider] Reserved legacy prefixes round-trip as literal strings") {
+	for (const String &source : PackedStringArray{ "s:value", "i:42", "f:1.0", "sn:name", "np:path" }) {
+		Variant encoded;
+		String error;
+		REQUIRE(MCPVariantCodec::encode(source, encoded, &error) == OK);
+		CHECK(encoded.get_type() == Variant::DICTIONARY);
+		Variant decoded;
+		REQUIRE(MCPVariantCodec::decode(encoded, decoded, &error) == OK);
+		CHECK(decoded == Variant(source));
+	}
+
+	Variant legacy_decoded;
+	String error;
+	REQUIRE(MCPVariantCodec::decode("s:legacy", legacy_decoded, &error) == OK);
+	CHECK(legacy_decoded == Variant("legacy"));
+}
+
 TEST_CASE("[MCP][Provider] Unsafe object-like Variant types are rejected") {
 	Variant encoded;
 	String error;

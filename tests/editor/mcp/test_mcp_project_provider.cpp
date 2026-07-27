@@ -92,11 +92,12 @@ TEST_CASE("[MCP][Provider] Project settings are bounded, typed, undo-aware, and 
 	Dictionary set_arguments;
 	set_arguments["name"] = setting_name;
 	Variant encoded_value;
-	REQUIRE(MCPVariantCodec::encode(Variant("configured"), encoded_value) == OK);
+	REQUIRE(MCPVariantCodec::encode(Variant("res://configured.gd"), encoded_value) == OK);
+	CHECK(encoded_value == Variant("res://configured.gd"));
 	set_arguments["value"] = encoded_value;
 	MCPToolRegistry::CallResult call_result = registry.call_tool("godot.project.set_setting", set_arguments, context);
 	REQUIRE_FALSE(bool(call_result.result.get("isError", false)));
-	CHECK(ProjectSettings::get_singleton()->get_setting(setting_name) == Variant("configured"));
+	CHECK(ProjectSettings::get_singleton()->get_setting(setting_name) == Variant("res://configured.gd"));
 	const Dictionary set_result = call_result.result.get("structuredContent", Dictionary());
 	CHECK_FALSE(bool(set_result.get("saved", true)));
 

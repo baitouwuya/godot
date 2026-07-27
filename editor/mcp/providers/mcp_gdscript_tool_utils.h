@@ -40,7 +40,6 @@ Dictionary references_schema();
 Dictionary rename_schema();
 Dictionary workspace_edit_schema();
 
-bool validate_arguments(const Dictionary &p_arguments, const PackedStringArray &p_allowed, String &r_error);
 bool get_string_argument(const Dictionary &p_arguments, const String &p_name, String &r_value, String &r_error);
 bool get_position_argument(const Dictionary &p_arguments, const String &p_name, int &r_value, String &r_error);
 

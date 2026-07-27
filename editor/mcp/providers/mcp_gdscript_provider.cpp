@@ -68,6 +68,126 @@ static Dictionary _completion_schema() {
 	return schema;
 }
 
+static Dictionary _non_negative_integer_schema(const String &p_description) {
+	Dictionary schema = MCPToolUtils::make_property_schema("integer", p_description);
+	schema["minimum"] = 0;
+	return schema;
+}
+
+static Dictionary _metadata_properties() {
+	Dictionary properties;
+	properties["path"] = MCPToolUtils::make_property_schema("string", "Analyzed project GDScript path.");
+	properties["uri"] = MCPToolUtils::make_property_schema("string", "Analyzed GDScript file URI.");
+	properties["analysisRevision"] = _non_negative_integer_schema("GDScript analysis session revision.");
+	properties["revision"] = _non_negative_integer_schema("Open document client revision, when available.");
+	Dictionary sha256 = MCPToolUtils::make_property_schema("string", "SHA-256 of the analyzed source text.");
+	sha256["pattern"] = "^[0-9a-f]{64}$";
+	properties["sha256"] = sha256;
+	properties["sourceState"] = MCPToolUtils::make_property_schema("string", "Open or disk analysis source state.");
+	Dictionary client_version = MCPToolUtils::make_property_schema("integer", "LSP client version, or -1 for disk documents.");
+	client_version["minimum"] = -1;
+	properties["clientVersion"] = client_version;
+	return properties;
+}
+
+static PackedStringArray _metadata_required() {
+	return PackedStringArray{ "path", "uri", "analysisRevision", "sha256", "sourceState", "clientVersion" };
+}
+
+static Dictionary _object_array_schema(const String &p_description) {
+	Dictionary array = MCPToolUtils::make_property_schema("array", p_description);
+	array["items"] = MCPToolUtils::make_object_schema(Dictionary(), PackedStringArray(), true);
+	return array;
+}
+
+static Dictionary _nullable_object_schema(const String &p_description) {
+	Dictionary schema;
+	schema["type"] = PackedStringArray{ "object", "null" };
+	schema["description"] = p_description;
+	schema["additionalProperties"] = true;
+	return schema;
+}
+
+static Dictionary _metadata_output_schema(const Dictionary &p_extra_properties, const PackedStringArray &p_extra_required) {
+	Dictionary properties = _metadata_properties();
+	for (const KeyValue<Variant, Variant> &entry : p_extra_properties) {
+		properties[entry.key] = entry.value;
+	}
+	PackedStringArray required = _metadata_required();
+	for (const String &name : p_extra_required) {
+		required.push_back(name);
+	}
+	return MCPToolUtils::make_object_schema(properties, required);
+}
+
+static Dictionary _diagnostics_output_schema() {
+	Dictionary properties;
+	properties["diagnostics"] = _object_array_schema("GDScript diagnostics.");
+	return _metadata_output_schema(properties, PackedStringArray{ "diagnostics" });
+}
+
+static Dictionary _symbols_output_schema() {
+	Dictionary properties;
+	properties["symbols"] = _object_array_schema("GDScript document symbols.");
+	return _metadata_output_schema(properties, PackedStringArray{ "symbols" });
+}
+
+static Dictionary _completion_output_schema() {
+	Dictionary properties;
+	Dictionary items = _object_array_schema("Bounded LSP completion items.");
+	items["maxItems"] = MAX_COMPLETION_LIMIT;
+	properties["items"] = items;
+	properties["totalItemCount"] = _non_negative_integer_schema("Total completion item count before truncation.");
+	properties["isIncomplete"] = MCPToolUtils::make_property_schema("boolean", "Whether completion items were truncated.");
+	return _metadata_output_schema(properties, PackedStringArray{ "items", "totalItemCount", "isIncomplete" });
+}
+
+static Dictionary _hover_output_schema() {
+	Dictionary properties;
+	properties["hover"] = _nullable_object_schema("LSP hover result, or null when no symbol is found.");
+	properties["symbol"] = MCPToolUtils::make_object_schema(Dictionary(), PackedStringArray(), true);
+	properties["found"] = MCPToolUtils::make_property_schema("boolean", "Whether hover information was found.");
+	return _metadata_output_schema(properties, PackedStringArray{ "hover", "found" });
+}
+
+static Dictionary _locations_output_schema(bool p_include_operation) {
+	Dictionary properties;
+	properties["locations"] = _object_array_schema("Resolved LSP locations.");
+	properties["found"] = MCPToolUtils::make_property_schema("boolean", "Whether locations were found.");
+	properties["symbol"] = MCPToolUtils::make_object_schema(Dictionary(), PackedStringArray(), true);
+	properties["native"] = MCPToolUtils::make_property_schema("boolean", "Whether the symbol resolves to a native class.");
+	PackedStringArray required{ "locations", "found" };
+	if (p_include_operation) {
+		properties["operation"] = MCPToolUtils::make_property_schema("string", "Definition or declaration operation.");
+		required.push_back("operation");
+	}
+	return _metadata_output_schema(properties, required);
+}
+
+static Dictionary _signature_output_schema() {
+	Dictionary properties;
+	properties["signatureHelp"] = _nullable_object_schema("LSP signature help, or null when unavailable.");
+	properties["found"] = MCPToolUtils::make_property_schema("boolean", "Whether signature help was found.");
+	return _metadata_output_schema(properties, PackedStringArray{ "signatureHelp", "found" });
+}
+
+static Dictionary _rename_output_schema() {
+	Dictionary properties;
+	properties["edit"] = MCPToolUtils::make_object_schema(Dictionary(), PackedStringArray(), true);
+	properties["changed"] = MCPToolUtils::make_property_schema("boolean", "Whether the WorkspaceEdit contains changes.");
+	return _metadata_output_schema(properties, PackedStringArray{ "edit", "changed" });
+}
+
+static Dictionary _workspace_edit_output_schema() {
+	Dictionary properties;
+	properties["applied"] = MCPToolUtils::make_property_schema("boolean", "Whether the WorkspaceEdit was applied.");
+	properties["analysisSynchronized"] = MCPToolUtils::make_property_schema("boolean", "Whether all changed buffers were synchronized with analysis.");
+	properties["saved"] = MCPToolUtils::make_property_schema("boolean", "Whether changed buffers were saved.");
+	properties["documentCount"] = _non_negative_integer_schema("Changed document count.");
+	properties["documents"] = _object_array_schema("Changed authoritative Script editor buffer snapshots.");
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "applied", "analysisSynchronized", "saved", "documentCount", "documents" });
+}
+
 } // namespace
 
 MCPGDScriptProvider::MCPGDScriptProvider(const Ref<GDScriptAnalysisService> &p_service, const Ref<GDScriptAnalysisSession> &p_fallback_session) {
@@ -138,11 +258,7 @@ bool MCPGDScriptProvider::_is_ready(String &r_error) const {
 	return true;
 }
 
-bool MCPGDScriptProvider::_validate_ready_arguments(const Dictionary &p_arguments, const PackedStringArray &p_allowed, String &r_error, Dictionary &r_error_result) const {
-	if (!MCPGDScriptToolUtils::validate_arguments(p_arguments, p_allowed, r_error)) {
-		r_error_result = _invalid_arguments(r_error);
-		return false;
-	}
+bool MCPGDScriptProvider::_validate_ready(String &r_error, Dictionary &r_error_result) const {
 	if (!_is_ready(r_error)) {
 		r_error_result = _unavailable(r_error);
 		return false;
@@ -257,12 +373,6 @@ bool MCPGDScriptProvider::_parse_position(const Dictionary &p_arguments, String 
 	}
 	if (has_position) {
 		const Dictionary position = position_value;
-		PackedStringArray allowed;
-		allowed.push_back("line");
-		allowed.push_back("character");
-		if (!MCPGDScriptToolUtils::validate_arguments(position, allowed, r_error)) {
-			return false;
-		}
 		if (!MCPGDScriptToolUtils::get_position_argument(position, "line", line, r_error) || !MCPGDScriptToolUtils::get_position_argument(position, "character", character, r_error)) {
 			return false;
 		}
@@ -396,12 +506,9 @@ Dictionary MCPGDScriptProvider::_symbol_result(const Ref<GDScriptAnalysisSession
 }
 
 Dictionary MCPGDScriptProvider::diagnostics(const Dictionary &p_arguments, const Dictionary &p_context) {
-	PackedStringArray allowed;
-	allowed.push_back("path");
-	allowed.push_back("uri");
 	String argument_error;
 	Dictionary request_error;
-	if (!_validate_ready_arguments(p_arguments, allowed, argument_error, request_error)) {
+	if (!_validate_ready(argument_error, request_error)) {
 		return request_error;
 	}
 	String path;
@@ -421,12 +528,9 @@ Dictionary MCPGDScriptProvider::diagnostics(const Dictionary &p_arguments, const
 }
 
 Dictionary MCPGDScriptProvider::symbols(const Dictionary &p_arguments, const Dictionary &p_context) {
-	PackedStringArray allowed;
-	allowed.push_back("path");
-	allowed.push_back("uri");
 	String argument_error;
 	Dictionary request_error;
-	if (!_validate_ready_arguments(p_arguments, allowed, argument_error, request_error)) {
+	if (!_validate_ready(argument_error, request_error)) {
 		return request_error;
 	}
 	String path;
@@ -451,16 +555,9 @@ Dictionary MCPGDScriptProvider::symbols(const Dictionary &p_arguments, const Dic
 }
 
 Dictionary MCPGDScriptProvider::completion(const Dictionary &p_arguments, const Dictionary &p_context) {
-	PackedStringArray allowed;
-	allowed.push_back("path");
-	allowed.push_back("uri");
-	allowed.push_back("line");
-	allowed.push_back("character");
-	allowed.push_back("position");
-	allowed.push_back("limit");
 	String argument_error;
 	Dictionary request_error;
-	if (!_validate_ready_arguments(p_arguments, allowed, argument_error, request_error)) {
+	if (!_validate_ready(argument_error, request_error)) {
 		return request_error;
 	}
 	String path;
@@ -494,15 +591,9 @@ Dictionary MCPGDScriptProvider::completion(const Dictionary &p_arguments, const 
 }
 
 Dictionary MCPGDScriptProvider::hover(const Dictionary &p_arguments, const Dictionary &p_context) {
-	PackedStringArray allowed;
-	allowed.push_back("path");
-	allowed.push_back("uri");
-	allowed.push_back("line");
-	allowed.push_back("character");
-	allowed.push_back("position");
 	String argument_error;
 	Dictionary request_error;
-	if (!_validate_ready_arguments(p_arguments, allowed, argument_error, request_error)) {
+	if (!_validate_ready(argument_error, request_error)) {
 		return request_error;
 	}
 	String path;
@@ -536,15 +627,9 @@ Dictionary MCPGDScriptProvider::hover(const Dictionary &p_arguments, const Dicti
 }
 
 Dictionary MCPGDScriptProvider::definition(const Dictionary &p_arguments, const Dictionary &p_context) {
-	PackedStringArray allowed;
-	allowed.push_back("path");
-	allowed.push_back("uri");
-	allowed.push_back("line");
-	allowed.push_back("character");
-	allowed.push_back("position");
 	String argument_error;
 	Dictionary request_error;
-	if (!_validate_ready_arguments(p_arguments, allowed, argument_error, request_error)) {
+	if (!_validate_ready(argument_error, request_error)) {
 		return request_error;
 	}
 	String path;
@@ -565,15 +650,9 @@ Dictionary MCPGDScriptProvider::definition(const Dictionary &p_arguments, const 
 }
 
 Dictionary MCPGDScriptProvider::declaration(const Dictionary &p_arguments, const Dictionary &p_context) {
-	PackedStringArray allowed;
-	allowed.push_back("path");
-	allowed.push_back("uri");
-	allowed.push_back("line");
-	allowed.push_back("character");
-	allowed.push_back("position");
 	String argument_error;
 	Dictionary request_error;
-	if (!_validate_ready_arguments(p_arguments, allowed, argument_error, request_error)) {
+	if (!_validate_ready(argument_error, request_error)) {
 		return request_error;
 	}
 	String path;
@@ -594,16 +673,9 @@ Dictionary MCPGDScriptProvider::declaration(const Dictionary &p_arguments, const
 }
 
 Dictionary MCPGDScriptProvider::references(const Dictionary &p_arguments, const Dictionary &p_context) {
-	PackedStringArray allowed;
-	allowed.push_back("path");
-	allowed.push_back("uri");
-	allowed.push_back("line");
-	allowed.push_back("character");
-	allowed.push_back("position");
-	allowed.push_back("includeDeclaration");
 	String argument_error;
 	Dictionary request_error;
-	if (!_validate_ready_arguments(p_arguments, allowed, argument_error, request_error)) {
+	if (!_validate_ready(argument_error, request_error)) {
 		return request_error;
 	}
 	String path;
@@ -642,15 +714,9 @@ Dictionary MCPGDScriptProvider::references(const Dictionary &p_arguments, const 
 }
 
 Dictionary MCPGDScriptProvider::signature_help(const Dictionary &p_arguments, const Dictionary &p_context) {
-	PackedStringArray allowed;
-	allowed.push_back("path");
-	allowed.push_back("uri");
-	allowed.push_back("line");
-	allowed.push_back("character");
-	allowed.push_back("position");
 	String argument_error;
 	Dictionary request_error;
-	if (!_validate_ready_arguments(p_arguments, allowed, argument_error, request_error)) {
+	if (!_validate_ready(argument_error, request_error)) {
 		return request_error;
 	}
 	String path;
@@ -681,16 +747,9 @@ Dictionary MCPGDScriptProvider::signature_help(const Dictionary &p_arguments, co
 }
 
 Dictionary MCPGDScriptProvider::rename(const Dictionary &p_arguments, const Dictionary &p_context) {
-	PackedStringArray allowed;
-	allowed.push_back("path");
-	allowed.push_back("uri");
-	allowed.push_back("line");
-	allowed.push_back("character");
-	allowed.push_back("position");
-	allowed.push_back("newName");
 	String argument_error;
 	Dictionary request_error;
-	if (!_validate_ready_arguments(p_arguments, allowed, argument_error, request_error)) {
+	if (!_validate_ready(argument_error, request_error)) {
 		return request_error;
 	}
 	String path;
@@ -720,10 +779,9 @@ Dictionary MCPGDScriptProvider::rename(const Dictionary &p_arguments, const Dict
 }
 
 Dictionary MCPGDScriptProvider::apply_workspace_edit(const Dictionary &p_arguments, const Dictionary &p_context) {
-	PackedStringArray allowed{ "edit", "documents" };
 	String argument_error;
 	Dictionary request_error;
-	if (!_validate_ready_arguments(p_arguments, allowed, argument_error, request_error)) {
+	if (!_validate_ready(argument_error, request_error)) {
 		return request_error;
 	}
 	const Variant edit_value = p_arguments.get("edit", Variant());
@@ -764,25 +822,30 @@ Error MCPGDScriptProvider::register_tools(MCPToolRegistry *p_registry, String *r
 		return ERR_ALREADY_IN_USE;
 	}
 
-	Error error = OK;
-	auto register_tool = [&](const String &p_name, const String &p_description, const Dictionary &p_schema, const Callable &p_handler, MCPToolUtils::ToolBehavior p_behavior = MCPToolUtils::TOOL_READ_ONLY) {
-		if (error == OK) {
-			error = p_registry->register_tool(MCPToolUtils::make_tool_definition(p_name, p_description, p_schema, p_behavior), p_handler, this, r_error);
-		}
+	const LocalVector<MCPToolUtils::ToolDescriptor> tools{
+			{ "godot.gdscript.diagnostics", "Return diagnostics for a GDScript document.",
+					MCPGDScriptToolUtils::diagnostics_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPGDScriptProvider::diagnostics), _diagnostics_output_schema() },
+			{ "godot.gdscript.symbols", "Return document symbols for a GDScript document.",
+					MCPGDScriptToolUtils::diagnostics_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPGDScriptProvider::symbols), _symbols_output_schema() },
+			{ "godot.gdscript.completion", "Return bounded UTF-16 positioned GDScript completions.",
+					_completion_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPGDScriptProvider::completion), _completion_output_schema() },
+			{ "godot.gdscript.hover", "Return GDScript hover information at a position.",
+					MCPGDScriptToolUtils::position_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPGDScriptProvider::hover), _hover_output_schema() },
+			{ "godot.gdscript.definition", "Resolve the GDScript definition at a position.",
+					MCPGDScriptToolUtils::position_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPGDScriptProvider::definition), _locations_output_schema(true) },
+			{ "godot.gdscript.declaration", "Resolve the GDScript declaration at a position.",
+					MCPGDScriptToolUtils::position_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPGDScriptProvider::declaration), _locations_output_schema(true) },
+			{ "godot.gdscript.references", "Find GDScript references at a position.",
+					MCPGDScriptToolUtils::references_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPGDScriptProvider::references), _locations_output_schema(false) },
+			{ "godot.gdscript.signature_help", "Return GDScript signature help at a call site.",
+					MCPGDScriptToolUtils::position_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPGDScriptProvider::signature_help), _signature_output_schema() },
+			{ "godot.gdscript.rename", "Return a UTF-16 GDScript workspace edit for a symbol.",
+					MCPGDScriptToolUtils::rename_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPGDScriptProvider::rename), _rename_output_schema() },
+			{ "godot.gdscript.apply_workspace_edit", "Validate a UTF-16 WorkspaceEdit, then apply it to authoritative ScriptEditor buffers without saving.",
+					MCPGDScriptToolUtils::workspace_edit_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPGDScriptProvider::apply_workspace_edit), _workspace_edit_output_schema() },
 	};
-	register_tool("godot.gdscript.diagnostics", "Return diagnostics for a GDScript document.", MCPGDScriptToolUtils::diagnostics_schema(), callable_mp(this, &MCPGDScriptProvider::diagnostics));
-	register_tool("godot.gdscript.symbols", "Return document symbols for a GDScript document.", MCPGDScriptToolUtils::diagnostics_schema(), callable_mp(this, &MCPGDScriptProvider::symbols));
-	register_tool("godot.gdscript.completion", "Return bounded UTF-16 positioned GDScript completions.", _completion_schema(), callable_mp(this, &MCPGDScriptProvider::completion));
-	register_tool("godot.gdscript.hover", "Return GDScript hover information at a position.", MCPGDScriptToolUtils::position_schema(), callable_mp(this, &MCPGDScriptProvider::hover));
-	register_tool("godot.gdscript.definition", "Resolve the GDScript definition at a position.", MCPGDScriptToolUtils::position_schema(), callable_mp(this, &MCPGDScriptProvider::definition));
-	register_tool("godot.gdscript.declaration", "Resolve the GDScript declaration at a position.", MCPGDScriptToolUtils::position_schema(), callable_mp(this, &MCPGDScriptProvider::declaration));
-	register_tool("godot.gdscript.references", "Find GDScript references at a position.", MCPGDScriptToolUtils::references_schema(), callable_mp(this, &MCPGDScriptProvider::references));
-	register_tool("godot.gdscript.signature_help", "Return GDScript signature help at a call site.", MCPGDScriptToolUtils::position_schema(), callable_mp(this, &MCPGDScriptProvider::signature_help));
-	register_tool("godot.gdscript.rename", "Return a UTF-16 GDScript workspace edit for a symbol.", MCPGDScriptToolUtils::rename_schema(), callable_mp(this, &MCPGDScriptProvider::rename));
-	register_tool("godot.gdscript.apply_workspace_edit", "Validate a UTF-16 WorkspaceEdit, then apply it to authoritative ScriptEditor buffers without saving.", MCPGDScriptToolUtils::workspace_edit_schema(), callable_mp(this, &MCPGDScriptProvider::apply_workspace_edit), MCPToolUtils::TOOL_DESTRUCTIVE);
-
+	const Error error = MCPToolUtils::register_tools(p_registry, this, tools, r_error);
 	if (error != OK) {
-		p_registry->unregister_tools_for_owner(this);
 		return error;
 	}
 	tool_registry = p_registry;

@@ -85,7 +85,7 @@ private:
 	Ref<GDScriptWorkspace> _get_workspace() const;
 	String _get_project_root() const;
 	bool _is_ready(String &r_error) const;
-	bool _validate_ready_arguments(const Dictionary &p_arguments, const PackedStringArray &p_allowed, String &r_error, Dictionary &r_error_result) const;
+	bool _validate_ready(String &r_error, Dictionary &r_error_result) const;
 	bool _resolve_session(const Dictionary &p_context, String &r_session_id, Ref<GDScriptAnalysisSession> &r_session, String &r_error);
 	bool _prepare_document(const Dictionary &p_context, const String &p_path, bool p_sync_open_buffers, Ref<GDScriptAnalysisSession> &r_session, Array *r_diagnostics, Dictionary &r_error_result);
 	bool _parse_path(const Dictionary &p_arguments, String &r_path, String &r_error) const;

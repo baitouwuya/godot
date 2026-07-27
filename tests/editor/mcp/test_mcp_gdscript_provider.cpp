@@ -69,15 +69,11 @@ static Error _write_text(const String &p_path, const String &p_text) {
 	return file->store_string(p_text) ? OK : ERR_FILE_CANT_WRITE;
 }
 
-TEST_CASE("[MCP][Provider] GDScript tool utilities preserve argument and completion mappings") {
+TEST_CASE("[MCP][Provider] GDScript tool utilities preserve position and completion mappings") {
 	Dictionary arguments;
 	arguments["path"] = "res://tool_utils.gd";
 	arguments["line"] = 7.0;
-	PackedStringArray allowed;
-	allowed.push_back("path");
-	allowed.push_back("line");
 	String error;
-	CHECK(MCPGDScriptToolUtils::validate_arguments(arguments, allowed, error));
 
 	String path;
 	CHECK(MCPGDScriptToolUtils::get_string_argument(arguments, "path", path, error));
@@ -92,10 +88,6 @@ TEST_CASE("[MCP][Provider] GDScript tool utilities preserve argument and complet
 	CHECK_FALSE(MCPGDScriptToolUtils::get_position_argument(arguments, "line", line, error));
 	CHECK(error == "line must be a non-negative 32-bit integer.");
 
-	arguments["unknown"] = true;
-	CHECK_FALSE(MCPGDScriptToolUtils::validate_arguments(arguments, allowed, error));
-	CHECK(error == "Unknown argument: unknown");
-	arguments.erase("unknown");
 	arguments["line"] = -1;
 	CHECK_FALSE(MCPGDScriptToolUtils::get_position_argument(arguments, "line", line, error));
 	CHECK(error == "line must be a non-negative 32-bit integer.");
@@ -152,6 +144,8 @@ TEST_CASE("[MCP][Provider] GDScript semantic tools use injected analysis session
 	const Dictionary diagnostics_schema = Dictionary(definitions[0]).get("inputSchema", Dictionary());
 	CHECK(String(diagnostics_schema.get("description", String())).contains("Exactly one"));
 	CHECK(Array(diagnostics_schema.get("oneOf", Array())).size() == 2);
+	const Dictionary diagnostics_properties = diagnostics_schema.get("properties", Dictionary());
+	CHECK(int(Dictionary(diagnostics_properties.get("path", Dictionary())).get("minLength", 0)) == 1);
 	const Array document_options = diagnostics_schema.get("oneOf", Array());
 	CHECK(PackedStringArray(Dictionary(document_options[0]).get("required", PackedStringArray())) == PackedStringArray{ "path" });
 	CHECK(PackedStringArray(Dictionary(document_options[1]).get("required", PackedStringArray())) == PackedStringArray{ "uri" });
@@ -172,20 +166,42 @@ TEST_CASE("[MCP][Provider] GDScript semantic tools use injected analysis session
 	CHECK(nested_position_required.has("character"));
 	CHECK(int(Dictionary(completion_properties.get("line", Dictionary())).get("minimum", -1)) == 0);
 	CHECK(int(Dictionary(completion_properties.get("character", Dictionary())).get("minimum", -1)) == 0);
+	const Dictionary diagnostics_output = Dictionary(definitions[0]).get("outputSchema", Dictionary());
+	CHECK(PackedStringArray(diagnostics_output.get("required", PackedStringArray())).has("diagnostics"));
+	const Dictionary completion_output = Dictionary(definitions[2]).get("outputSchema", Dictionary());
+	CHECK(PackedStringArray(completion_output.get("required", PackedStringArray())).has("items"));
+	const Dictionary hover_output = Dictionary(definitions[3]).get("outputSchema", Dictionary());
+	CHECK(Dictionary(hover_output.get("properties", Dictionary())).has("hover"));
+	const Dictionary definition_output = Dictionary(definitions[4]).get("outputSchema", Dictionary());
+	CHECK(PackedStringArray(definition_output.get("required", PackedStringArray())).has("operation"));
+	const Dictionary references_output = Dictionary(definitions[6]).get("outputSchema", Dictionary());
+	CHECK(PackedStringArray(references_output.get("required", PackedStringArray())).has("locations"));
+	const Dictionary signature_output = Dictionary(definitions[7]).get("outputSchema", Dictionary());
+	CHECK(Dictionary(signature_output.get("properties", Dictionary())).has("signatureHelp"));
 	const Dictionary rename_schema = Dictionary(definitions[8]).get("inputSchema", Dictionary());
 	CHECK(Dictionary(rename_schema.get("properties", Dictionary())).has("newName"));
+	CHECK(int(Dictionary(Dictionary(rename_schema.get("properties", Dictionary())).get("newName", Dictionary())).get("minLength", 0)) == 1);
 	const PackedStringArray rename_required = rename_schema.get("required", PackedStringArray());
 	CHECK(rename_required.has("newName"));
+	const Dictionary rename_output = Dictionary(definitions[8]).get("outputSchema", Dictionary());
+	CHECK(PackedStringArray(rename_output.get("required", PackedStringArray())).has("edit"));
 	const Dictionary workspace_edit_schema = Dictionary(definitions[9]).get("inputSchema", Dictionary());
 	const Dictionary workspace_edit_properties = workspace_edit_schema.get("properties", Dictionary());
 	CHECK(workspace_edit_properties.has("edit"));
 	CHECK(workspace_edit_properties.has("documents"));
 	const Dictionary workspace_edit_annotations = Dictionary(definitions[9]).get("annotations", Dictionary());
 	CHECK(bool(workspace_edit_annotations.get("destructiveHint", false)));
+	const Dictionary workspace_edit_output = Dictionary(definitions[9]).get("outputSchema", Dictionary());
+	CHECK(PackedStringArray(workspace_edit_output.get("required", PackedStringArray())).has("documents"));
 
 	MCPToolCallContext context;
 	Dictionary missing_script;
 	missing_script["path"] = "res://mcp_semantic_missing.gd";
+	Dictionary unexpected_arguments = missing_script.duplicate(true);
+	unexpected_arguments["unexpected"] = true;
+	const Dictionary unexpected_result = registry.call_tool("godot.gdscript.diagnostics", unexpected_arguments, context).result;
+	CHECK(_error_code(unexpected_result) == "INVALID_ARGUMENTS");
+	CHECK(_error_details(unexpected_result).get("keyword", String()) == "additionalProperties");
 	const MCPToolRegistry::CallResult missing_call = registry.call_tool("godot.gdscript.diagnostics", missing_script, context);
 	REQUIRE(missing_call.status == MCPToolRegistry::CALL_OK);
 	CHECK(bool(missing_call.result.get("isError", false)));
@@ -200,6 +216,16 @@ TEST_CASE("[MCP][Provider] GDScript semantic tools use injected analysis session
 	const MCPToolRegistry::CallResult missing_references = registry.call_tool("godot.gdscript.references", missing_position, context);
 	REQUIRE(missing_references.status == MCPToolRegistry::CALL_OK);
 	CHECK(_error_code(missing_references.result) == "SCRIPT_NOT_FOUND");
+	Dictionary invalid_nested_position;
+	invalid_nested_position["line"] = 0;
+	invalid_nested_position["character"] = 0;
+	invalid_nested_position["unexpected"] = true;
+	Dictionary invalid_nested_arguments;
+	invalid_nested_arguments["path"] = "res://mcp_semantic_missing.gd";
+	invalid_nested_arguments["position"] = invalid_nested_position;
+	const Dictionary invalid_nested_result = registry.call_tool("godot.gdscript.hover", invalid_nested_arguments, context).result;
+	CHECK(_error_code(invalid_nested_result) == "INVALID_ARGUMENTS");
+	CHECK(_error_details(invalid_nested_result).get("keyword", String()) == "additionalProperties");
 
 	Dictionary negative_position = missing_position.duplicate();
 	negative_position["line"] = -1;

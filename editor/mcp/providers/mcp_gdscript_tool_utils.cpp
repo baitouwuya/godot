@@ -60,10 +60,16 @@ static Dictionary _position_integer_schema(const String &p_description) {
 	return property;
 }
 
+static Dictionary _required_string_schema(const String &p_description) {
+	Dictionary property = MCPToolUtils::make_property_schema("string", p_description);
+	property["minLength"] = 1;
+	return property;
+}
+
 static Dictionary _document_properties() {
 	Dictionary properties;
-	properties["path"] = MCPToolUtils::make_property_schema("string", "Project res:// path or an absolute .gd path inside the project.");
-	properties["uri"] = MCPToolUtils::make_property_schema("string", "File URI resolving to a .gd file inside the project. Use path or uri, not both.");
+	properties["path"] = _required_string_schema("Project res:// path or an absolute .gd path inside the project.");
+	properties["uri"] = _required_string_schema("File URI resolving to a .gd file inside the project. Use path or uri, not both.");
 	return properties;
 }
 
@@ -129,7 +135,7 @@ Dictionary references_schema() {
 
 Dictionary rename_schema() {
 	Dictionary properties = _position_properties();
-	properties["newName"] = MCPToolUtils::make_property_schema("string", "The replacement identifier.");
+	properties["newName"] = _required_string_schema("The replacement identifier.");
 	Dictionary schema = _position_schema(properties);
 	PackedStringArray required;
 	required.push_back("newName");
@@ -139,12 +145,14 @@ Dictionary rename_schema() {
 
 Dictionary workspace_edit_schema() {
 	Dictionary document_properties;
-	document_properties["path"] = MCPToolUtils::make_property_schema("string", "Project GDScript path changed by the WorkspaceEdit.");
+	document_properties["path"] = _required_string_schema("Project GDScript path changed by the WorkspaceEdit.");
 	Dictionary expected_revision = MCPToolUtils::make_property_schema("integer", "Expected ScriptEditor revision.");
 	expected_revision["minimum"] = 0;
 	expected_revision["maximum"] = uint64_t(UINT32_MAX);
 	document_properties["expected_revision"] = expected_revision;
-	document_properties["expected_sha256"] = MCPToolUtils::make_property_schema("string", "Expected authoritative SHA-256.");
+	Dictionary expected_sha256 = MCPToolUtils::make_property_schema("string", "Expected authoritative SHA-256.");
+	expected_sha256["pattern"] = "^[0-9a-fA-F]{64}$";
+	document_properties["expected_sha256"] = expected_sha256;
 	Dictionary document = MCPToolUtils::make_object_schema(document_properties, PackedStringArray{ "path" });
 	Array expectation_options;
 	expectation_options.push_back(_required_schema(PackedStringArray{ "expected_revision" }));
@@ -161,15 +169,6 @@ Dictionary workspace_edit_schema() {
 	documents["items"] = document;
 	properties["documents"] = documents;
 	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "edit", "documents" });
-}
-
-bool validate_arguments(const Dictionary &p_arguments, const PackedStringArray &p_allowed, String &r_error) {
-	String unknown;
-	if (!MCPToolUtils::has_only_arguments(p_arguments, p_allowed, unknown)) {
-		r_error = "Unknown argument: " + unknown;
-		return false;
-	}
-	return true;
 }
 
 bool get_string_argument(const Dictionary &p_arguments, const String &p_name, String &r_value, String &r_error) {

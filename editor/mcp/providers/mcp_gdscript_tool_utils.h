@@ -39,9 +39,20 @@ Dictionary position_schema();
 Dictionary references_schema();
 Dictionary rename_schema();
 Dictionary workspace_edit_schema();
+Dictionary completion_schema();
+
+Dictionary diagnostics_output_schema();
+Dictionary symbols_output_schema();
+Dictionary completion_output_schema();
+Dictionary hover_output_schema();
+Dictionary locations_output_schema(bool p_include_operation);
+Dictionary signature_output_schema();
+Dictionary rename_output_schema();
+Dictionary workspace_edit_output_schema();
 
 bool get_string_argument(const Dictionary &p_arguments, const String &p_name, String &r_value, String &r_error);
 bool get_position_argument(const Dictionary &p_arguments, const String &p_name, int &r_value, String &r_error);
+bool get_completion_limit(const Dictionary &p_arguments, int &r_value, String &r_error);
 
 int completion_kind(ScriptLanguage::CodeCompletionKind p_kind);
 

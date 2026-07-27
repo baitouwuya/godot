@@ -35,6 +35,9 @@
 
 namespace {
 
+static constexpr int DEFAULT_COMPLETION_LIMIT = 100;
+static constexpr int MAX_COMPLETION_LIMIT = 500;
+
 static Dictionary _required_schema(const PackedStringArray &p_required) {
 	Dictionary schema;
 	schema["required"] = p_required;
@@ -112,6 +115,58 @@ static Dictionary _position_schema(const Dictionary &p_properties) {
 	return schema;
 }
 
+static Dictionary _non_negative_integer_schema(const String &p_description) {
+	Dictionary schema = MCPToolUtils::make_property_schema("integer", p_description);
+	schema["minimum"] = 0;
+	return schema;
+}
+
+static Dictionary _metadata_properties() {
+	Dictionary properties;
+	properties["path"] = MCPToolUtils::make_property_schema("string", "Analyzed project GDScript path.");
+	properties["uri"] = MCPToolUtils::make_property_schema("string", "Analyzed GDScript file URI.");
+	properties["analysisRevision"] = _non_negative_integer_schema("GDScript analysis session revision.");
+	properties["revision"] = _non_negative_integer_schema("Open document client revision, when available.");
+	Dictionary sha256 = MCPToolUtils::make_property_schema("string", "SHA-256 of the analyzed source text.");
+	sha256["pattern"] = "^[0-9a-f]{64}$";
+	properties["sha256"] = sha256;
+	properties["sourceState"] = MCPToolUtils::make_property_schema("string", "Open or disk analysis source state.");
+	Dictionary client_version = MCPToolUtils::make_property_schema("integer", "LSP client version, or -1 for disk documents.");
+	client_version["minimum"] = -1;
+	properties["clientVersion"] = client_version;
+	return properties;
+}
+
+static PackedStringArray _metadata_required() {
+	return PackedStringArray{ "path", "uri", "analysisRevision", "sha256", "sourceState", "clientVersion" };
+}
+
+static Dictionary _object_array_schema(const String &p_description) {
+	Dictionary array = MCPToolUtils::make_property_schema("array", p_description);
+	array["items"] = MCPToolUtils::make_object_schema(Dictionary(), PackedStringArray(), true);
+	return array;
+}
+
+static Dictionary _nullable_object_schema(const String &p_description) {
+	Dictionary schema;
+	schema["type"] = PackedStringArray{ "object", "null" };
+	schema["description"] = p_description;
+	schema["additionalProperties"] = true;
+	return schema;
+}
+
+static Dictionary _metadata_output_schema(const Dictionary &p_extra_properties, const PackedStringArray &p_extra_required) {
+	Dictionary properties = _metadata_properties();
+	for (const KeyValue<Variant, Variant> &entry : p_extra_properties) {
+		properties[entry.key] = entry.value;
+	}
+	PackedStringArray required = _metadata_required();
+	for (const String &name : p_extra_required) {
+		required.push_back(name);
+	}
+	return MCPToolUtils::make_object_schema(properties, required);
+}
+
 } // namespace
 
 namespace MCPGDScriptToolUtils {
@@ -171,6 +226,86 @@ Dictionary workspace_edit_schema() {
 	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "edit", "documents" });
 }
 
+Dictionary completion_schema() {
+	Dictionary schema = position_schema();
+	Dictionary properties = schema.get("properties", Dictionary());
+	Dictionary limit = MCPToolUtils::make_property_schema("integer", "Maximum completion items returned.");
+	limit["minimum"] = 1;
+	limit["maximum"] = MAX_COMPLETION_LIMIT;
+	limit["default"] = DEFAULT_COMPLETION_LIMIT;
+	properties["limit"] = limit;
+	schema["properties"] = properties;
+	return schema;
+}
+
+Dictionary diagnostics_output_schema() {
+	Dictionary properties;
+	properties["diagnostics"] = _object_array_schema("GDScript diagnostics.");
+	return _metadata_output_schema(properties, PackedStringArray{ "diagnostics" });
+}
+
+Dictionary symbols_output_schema() {
+	Dictionary properties;
+	properties["symbols"] = _object_array_schema("GDScript document symbols.");
+	return _metadata_output_schema(properties, PackedStringArray{ "symbols" });
+}
+
+Dictionary completion_output_schema() {
+	Dictionary properties;
+	Dictionary items = _object_array_schema("Bounded LSP completion items.");
+	items["maxItems"] = MAX_COMPLETION_LIMIT;
+	properties["items"] = items;
+	properties["totalItemCount"] = _non_negative_integer_schema("Total completion item count before truncation.");
+	properties["isIncomplete"] = MCPToolUtils::make_property_schema("boolean", "Whether completion items were truncated.");
+	return _metadata_output_schema(properties, PackedStringArray{ "items", "totalItemCount", "isIncomplete" });
+}
+
+Dictionary hover_output_schema() {
+	Dictionary properties;
+	properties["hover"] = _nullable_object_schema("LSP hover result, or null when no symbol is found.");
+	properties["symbol"] = MCPToolUtils::make_object_schema(Dictionary(), PackedStringArray(), true);
+	properties["found"] = MCPToolUtils::make_property_schema("boolean", "Whether hover information was found.");
+	return _metadata_output_schema(properties, PackedStringArray{ "hover", "found" });
+}
+
+Dictionary locations_output_schema(bool p_include_operation) {
+	Dictionary properties;
+	properties["locations"] = _object_array_schema("Resolved LSP locations.");
+	properties["found"] = MCPToolUtils::make_property_schema("boolean", "Whether locations were found.");
+	properties["symbol"] = MCPToolUtils::make_object_schema(Dictionary(), PackedStringArray(), true);
+	properties["native"] = MCPToolUtils::make_property_schema("boolean", "Whether the symbol resolves to a native class.");
+	PackedStringArray required{ "locations", "found" };
+	if (p_include_operation) {
+		properties["operation"] = MCPToolUtils::make_property_schema("string", "Definition or declaration operation.");
+		required.push_back("operation");
+	}
+	return _metadata_output_schema(properties, required);
+}
+
+Dictionary signature_output_schema() {
+	Dictionary properties;
+	properties["signatureHelp"] = _nullable_object_schema("LSP signature help, or null when unavailable.");
+	properties["found"] = MCPToolUtils::make_property_schema("boolean", "Whether signature help was found.");
+	return _metadata_output_schema(properties, PackedStringArray{ "signatureHelp", "found" });
+}
+
+Dictionary rename_output_schema() {
+	Dictionary properties;
+	properties["edit"] = MCPToolUtils::make_object_schema(Dictionary(), PackedStringArray(), true);
+	properties["changed"] = MCPToolUtils::make_property_schema("boolean", "Whether the WorkspaceEdit contains changes.");
+	return _metadata_output_schema(properties, PackedStringArray{ "edit", "changed" });
+}
+
+Dictionary workspace_edit_output_schema() {
+	Dictionary properties;
+	properties["applied"] = MCPToolUtils::make_property_schema("boolean", "Whether the WorkspaceEdit was applied.");
+	properties["analysisSynchronized"] = MCPToolUtils::make_property_schema("boolean", "Whether all changed buffers were synchronized with analysis.");
+	properties["saved"] = MCPToolUtils::make_property_schema("boolean", "Whether changed buffers were saved.");
+	properties["documentCount"] = _non_negative_integer_schema("Changed document count.");
+	properties["documents"] = _object_array_schema("Changed authoritative Script editor buffer snapshots.");
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "applied", "analysisSynchronized", "saved", "documentCount", "documents" });
+}
+
 bool get_string_argument(const Dictionary &p_arguments, const String &p_name, String &r_value, String &r_error) {
 	const Variant value = p_arguments.get(p_name, Variant());
 	if (value.get_type() != Variant::STRING) {
@@ -193,6 +328,16 @@ bool get_position_argument(const Dictionary &p_arguments, const String &p_name, 
 		return false;
 	}
 	r_value = int(integer);
+	return true;
+}
+
+bool get_completion_limit(const Dictionary &p_arguments, int &r_value, String &r_error) {
+	int64_t limit = DEFAULT_COMPLETION_LIMIT;
+	if (!MCPToolUtils::try_get_json_integer(p_arguments.get("limit", DEFAULT_COMPLETION_LIMIT), 1, MAX_COMPLETION_LIMIT, limit)) {
+		r_error = "limit is outside its allowed range.";
+		return false;
+	}
+	r_value = int(limit);
 	return true;
 }
 

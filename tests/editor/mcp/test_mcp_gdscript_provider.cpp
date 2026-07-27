@@ -92,6 +92,16 @@ TEST_CASE("[MCP][Provider] GDScript tool utilities preserve position and complet
 	CHECK_FALSE(MCPGDScriptToolUtils::get_position_argument(arguments, "line", line, error));
 	CHECK(error == "line must be a non-negative 32-bit integer.");
 
+	int completion_limit = 0;
+	CHECK(MCPGDScriptToolUtils::get_completion_limit(Dictionary(), completion_limit, error));
+	CHECK(completion_limit == 100);
+	arguments["limit"] = 500;
+	CHECK(MCPGDScriptToolUtils::get_completion_limit(arguments, completion_limit, error));
+	CHECK(completion_limit == 500);
+	arguments["limit"] = 501;
+	CHECK_FALSE(MCPGDScriptToolUtils::get_completion_limit(arguments, completion_limit, error));
+	CHECK(error == "limit is outside its allowed range.");
+
 	CHECK(MCPGDScriptToolUtils::completion_kind(ScriptLanguage::CODE_COMPLETION_KIND_ENUM) == LSP::CompletionItemKind::Enum);
 	CHECK(MCPGDScriptToolUtils::completion_kind(ScriptLanguage::CODE_COMPLETION_KIND_CLASS) == LSP::CompletionItemKind::Class);
 	CHECK(MCPGDScriptToolUtils::completion_kind(ScriptLanguage::CODE_COMPLETION_KIND_MEMBER) == LSP::CompletionItemKind::Property);

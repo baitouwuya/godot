@@ -83,11 +83,35 @@ TEST_CASE("[MCP][Provider] Project settings are bounded, typed, undo-aware, and 
 	CHECK(names[0] == "godot.project.get_settings");
 	CHECK(names[4] == "godot.project.save");
 	CHECK(names[5] == "godot.autoload.get_all");
+	const Array definitions = registry.get_tool_definitions();
+	REQUIRE(definitions.size() == 8);
+	const Dictionary settings_output = Dictionary(definitions[0]).get("outputSchema", Dictionary());
+	CHECK(Dictionary(settings_output.get("properties", Dictionary())).has("settings"));
+	CHECK(PackedStringArray(settings_output.get("required", PackedStringArray())).has("matchedCount"));
+	CHECK_FALSE(bool(settings_output.get("additionalProperties", true)));
+	const Dictionary setting_input = Dictionary(definitions[1]).get("inputSchema", Dictionary());
+	const Dictionary setting_name_schema = Dictionary(setting_input.get("properties", Dictionary())).get("name", Dictionary());
+	CHECK(int(setting_name_schema.get("minLength", 0)) == 1);
+	const Dictionary setting_output = Dictionary(definitions[1]).get("outputSchema", Dictionary());
+	CHECK(PackedStringArray(setting_output.get("required", PackedStringArray())).has("encodable"));
+	const Dictionary set_output = Dictionary(definitions[2]).get("outputSchema", Dictionary());
+	CHECK(PackedStringArray(set_output.get("required", PackedStringArray())).has("changed"));
+	const Dictionary save_output = Dictionary(definitions[4]).get("outputSchema", Dictionary());
+	CHECK(PackedStringArray(save_output.get("required", PackedStringArray())).has("path"));
+	const Dictionary autoloads_output = Dictionary(definitions[5]).get("outputSchema", Dictionary());
+	CHECK(Dictionary(autoloads_output.get("properties", Dictionary())).has("autoloads"));
+	const Dictionary add_input = Dictionary(definitions[6]).get("inputSchema", Dictionary());
+	CHECK(int(Dictionary(add_input.get("properties", Dictionary())).get("path", Dictionary()).get("minLength", 0)) == 1);
+	const Dictionary remove_output = Dictionary(definitions[7]).get("outputSchema", Dictionary());
+	CHECK(PackedStringArray(remove_output.get("required", PackedStringArray())).has("removed"));
 
 	const String suffix = String::num_int64(OS::get_singleton()->get_process_id()) + "_" + String::num_uint64(OS::get_singleton()->get_ticks_usec());
 	const String setting_name = "mcp_test/settings_" + suffix;
 	ScopedSettingRestore restore(setting_name);
 	MCPToolCallContext context;
+	Dictionary unexpected_arguments;
+	unexpected_arguments["unexpected"] = true;
+	CHECK(_error_code(registry.call_tool("godot.project.save", unexpected_arguments, context)) == "INVALID_ARGUMENTS");
 
 	Dictionary set_arguments;
 	set_arguments["name"] = setting_name;

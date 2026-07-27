@@ -45,6 +45,12 @@
 
 namespace {
 
+static Dictionary _required_string_schema(const String &p_description) {
+	Dictionary schema = MCPToolUtils::make_property_schema("string", p_description);
+	schema["minLength"] = 1;
+	return schema;
+}
+
 static Dictionary _settings_schema() {
 	Dictionary properties;
 	properties["prefix"] = MCPToolUtils::make_property_schema("string", "Optional project-setting name prefix.");
@@ -61,13 +67,13 @@ static Dictionary _settings_schema() {
 
 static Dictionary _setting_name_schema() {
 	Dictionary properties;
-	properties["name"] = MCPToolUtils::make_property_schema("string", "Exact project-setting name.");
+	properties["name"] = _required_string_schema("Exact project-setting name.");
 	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "name" });
 }
 
 static Dictionary _set_setting_schema() {
 	Dictionary properties;
-	properties["name"] = MCPToolUtils::make_property_schema("string", "Exact project-setting name outside special managed namespaces.");
+	properties["name"] = _required_string_schema("Exact project-setting name outside special managed namespaces.");
 	Dictionary value;
 	value["description"] = "JSON-native Variant value.";
 	properties["value"] = value;
@@ -76,22 +82,107 @@ static Dictionary _set_setting_schema() {
 
 static Dictionary _autoload_add_schema() {
 	Dictionary properties;
-	properties["name"] = MCPToolUtils::make_property_schema("string", "Valid autoload identifier.");
-	properties["path"] = MCPToolUtils::make_property_schema("string", "Existing project-local Script or PackedScene path.");
+	properties["name"] = _required_string_schema("Valid autoload identifier.");
+	properties["path"] = _required_string_schema("Existing project-local Script or PackedScene path.");
 	Dictionary singleton = MCPToolUtils::make_property_schema("boolean", "Expose the autoload as a global singleton. Defaults to true.");
 	singleton["default"] = true;
 	properties["singleton"] = singleton;
 	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "name", "path" });
 }
 
+static Dictionary _autoload_name_schema() {
+	Dictionary properties;
+	properties["name"] = _required_string_schema("Exact Autoload name.");
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "name" });
+}
+
+static Dictionary _non_negative_integer_schema(const String &p_description) {
+	Dictionary schema = MCPToolUtils::make_property_schema("integer", p_description);
+	schema["minimum"] = 0;
+	return schema;
+}
+
+static Dictionary _setting_output_schema(bool p_require_encoding_state) {
+	Dictionary properties;
+	properties["name"] = MCPToolUtils::make_property_schema("string", "Project setting name.");
+	properties["type"] = MCPToolUtils::make_property_schema("string", "Godot Variant type name.");
+	properties["typeId"] = _non_negative_integer_schema("Godot Variant type ID.");
+	properties["builtin"] = MCPToolUtils::make_property_schema("boolean", "Whether this is a built-in project setting.");
+	properties["order"] = MCPToolUtils::make_property_schema("integer", "Project setting serialization order.");
+	properties["encodable"] = MCPToolUtils::make_property_schema("boolean", "Whether the current value is MCP encodable.");
+	properties["value"] = Dictionary();
+	properties["encodingError"] = MCPToolUtils::make_property_schema("string", "Value encoding failure.");
+	PackedStringArray required{ "name", "type", "typeId", "builtin", "order" };
+	if (p_require_encoding_state) {
+		required.push_back("encodable");
+	}
+	return MCPToolUtils::make_object_schema(properties, required, true);
+}
+
+static Dictionary _settings_output_schema() {
+	Dictionary settings = MCPToolUtils::make_property_schema("array", "Matching project setting descriptions.");
+	settings["items"] = _setting_output_schema(false);
+	settings["maxItems"] = 1024;
+	Dictionary properties;
+	properties["prefix"] = MCPToolUtils::make_property_schema("string", "Applied project-setting prefix.");
+	properties["matchedCount"] = _non_negative_integer_schema("Matching project setting count.");
+	properties["returnedCount"] = _non_negative_integer_schema("Returned project setting count.");
+	properties["truncated"] = MCPToolUtils::make_property_schema("boolean", "Whether matching settings were omitted by the limit.");
+	properties["settings"] = settings;
+	return MCPToolUtils::make_object_schema(properties,
+			PackedStringArray{ "prefix", "matchedCount", "returnedCount", "truncated", "settings" });
+}
+
+static Dictionary _named_mutation_output_schema(const String &p_state_name, const String &p_state_description, bool p_include_value = false) {
+	Dictionary properties;
+	properties["name"] = MCPToolUtils::make_property_schema("string", "Affected project entry name.");
+	properties[p_state_name] = MCPToolUtils::make_property_schema("boolean", p_state_description);
+	properties["saved"] = MCPToolUtils::make_property_schema("boolean", "Whether project.godot was saved.");
+	if (p_include_value) {
+		properties["value"] = Dictionary();
+	}
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "name", p_state_name, "saved" });
+}
+
+static Dictionary _save_output_schema() {
+	Dictionary properties;
+	properties["path"] = MCPToolUtils::make_property_schema("string", "Saved project settings path.");
+	properties["saved"] = MCPToolUtils::make_property_schema("boolean", "Whether project settings were saved.");
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "path", "saved" });
+}
+
+static Dictionary _autoload_output_schema() {
+	Dictionary properties;
+	properties["name"] = MCPToolUtils::make_property_schema("string", "Autoload name.");
+	properties["path"] = MCPToolUtils::make_property_schema("string", "Project-local Autoload resource path.");
+	properties["singleton"] = MCPToolUtils::make_property_schema("boolean", "Whether the Autoload is a global singleton.");
+	properties["prepend"] = MCPToolUtils::make_property_schema("boolean", "Whether the Autoload uses prepend ordering.");
+	properties["order"] = MCPToolUtils::make_property_schema("integer", "Project setting serialization order.");
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "name", "path", "singleton", "prepend", "order" });
+}
+
+static Dictionary _autoloads_output_schema() {
+	Dictionary autoloads = MCPToolUtils::make_property_schema("array", "Autoload entries in load order.");
+	autoloads["items"] = _autoload_output_schema();
+	Dictionary properties;
+	properties["count"] = _non_negative_integer_schema("Autoload entry count.");
+	properties["autoloads"] = autoloads;
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "count", "autoloads" });
+}
+
+static Dictionary _autoload_add_output_schema() {
+	Dictionary properties;
+	properties["name"] = MCPToolUtils::make_property_schema("string", "Added Autoload name.");
+	properties["path"] = MCPToolUtils::make_property_schema("string", "Project-local Autoload resource path.");
+	properties["singleton"] = MCPToolUtils::make_property_schema("boolean", "Whether the Autoload is a global singleton.");
+	properties["saved"] = MCPToolUtils::make_property_schema("boolean", "Whether project.godot was saved.");
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "name", "path", "singleton", "saved" });
+}
+
 static void _set_error(String *r_error, const String &p_message) {
 	if (r_error) {
 		*r_error = p_message;
 	}
-}
-
-static Dictionary _unknown_argument_error(const String &p_name) {
-	return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "Unknown argument: " + p_name);
 }
 
 static bool _read_nonempty_string(const Dictionary &p_arguments, const StringName &p_name, String &r_value) {
@@ -182,46 +273,26 @@ Error MCPProjectProvider::register_tools(MCPToolRegistry *p_registry, String *r_
 		return ERR_ALREADY_IN_USE;
 	}
 
-	Error error = p_registry->register_tool(
-			MCPToolUtils::make_tool_definition("godot.project.get_settings", "List visible project settings with bounded optional values.", _settings_schema(), MCPToolUtils::TOOL_READ_ONLY),
-			callable_mp(this, &MCPProjectProvider::get_settings), this, r_error);
-	if (error == OK) {
-		error = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.project.get_setting", "Get one project setting and its editor metadata.", _setting_name_schema(), MCPToolUtils::TOOL_READ_ONLY),
-				callable_mp(this, &MCPProjectProvider::get_setting), this, r_error);
-	}
-	if (error == OK) {
-		error = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.project.set_setting", "Set a project setting through editor undo/redo without saving project.godot.", _set_setting_schema(), MCPToolUtils::TOOL_DESTRUCTIVE),
-				callable_mp(this, &MCPProjectProvider::set_setting), this, r_error);
-	}
-	if (error == OK) {
-		error = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.project.erase_setting", "Erase a project setting through editor undo/redo without saving project.godot.", _setting_name_schema(), MCPToolUtils::TOOL_DESTRUCTIVE),
-				callable_mp(this, &MCPProjectProvider::erase_setting), this, r_error);
-	}
-	if (error == OK) {
-		error = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.project.save", "Explicitly save current project settings to project.godot.", MCPToolUtils::make_object_schema(), MCPToolUtils::TOOL_DESTRUCTIVE),
-				callable_mp(this, &MCPProjectProvider::save), this, r_error);
-	}
-	if (error == OK) {
-		error = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.autoload.get_all", "List project Autoload entries in load order.", MCPToolUtils::make_object_schema(), MCPToolUtils::TOOL_READ_ONLY),
-				callable_mp(this, &MCPProjectProvider::get_autoloads), this, r_error);
-	}
-	if (error == OK) {
-		error = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.autoload.add", "Add a project-local Script or PackedScene Autoload through editor undo/redo.", _autoload_add_schema(), MCPToolUtils::TOOL_ADDITIVE),
-				callable_mp(this, &MCPProjectProvider::add_autoload), this, r_error);
-	}
-	if (error == OK) {
-		error = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.autoload.remove", "Remove an Autoload through editor undo/redo.", _setting_name_schema(), MCPToolUtils::TOOL_DESTRUCTIVE),
-				callable_mp(this, &MCPProjectProvider::remove_autoload), this, r_error);
-	}
+	const LocalVector<MCPToolUtils::ToolDescriptor> tools{
+		{ "godot.project.get_settings", "List visible project settings with bounded optional values.",
+				_settings_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPProjectProvider::get_settings), _settings_output_schema() },
+		{ "godot.project.get_setting", "Get one project setting and its editor metadata.",
+				_setting_name_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPProjectProvider::get_setting), _setting_output_schema(true) },
+		{ "godot.project.set_setting", "Set a project setting through editor undo/redo without saving project.godot.",
+				_set_setting_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPProjectProvider::set_setting), _named_mutation_output_schema("changed", "Whether the project setting changed.", true) },
+		{ "godot.project.erase_setting", "Erase a project setting through editor undo/redo without saving project.godot.",
+				_setting_name_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPProjectProvider::erase_setting), _named_mutation_output_schema("erased", "Whether the project setting was erased.") },
+		{ "godot.project.save", "Explicitly save current project settings to project.godot.",
+				MCPToolUtils::make_object_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPProjectProvider::save), _save_output_schema() },
+		{ "godot.autoload.get_all", "List project Autoload entries in load order.",
+				MCPToolUtils::make_object_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPProjectProvider::get_autoloads), _autoloads_output_schema() },
+		{ "godot.autoload.add", "Add a project-local Script or PackedScene Autoload through editor undo/redo.",
+				_autoload_add_schema(), MCPToolUtils::TOOL_ADDITIVE, callable_mp(this, &MCPProjectProvider::add_autoload), _autoload_add_output_schema() },
+		{ "godot.autoload.remove", "Remove an Autoload through editor undo/redo.",
+				_autoload_name_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPProjectProvider::remove_autoload), _named_mutation_output_schema("removed", "Whether the Autoload was removed.") },
+	};
+	const Error error = MCPToolUtils::register_tools(p_registry, this, tools, r_error);
 	if (error != OK) {
-		p_registry->unregister_tools_for_owner(this);
 		return error;
 	}
 
@@ -238,11 +309,6 @@ void MCPProjectProvider::unregister_tools() {
 }
 
 Dictionary MCPProjectProvider::get_settings(const Dictionary &p_arguments, const Dictionary &) {
-	PackedStringArray allowed{ "prefix", "includeValues", "limit" };
-	String unknown;
-	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed, unknown)) {
-		return _unknown_argument_error(unknown);
-	}
 	const Variant prefix_value = p_arguments.get("prefix", String());
 	const Variant include_values_value = p_arguments.get("includeValues", false);
 	if (prefix_value.get_type() != Variant::STRING || include_values_value.get_type() != Variant::BOOL) {
@@ -281,11 +347,6 @@ Dictionary MCPProjectProvider::get_settings(const Dictionary &p_arguments, const
 }
 
 Dictionary MCPProjectProvider::get_setting(const Dictionary &p_arguments, const Dictionary &) {
-	PackedStringArray allowed{ "name" };
-	String unknown;
-	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed, unknown)) {
-		return _unknown_argument_error(unknown);
-	}
 	String name;
 	if (!_read_nonempty_string(p_arguments, "name", name)) {
 		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "A non-empty setting name is required.");
@@ -300,11 +361,6 @@ Dictionary MCPProjectProvider::get_setting(const Dictionary &p_arguments, const 
 }
 
 Dictionary MCPProjectProvider::set_setting(const Dictionary &p_arguments, const Dictionary &) {
-	PackedStringArray allowed{ "name", "value" };
-	String unknown;
-	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed, unknown)) {
-		return _unknown_argument_error(unknown);
-	}
 	String name;
 	if (!_read_nonempty_string(p_arguments, "name", name) || !p_arguments.has("value")) {
 		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "A non-empty setting name and value are required.");
@@ -336,11 +392,6 @@ Dictionary MCPProjectProvider::set_setting(const Dictionary &p_arguments, const 
 }
 
 Dictionary MCPProjectProvider::erase_setting(const Dictionary &p_arguments, const Dictionary &) {
-	PackedStringArray allowed{ "name" };
-	String unknown;
-	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed, unknown)) {
-		return _unknown_argument_error(unknown);
-	}
 	String name;
 	if (!_read_nonempty_string(p_arguments, "name", name)) {
 		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "A non-empty setting name is required.");
@@ -363,10 +414,7 @@ Dictionary MCPProjectProvider::erase_setting(const Dictionary &p_arguments, cons
 	return MCPToolUtils::make_success_result(result);
 }
 
-Dictionary MCPProjectProvider::save(const Dictionary &p_arguments, const Dictionary &) {
-	if (!p_arguments.is_empty()) {
-		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "godot.project.save does not accept arguments.");
-	}
+Dictionary MCPProjectProvider::save(const Dictionary &, const Dictionary &) {
 	const Error error = ProjectSettings::get_singleton()->save();
 	if (error != OK) {
 		return MCPToolUtils::make_error_result("SAVE_FAILED", error_names[error]);
@@ -377,10 +425,7 @@ Dictionary MCPProjectProvider::save(const Dictionary &p_arguments, const Diction
 	return MCPToolUtils::make_success_result(result);
 }
 
-Dictionary MCPProjectProvider::get_autoloads(const Dictionary &p_arguments, const Dictionary &) {
-	if (!p_arguments.is_empty()) {
-		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "godot.autoload.get_all does not accept arguments.");
-	}
+Dictionary MCPProjectProvider::get_autoloads(const Dictionary &, const Dictionary &) {
 	Array autoloads;
 	ProjectSettings *settings = ProjectSettings::get_singleton();
 	List<PropertyInfo> properties;
@@ -411,11 +456,6 @@ Dictionary MCPProjectProvider::get_autoloads(const Dictionary &p_arguments, cons
 }
 
 Dictionary MCPProjectProvider::add_autoload(const Dictionary &p_arguments, const Dictionary &) {
-	PackedStringArray allowed{ "name", "path", "singleton" };
-	String unknown;
-	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed, unknown)) {
-		return _unknown_argument_error(unknown);
-	}
 	String name;
 	String path;
 	const Variant singleton_value = p_arguments.get("singleton", true);
@@ -461,11 +501,6 @@ Dictionary MCPProjectProvider::add_autoload(const Dictionary &p_arguments, const
 }
 
 Dictionary MCPProjectProvider::remove_autoload(const Dictionary &p_arguments, const Dictionary &) {
-	PackedStringArray allowed{ "name" };
-	String unknown;
-	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed, unknown)) {
-		return _unknown_argument_error(unknown);
-	}
 	String name;
 	if (!_read_nonempty_string(p_arguments, "name", name)) {
 		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "A non-empty Autoload name is required.");

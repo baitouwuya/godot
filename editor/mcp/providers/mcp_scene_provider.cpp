@@ -71,17 +71,42 @@ static Dictionary _save_schema() {
 
 static Dictionary _open_schema() {
 	Dictionary path = MCPToolUtils::make_property_schema("string", "Project scene path beginning with res://.");
+	path["minLength"] = 1;
 	Dictionary properties;
 	properties["path"] = path;
-	Dictionary schema = MCPToolUtils::make_object_schema(properties);
-	PackedStringArray required;
-	required.push_back("path");
-	schema["required"] = required;
-	return schema;
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "path" });
 }
 
-static Dictionary _unknown_argument_error(const String &p_name) {
-	return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "Unknown argument: " + p_name);
+static Dictionary _path_result_schema(const String &p_boolean_name, const String &p_boolean_description) {
+	Dictionary properties;
+	properties["path"] = MCPToolUtils::make_property_schema("string", "Normalized project scene path.");
+	properties[p_boolean_name] = MCPToolUtils::make_property_schema("boolean", p_boolean_description);
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "path", p_boolean_name });
+}
+
+static Dictionary _tree_output_schema() {
+	Dictionary root;
+	root["type"] = "object";
+	root["additionalProperties"] = true;
+	Dictionary properties;
+	properties["scenePath"] = MCPToolUtils::make_property_schema("string", "Current edited scene path.");
+	properties["root"] = root;
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "scenePath", "root" });
+}
+
+static Dictionary _selection_output_schema() {
+	Dictionary count = MCPToolUtils::make_property_schema("integer", "Selected scene node count.");
+	count["minimum"] = 0;
+	Dictionary node;
+	node["type"] = "object";
+	node["additionalProperties"] = true;
+	Dictionary nodes = MCPToolUtils::make_property_schema("array", "Selected scene node summaries.");
+	nodes["items"] = node;
+
+	Dictionary properties;
+	properties["count"] = count;
+	properties["nodes"] = nodes;
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "count", "nodes" });
 }
 
 static void _set_error(String *r_error, const String &p_message) {
@@ -117,26 +142,18 @@ Error MCPSceneProvider::register_tools(MCPToolRegistry *p_registry, String *r_er
 		return ERR_ALREADY_IN_USE;
 	}
 
-	Error err = p_registry->register_tool(
-			MCPToolUtils::make_tool_definition("godot.scene.open", "Open a project scene in the editor.", _open_schema(), MCPToolUtils::TOOL_DESTRUCTIVE),
-			callable_mp(this, &MCPSceneProvider::open), this, r_error);
-	if (err == OK) {
-		err = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.scene.get_tree", "Get the current edited scene tree.", _tree_schema(), MCPToolUtils::TOOL_READ_ONLY),
-				callable_mp(this, &MCPSceneProvider::get_tree), this, r_error);
-	}
-	if (err == OK) {
-		err = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.scene.get_selection", "Get nodes selected in the editor.", MCPToolUtils::make_object_schema(), MCPToolUtils::TOOL_READ_ONLY),
-				callable_mp(this, &MCPSceneProvider::get_selection), this, r_error);
-	}
-	if (err == OK) {
-		err = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.scene.save", "Explicitly save the current edited scene.", _save_schema(), MCPToolUtils::TOOL_DESTRUCTIVE),
-				callable_mp(this, &MCPSceneProvider::save), this, r_error);
-	}
+	const LocalVector<MCPToolUtils::ToolDescriptor> tools{
+		{ "godot.scene.open", "Open a project scene in the editor.",
+				_open_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPSceneProvider::open), _path_result_schema("opened", "Whether the scene was opened.") },
+		{ "godot.scene.get_tree", "Get the current edited scene tree.",
+				_tree_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPSceneProvider::get_tree), _tree_output_schema() },
+		{ "godot.scene.get_selection", "Get nodes selected in the editor.",
+				MCPToolUtils::make_object_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPSceneProvider::get_selection), _selection_output_schema() },
+		{ "godot.scene.save", "Explicitly save the current edited scene.",
+				_save_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPSceneProvider::save), _path_result_schema("saved", "Whether the scene was saved.") },
+	};
+	const Error err = MCPToolUtils::register_tools(p_registry, this, tools, r_error);
 	if (err != OK) {
-		p_registry->unregister_tools_for_owner(this);
 		return err;
 	}
 
@@ -153,12 +170,6 @@ void MCPSceneProvider::unregister_tools() {
 }
 
 Dictionary MCPSceneProvider::open(const Dictionary &p_arguments, const Dictionary &) {
-	PackedStringArray allowed_arguments;
-	allowed_arguments.push_back("path");
-	String unknown_argument;
-	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed_arguments, unknown_argument)) {
-		return _unknown_argument_error(unknown_argument);
-	}
 	const Variant path_value = p_arguments.get("path", Variant());
 	if (path_value.get_type() != Variant::STRING || String(path_value).is_empty()) {
 		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "A non-empty string path is required.");
@@ -197,15 +208,6 @@ Dictionary MCPSceneProvider::open(const Dictionary &p_arguments, const Dictionar
 }
 
 Dictionary MCPSceneProvider::get_tree(const Dictionary &p_arguments, const Dictionary &) {
-	PackedStringArray allowed_arguments;
-	allowed_arguments.push_back("rootPath");
-	allowed_arguments.push_back("maxDepth");
-	allowed_arguments.push_back("includeInternal");
-	String unknown_argument;
-	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed_arguments, unknown_argument)) {
-		return _unknown_argument_error(unknown_argument);
-	}
-
 	const Variant root_path_value = p_arguments.get("rootPath", ".");
 	const Variant max_depth_value = p_arguments.get("maxDepth", -1);
 	const Variant include_internal_value = p_arguments.get("includeInternal", false);
@@ -239,11 +241,7 @@ Dictionary MCPSceneProvider::get_tree(const Dictionary &p_arguments, const Dicti
 	return MCPToolUtils::make_success_result(result);
 }
 
-Dictionary MCPSceneProvider::get_selection(const Dictionary &p_arguments, const Dictionary &) {
-	if (!p_arguments.is_empty()) {
-		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "godot.scene.get_selection does not accept arguments.");
-	}
-
+Dictionary MCPSceneProvider::get_selection(const Dictionary &, const Dictionary &) {
 	EditorInterface *editor_interface = EditorInterface::get_singleton();
 	Node *scene_root = editor_interface ? editor_interface->get_edited_scene_root() : nullptr;
 	if (!scene_root) {
@@ -267,12 +265,6 @@ Dictionary MCPSceneProvider::get_selection(const Dictionary &p_arguments, const 
 }
 
 Dictionary MCPSceneProvider::save(const Dictionary &p_arguments, const Dictionary &) {
-	PackedStringArray allowed_arguments;
-	allowed_arguments.push_back("path");
-	String unknown_argument;
-	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed_arguments, unknown_argument)) {
-		return _unknown_argument_error(unknown_argument);
-	}
 	const Variant path_value = p_arguments.get("path", String());
 	if (path_value.get_type() != Variant::STRING) {
 		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "path must be a string when provided.");

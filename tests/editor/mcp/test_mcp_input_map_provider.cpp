@@ -78,6 +78,20 @@ TEST_CASE("[MCP][Provider][SceneTree] Input Map actions use semantic events and 
 	CHECK(names[0] == "godot.input.get_actions");
 	CHECK(names[1] == "godot.input.set_action");
 	CHECK(names[2] == "godot.input.remove_action");
+	const Array definitions = registry.get_tool_definitions();
+	REQUIRE(definitions.size() == 3);
+	const Dictionary get_output = Dictionary(definitions[0]).get("outputSchema", Dictionary());
+	CHECK(Dictionary(get_output.get("properties", Dictionary())).has("actions"));
+	CHECK(PackedStringArray(get_output.get("required", PackedStringArray())).has("matchedCount"));
+	CHECK_FALSE(bool(get_output.get("additionalProperties", true)));
+	const Dictionary set_input = Dictionary(definitions[1]).get("inputSchema", Dictionary());
+	const Dictionary set_name = Dictionary(set_input.get("properties", Dictionary())).get("name", Dictionary());
+	CHECK(int(set_name.get("minLength", 0)) == 1);
+	CHECK(int(set_name.get("maxLength", 0)) == 128);
+	const Dictionary set_output = Dictionary(definitions[1]).get("outputSchema", Dictionary());
+	CHECK(PackedStringArray(set_output.get("required", PackedStringArray())).has("changed"));
+	const Dictionary remove_output = Dictionary(definitions[2]).get("outputSchema", Dictionary());
+	CHECK(PackedStringArray(remove_output.get("required", PackedStringArray())).has("removed"));
 
 	const String action_name = "mcp_action_" + String::num_int64(OS::get_singleton()->get_process_id()) + "_" + String::num_uint64(OS::get_singleton()->get_ticks_usec());
 	ScopedActionRestore restore(action_name);

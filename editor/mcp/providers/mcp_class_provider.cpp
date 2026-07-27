@@ -64,7 +64,9 @@ static Dictionary _search_schema() {
 
 static Dictionary _documentation_schema() {
 	Dictionary properties;
-	properties["name"] = MCPToolUtils::make_property_schema("string", "Exact documented class name.");
+	Dictionary name = MCPToolUtils::make_property_schema("string", "Exact documented class name.");
+	name["minLength"] = 1;
+	properties["name"] = name;
 	PackedStringArray views;
 	views.push_back("summary");
 	views.push_back("full");
@@ -88,6 +90,43 @@ static Dictionary _documentation_schema() {
 	return MCPToolUtils::make_object_schema(properties, required);
 }
 
+static Dictionary _search_output_schema() {
+	Dictionary source = MCPToolUtils::make_property_schema("string", "Applied documentation source filter.");
+	source["enum"] = PackedStringArray{ "all", "native", "script" };
+	Dictionary count = MCPToolUtils::make_property_schema("integer", "Number of returned class matches.");
+	count["minimum"] = 0;
+	Dictionary match;
+	match["type"] = "object";
+	match["additionalProperties"] = true;
+	Dictionary matches = MCPToolUtils::make_property_schema("array", "Matching class summaries.");
+	matches["items"] = match;
+	matches["maxItems"] = 100;
+
+	Dictionary properties;
+	properties["query"] = MCPToolUtils::make_property_schema("string", "Normalized class search query.");
+	properties["source"] = source;
+	properties["inherits"] = MCPToolUtils::make_property_schema("string", "Applied inheritance filter when provided.");
+	properties["count"] = count;
+	properties["matches"] = matches;
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "query", "source", "count", "matches" });
+}
+
+static Dictionary _documentation_output_schema() {
+	Dictionary string_array = MCPToolUtils::make_property_schema("array", "Ordered class names.");
+	string_array["items"] = MCPToolUtils::make_property_schema("string", "Class name.");
+	Dictionary counts;
+	counts["type"] = "object";
+	counts["additionalProperties"] = true;
+
+	Dictionary properties;
+	properties["name"] = MCPToolUtils::make_property_schema("string", "Documented class name.");
+	properties["source"] = MCPToolUtils::make_property_schema("string", "Documentation source.");
+	properties["inherits"] = MCPToolUtils::make_property_schema("string", "Immediate base class name.");
+	properties["inheritance"] = string_array;
+	properties["counts"] = counts;
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "name", "source", "inherits", "inheritance", "counts" }, true);
+}
+
 static bool _get_string(const Dictionary &p_arguments, const StringName &p_name, const String &p_default,
 		bool p_allow_empty, String &r_value) {
 	const Variant value = p_arguments.get(p_name, p_default);
@@ -96,10 +135,6 @@ static bool _get_string(const Dictionary &p_arguments, const StringName &p_name,
 	}
 	r_value = value;
 	return true;
-}
-
-static Dictionary _unknown_argument_error(const String &p_name) {
-	return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "Unknown argument: " + p_name);
 }
 
 static Dictionary _documentation_error(Error p_error, const String &p_message) {
@@ -165,17 +200,14 @@ Error MCPClassProvider::register_tools(MCPToolRegistry *p_registry, String *r_er
 		return ERR_ALREADY_IN_USE;
 	}
 
-	Error err = p_registry->register_tool(
-			MCPToolUtils::make_tool_definition("godot.class.search", "Search native and project script classes.", _search_schema(), MCPToolUtils::TOOL_READ_ONLY),
-			callable_mp(this, &MCPClassProvider::search), this, r_error);
-	if (err == OK) {
-		err = p_registry->register_tool(
-			MCPToolUtils::make_tool_definition("godot.class.get_documentation",
-					"Read structured Godot class documentation.", _documentation_schema(), MCPToolUtils::TOOL_READ_ONLY),
-				callable_mp(this, &MCPClassProvider::get_documentation), this, r_error);
-	}
+	const LocalVector<MCPToolUtils::ToolDescriptor> tools{
+		{ "godot.class.search", "Search native and project script classes.",
+				_search_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPClassProvider::search), _search_output_schema() },
+		{ "godot.class.get_documentation", "Read structured Godot class documentation.",
+				_documentation_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPClassProvider::get_documentation), _documentation_output_schema() },
+	};
+	const Error err = MCPToolUtils::register_tools(p_registry, this, tools, r_error);
 	if (err != OK) {
-		p_registry->unregister_tools_for_owner(this);
 		return err;
 	}
 	tool_registry = p_registry;
@@ -191,17 +223,6 @@ void MCPClassProvider::unregister_tools() {
 }
 
 Dictionary MCPClassProvider::search(const Dictionary &p_arguments, const Dictionary &) {
-	PackedStringArray allowed;
-	allowed.push_back("query");
-	allowed.push_back("source");
-	allowed.push_back("inherits");
-	allowed.push_back("includeDeprecated");
-	allowed.push_back("limit");
-	String unknown_argument;
-	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed, unknown_argument)) {
-		return _unknown_argument_error(unknown_argument);
-	}
-
 	String query;
 	String source;
 	String inherits;
@@ -226,16 +247,6 @@ Dictionary MCPClassProvider::search(const Dictionary &p_arguments, const Diction
 }
 
 Dictionary MCPClassProvider::get_documentation(const Dictionary &p_arguments, const Dictionary &) {
-	PackedStringArray allowed;
-	allowed.push_back("name");
-	allowed.push_back("view");
-	allowed.push_back("section");
-	allowed.push_back("member");
-	String unknown_argument;
-	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed, unknown_argument)) {
-		return _unknown_argument_error(unknown_argument);
-	}
-
 	String name;
 	String view;
 	String section;

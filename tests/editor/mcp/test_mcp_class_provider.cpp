@@ -143,6 +143,18 @@ TEST_CASE("[MCP][Provider] Class documentation tools expose strict schemas") {
 	REQUIRE(names.size() == 2);
 	CHECK(names[0] == "godot.class.search");
 	CHECK(names[1] == "godot.class.get_documentation");
+	const Array definitions = registry.get_tool_definitions();
+	REQUIRE(definitions.size() == 2);
+	const Dictionary search_output = Dictionary(definitions[0]).get("outputSchema", Dictionary());
+	CHECK(Dictionary(search_output.get("properties", Dictionary())).has("matches"));
+	CHECK(PackedStringArray(search_output.get("required", PackedStringArray())).has("count"));
+	CHECK_FALSE(bool(search_output.get("additionalProperties", true)));
+	const Dictionary documentation_input = Dictionary(definitions[1]).get("inputSchema", Dictionary());
+	const Dictionary documentation_name = Dictionary(documentation_input.get("properties", Dictionary())).get("name", Dictionary());
+	CHECK(int(documentation_name.get("minLength", 0)) == 1);
+	const Dictionary documentation_output = Dictionary(definitions[1]).get("outputSchema", Dictionary());
+	CHECK(PackedStringArray(documentation_output.get("required", PackedStringArray())).has("inheritance"));
+	CHECK(bool(documentation_output.get("additionalProperties", false)));
 
 	Dictionary invalid;
 	invalid["unknown"] = true;

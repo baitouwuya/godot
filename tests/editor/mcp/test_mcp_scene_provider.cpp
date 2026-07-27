@@ -54,11 +54,21 @@ TEST_CASE("[MCP][Provider] Scene tools register in order") {
 	REQUIRE(definitions.size() == 4);
 	const Dictionary open_schema = Dictionary(definitions[0]).get("inputSchema", Dictionary());
 	CHECK(PackedStringArray(open_schema.get("required", PackedStringArray())).has("path"));
+	CHECK(int(Dictionary(open_schema.get("properties", Dictionary())).get("path", Dictionary()).get("minLength", 0)) == 1);
+	const Dictionary open_output = Dictionary(definitions[0]).get("outputSchema", Dictionary());
+	CHECK(PackedStringArray(open_output.get("required", PackedStringArray())).has("opened"));
 	const Dictionary tree_schema = Dictionary(definitions[1]).get("inputSchema", Dictionary());
 	const Dictionary tree_properties = tree_schema.get("properties", Dictionary());
 	CHECK(tree_properties.has("rootPath"));
 	CHECK(tree_properties.has("maxDepth"));
 	CHECK(tree_properties.has("includeInternal"));
+	const Dictionary tree_output = Dictionary(definitions[1]).get("outputSchema", Dictionary());
+	CHECK(PackedStringArray(tree_output.get("required", PackedStringArray())).has("root"));
+	const Dictionary selection_output = Dictionary(definitions[2]).get("outputSchema", Dictionary());
+	CHECK(Dictionary(selection_output.get("properties", Dictionary())).has("nodes"));
+	CHECK_FALSE(bool(selection_output.get("additionalProperties", true)));
+	const Dictionary save_output = Dictionary(definitions[3]).get("outputSchema", Dictionary());
+	CHECK(PackedStringArray(save_output.get("required", PackedStringArray())).has("saved"));
 
 	MCPToolCallContext context;
 	Dictionary invalid_arguments;

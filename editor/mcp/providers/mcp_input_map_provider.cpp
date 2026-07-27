@@ -56,7 +56,10 @@ static Dictionary _get_actions_schema() {
 
 static Dictionary _set_action_schema() {
 	Dictionary properties;
-	properties["name"] = MCPToolUtils::make_property_schema("string", "Project input action name.");
+	Dictionary name = MCPToolUtils::make_property_schema("string", "Project input action name.");
+	name["minLength"] = 1;
+	name["maxLength"] = 128;
+	properties["name"] = name;
 	Dictionary deadzone = MCPToolUtils::make_property_schema("number", "Optional action deadzone between 0 and 1.");
 	deadzone["minimum"] = 0.0;
 	deadzone["maximum"] = 1.0;
@@ -73,8 +76,62 @@ static Dictionary _set_action_schema() {
 
 static Dictionary _name_schema() {
 	Dictionary properties;
-	properties["name"] = MCPToolUtils::make_property_schema("string", "Project input action name.");
+	Dictionary name = MCPToolUtils::make_property_schema("string", "Project input action name.");
+	name["minLength"] = 1;
+	name["maxLength"] = 128;
+	properties["name"] = name;
 	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "name" });
+}
+
+static Dictionary _action_output_schema(bool p_include_mutation_state) {
+	Dictionary event;
+	event["type"] = "object";
+	event["additionalProperties"] = true;
+	Dictionary events = MCPToolUtils::make_property_schema("array", "Semantic input events.");
+	events["items"] = event;
+	Dictionary event_count = MCPToolUtils::make_property_schema("integer", "Number of configured input events.");
+	event_count["minimum"] = 0;
+
+	Dictionary properties;
+	properties["name"] = MCPToolUtils::make_property_schema("string", "Input action name.");
+	properties["builtin"] = MCPToolUtils::make_property_schema("boolean", "Whether the action is built in.");
+	properties["deadzone"] = MCPToolUtils::make_property_schema("number", "Input action deadzone.");
+	properties["eventCount"] = event_count;
+	properties["events"] = events;
+	PackedStringArray required{ "name", "builtin", "deadzone", "eventCount", "events" };
+	if (p_include_mutation_state) {
+		properties["changed"] = MCPToolUtils::make_property_schema("boolean", "Whether the action changed.");
+		properties["saved"] = MCPToolUtils::make_property_schema("boolean", "Whether project.godot was saved.");
+		required.push_back("changed");
+		required.push_back("saved");
+	}
+	return MCPToolUtils::make_object_schema(properties, required);
+}
+
+static Dictionary _get_actions_output_schema() {
+	Dictionary count = MCPToolUtils::make_property_schema("integer", "Input action count.");
+	count["minimum"] = 0;
+	Dictionary actions = MCPToolUtils::make_property_schema("array", "Matching Input Map actions.");
+	actions["items"] = _action_output_schema(false);
+	actions["maxItems"] = 512;
+
+	Dictionary properties;
+	properties["prefix"] = MCPToolUtils::make_property_schema("string", "Applied action-name prefix.");
+	properties["includeBuiltin"] = MCPToolUtils::make_property_schema("boolean", "Whether built-in actions were included.");
+	properties["matchedCount"] = count;
+	properties["returnedCount"] = count;
+	properties["truncated"] = MCPToolUtils::make_property_schema("boolean", "Whether matching actions were omitted by the limit.");
+	properties["actions"] = actions;
+	return MCPToolUtils::make_object_schema(properties,
+			PackedStringArray{ "prefix", "includeBuiltin", "matchedCount", "returnedCount", "truncated", "actions" });
+}
+
+static Dictionary _remove_action_output_schema() {
+	Dictionary properties;
+	properties["name"] = MCPToolUtils::make_property_schema("string", "Removed input action name.");
+	properties["removed"] = MCPToolUtils::make_property_schema("boolean", "Whether the action was removed.");
+	properties["saved"] = MCPToolUtils::make_property_schema("boolean", "Whether project.godot was saved.");
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "name", "removed", "saved" });
 }
 
 static void _set_error(String *r_error, const String &p_message) {
@@ -162,21 +219,16 @@ Error MCPInputMapProvider::register_tools(MCPToolRegistry *p_registry, String *r
 		return ERR_ALREADY_IN_USE;
 	}
 
-	Error error = p_registry->register_tool(
-			MCPToolUtils::make_tool_definition("godot.input.get_actions", "List project Input Map actions and semantic event bindings.", _get_actions_schema(), MCPToolUtils::TOOL_READ_ONLY),
-			callable_mp(this, &MCPInputMapProvider::get_actions), this, r_error);
-	if (error == OK) {
-		error = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.input.set_action", "Create or replace an Input Map action through editor undo/redo without saving project.godot.", _set_action_schema(), MCPToolUtils::TOOL_DESTRUCTIVE),
-				callable_mp(this, &MCPInputMapProvider::set_action), this, r_error);
-	}
-	if (error == OK) {
-		error = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.input.remove_action", "Remove a custom Input Map action through editor undo/redo.", _name_schema(), MCPToolUtils::TOOL_DESTRUCTIVE),
-				callable_mp(this, &MCPInputMapProvider::remove_action), this, r_error);
-	}
+	const LocalVector<MCPToolUtils::ToolDescriptor> tools{
+		{ "godot.input.get_actions", "List project Input Map actions and semantic event bindings.",
+				_get_actions_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPInputMapProvider::get_actions), _get_actions_output_schema() },
+		{ "godot.input.set_action", "Create or replace an Input Map action through editor undo/redo without saving project.godot.",
+				_set_action_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPInputMapProvider::set_action), _action_output_schema(true) },
+		{ "godot.input.remove_action", "Remove a custom Input Map action through editor undo/redo.",
+				_name_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPInputMapProvider::remove_action), _remove_action_output_schema() },
+	};
+	const Error error = MCPToolUtils::register_tools(p_registry, this, tools, r_error);
 	if (error != OK) {
-		p_registry->unregister_tools_for_owner(this);
 		return error;
 	}
 	tool_registry = p_registry;
@@ -192,11 +244,6 @@ void MCPInputMapProvider::unregister_tools() {
 }
 
 Dictionary MCPInputMapProvider::get_actions(const Dictionary &p_arguments, const Dictionary &) {
-	PackedStringArray allowed{ "prefix", "includeBuiltin", "limit" };
-	String unknown;
-	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed, unknown)) {
-		return _error("INVALID_ARGUMENTS", "Unknown argument: " + unknown);
-	}
 	const Variant prefix_value = p_arguments.get("prefix", String());
 	const Variant include_builtin_value = p_arguments.get("includeBuiltin", false);
 	if (prefix_value.get_type() != Variant::STRING || include_builtin_value.get_type() != Variant::BOOL) {
@@ -244,11 +291,6 @@ Dictionary MCPInputMapProvider::get_actions(const Dictionary &p_arguments, const
 }
 
 Dictionary MCPInputMapProvider::set_action(const Dictionary &p_arguments, const Dictionary &) {
-	PackedStringArray allowed{ "name", "deadzone", "events" };
-	String unknown;
-	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed, unknown)) {
-		return _error("INVALID_ARGUMENTS", "Unknown argument: " + unknown);
-	}
 	String name;
 	if (!_read_name(p_arguments, name)) {
 		return _error("INVALID_ARGUMENTS", "name must be a non-empty action name without '/'.");
@@ -308,11 +350,6 @@ Dictionary MCPInputMapProvider::set_action(const Dictionary &p_arguments, const 
 }
 
 Dictionary MCPInputMapProvider::remove_action(const Dictionary &p_arguments, const Dictionary &) {
-	PackedStringArray allowed{ "name" };
-	String unknown;
-	if (!MCPToolUtils::has_only_arguments(p_arguments, allowed, unknown)) {
-		return _error("INVALID_ARGUMENTS", "Unknown argument: " + unknown);
-	}
 	String name;
 	if (!_read_name(p_arguments, name)) {
 		return _error("INVALID_ARGUMENTS", "name must be a non-empty action name without '/'.");

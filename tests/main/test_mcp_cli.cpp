@@ -239,7 +239,7 @@ TEST_CASE("[MCP][CLI] Stdio bridge keeps stdout JSON-RPC-only and carries the HT
 			R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26",)"
 			R"("capabilities":{},"clientInfo":{"name":"test","version":"1"}}})");
 	io.input_lines.push_back(R"({"jsonrpc":"2.0","method":"notifications/initialized"})");
-	io.input_lines.push_back(R"({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}})");
+	io.input_lines.push_back(R"({ "jsonrpc": "2.0", "id": 9007199254740993, "method": "tools/list", "params": {} })");
 
 	QueueCLITransport transport;
 	transport.responses.push_back(make_response(
@@ -247,7 +247,9 @@ TEST_CASE("[MCP][CLI] Stdio bridge keeps stdout JSON-RPC-only and carries the HT
 			"{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"result\": {\"protocolVersion\": \"2025-03-26\"}\n}",
 			"session-abc"));
 	transport.responses.push_back(make_response(202));
-	transport.responses.push_back(make_response(200, R"({"jsonrpc":"2.0","id":2,"result":{"tools":[]}})"));
+	transport.responses.push_back(make_response(
+			200,
+			"{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 9007199254740993,\n  \"result\": {\"processId\": 29700, \"message\": \"space \\\\t and \\\\n stay\"}\n}"));
 	transport.responses.push_back(make_response(204));
 
 	MCPCLI::Options options;
@@ -275,6 +277,8 @@ TEST_CASE("[MCP][CLI] Stdio bridge keeps stdout JSON-RPC-only and carries the HT
 	CHECK(find_request_header(transport.requests[3].headers, "authorization") == "Bearer private-token");
 	CHECK(find_request_header(transport.requests[3].headers, "mcp-protocol-version") == MCPProtocol::PROTOCOL_VERSION_2025_03_26);
 	CHECK(find_request_header(transport.requests[3].headers, "mcp-session-id") == "session-abc");
+	CHECK(transport.requests[2].body.contains("9007199254740993"));
+	CHECK_FALSE(transport.requests[2].body.contains("9007199254740992"));
 
 	for (const String &stdout_line : io.stdout_lines) {
 		CHECK_FALSE(stdout_line.contains("\n"));
@@ -283,6 +287,10 @@ TEST_CASE("[MCP][CLI] Stdio bridge keeps stdout JSON-RPC-only and carries the HT
 		REQUIRE(response.get_type() == Variant::DICTIONARY);
 		CHECK(Dictionary(response).get("jsonrpc", String()) == "2.0");
 	}
+	CHECK(io.stdout_lines[1].contains("\"id\":9007199254740993"));
+	CHECK(io.stdout_lines[1].contains("\"processId\":29700"));
+	CHECK_FALSE(io.stdout_lines[1].contains("29700.0"));
+	CHECK(io.stdout_lines[1].contains("space \\\\t and \\\\n stay"));
 }
 
 TEST_CASE("[MCP][CLI] Stdio bridge rejects unsafe HTTP session identifiers") {

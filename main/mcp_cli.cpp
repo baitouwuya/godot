@@ -111,6 +111,34 @@ bool is_jsonrpc_response(const Variant &p_value) {
 	return response.get("jsonrpc", String()) == "2.0" && (response.has("result") != response.has("error"));
 }
 
+String compact_json_whitespace(const String &p_json) {
+	String compacted;
+	compacted.reserve(p_json.length());
+	bool in_string = false;
+	bool escaped = false;
+	for (int i = 0; i < p_json.length(); i++) {
+		const char32_t character = p_json[i];
+		if (in_string) {
+			compacted += character;
+			if (escaped) {
+				escaped = false;
+			} else if (character == '\\') {
+				escaped = true;
+			} else if (character == '"') {
+				in_string = false;
+			}
+			continue;
+		}
+		if (character == '"') {
+			in_string = true;
+			compacted += character;
+		} else if (character != ' ' && character != '\t' && character != '\r' && character != '\n') {
+			compacted += character;
+		}
+	}
+	return compacted;
+}
+
 Vector<String> make_mcp_request_headers(const MCPDiscoveryRecord &p_record, const String &p_protocol_version, const String &p_session_id, bool p_has_body) {
 	Vector<String> headers;
 	if (p_has_body) {
@@ -640,7 +668,7 @@ int MCPCLI::_run_stdio_bridge(const MCPDiscoveryRecord &p_record) {
 				MCPCLITransport::REQUEST_POST,
 				p_record.endpoint,
 				headers,
-				JSON::stringify(request_json.get_data()),
+				line,
 				options.request_timeout_ms,
 				options.max_response_bytes,
 				response,
@@ -691,7 +719,7 @@ int MCPCLI::_run_stdio_bridge(const MCPDiscoveryRecord &p_record) {
 				protocol_version = negotiated_version;
 			}
 		}
-		io->write_stdout_line(JSON::stringify(response_json.get_data()));
+		io->write_stdout_line(compact_json_whitespace(response_text));
 	}
 }
 

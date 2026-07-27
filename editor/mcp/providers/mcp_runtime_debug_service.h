@@ -33,6 +33,7 @@
 #include "mcp_runtime_debugger_gateway.h"
 #include "mcp_runtime_input_service.h"
 #include "mcp_runtime_job_service.h"
+#include "mcp_runtime_remote_scene_service.h"
 #include "mcp_runtime_target_action_service.h"
 
 #include "core/variant/dictionary.h"
@@ -42,6 +43,7 @@ class ScriptEditorDebugger;
 
 class MCPRuntimeDebugService {
 	MCPRuntimeDebuggerGateway runtime_gateway;
+	MCPRuntimeRemoteSceneService remote_scene_service;
 	MCPRuntimeJobService condition_jobs;
 	MCPRuntimeJobService performance_jobs;
 	MCPRuntimeInputService input_service;
@@ -49,9 +51,6 @@ class MCPRuntimeDebugService {
 
 	Dictionary _resolve_session(const Dictionary &p_arguments, bool p_require_generation, ScriptEditorDebugger *&r_debugger,
 			int &r_debugger_session, uint64_t &r_runtime_generation) const;
-	Dictionary _refresh_tree(ScriptEditorDebugger *p_debugger, int p_timeout_msec) const;
-	Dictionary _find_node(ScriptEditorDebugger *p_debugger, const String &p_path, ObjectID &r_object_id, Dictionary &r_node) const;
-	Dictionary _refresh_object(ScriptEditorDebugger *p_debugger, ObjectID p_object_id, int p_timeout_msec) const;
 	Dictionary _make_session_identity(int p_debugger_session, uint64_t p_runtime_generation) const;
 	Dictionary _request_debugger_message(const Dictionary &p_arguments, const String &p_capture, const String &p_operation,
 			const Dictionary &p_payload, bool p_require_generation) const;

@@ -31,8 +31,9 @@
 #pragma once
 
 #include "mcp_runtime_debugger_gateway.h"
-#include "mcp_runtime_input_scheduler.h"
+#include "mcp_runtime_input_service.h"
 #include "mcp_runtime_job_service.h"
+#include "mcp_runtime_target_action_service.h"
 
 #include "core/variant/dictionary.h"
 
@@ -43,7 +44,8 @@ class MCPRuntimeDebugService {
 	MCPRuntimeDebuggerGateway runtime_gateway;
 	MCPRuntimeJobService condition_jobs;
 	MCPRuntimeJobService performance_jobs;
-	MCPRuntimeInputScheduler input_scheduler;
+	MCPRuntimeInputService input_service;
+	MCPRuntimeTargetActionService target_action_service;
 
 	Dictionary _resolve_session(const Dictionary &p_arguments, bool p_require_generation, ScriptEditorDebugger *&r_debugger,
 			int &r_debugger_session, uint64_t &r_runtime_generation) const;
@@ -55,11 +57,6 @@ class MCPRuntimeDebugService {
 			const Dictionary &p_payload, bool p_require_generation) const;
 	Dictionary _request_observation(const Dictionary &p_arguments, const String &p_operation, const Dictionary &p_payload,
 			bool p_require_generation = false) const;
-	Dictionary _dispatch_action_events(const Dictionary &p_arguments, const String &p_mcp_session_id, const Array &p_events,
-			const Dictionary &p_metadata);
-	Dictionary _start_action_sequence(const Dictionary &p_arguments, const String &p_mcp_session_id, const Array &p_steps,
-			const Dictionary &p_metadata);
-	Dictionary _resolve_action_targets(const Dictionary &p_arguments, const String &p_kind, const Array &p_selectors) const;
 
 public:
 	explicit MCPRuntimeDebugService(MCPDebugCapture *p_debug_capture);
@@ -100,5 +97,5 @@ public:
 	void release_mcp_session(const String &p_mcp_session_id);
 	void shutdown_input();
 	void set_observation_plugin(MCPRuntimeObservationDebuggerPlugin *p_plugin) { runtime_gateway.set_response_plugin(p_plugin); }
-	MCPRuntimeInputScheduler *get_input_scheduler() { return &input_scheduler; }
+	MCPRuntimeInputScheduler *get_input_scheduler() { return input_service.get_scheduler(); }
 };

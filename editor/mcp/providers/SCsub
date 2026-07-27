@@ -6,22 +6,25 @@ Import("env")
 
 sources = glob.glob("*.cpp")
 
-if not (
+gdscript_lsp_sources = {
+    "mcp_gdscript_provider.cpp",
+    "mcp_gdscript_session_manager.cpp",
+    "mcp_gdscript_tool_utils.cpp",
+    "mcp_script_analysis_sync.cpp",
+    "mcp_script_document.cpp",
+    "mcp_script_member_selector.cpp",
+    "mcp_script_provider.cpp",
+    "mcp_script_usages.cpp",
+    "mcp_workspace_edit_planner.cpp",
+    "mcp_workspace_edit_transaction.cpp",
+}
+
+gdscript_lsp_enabled = (
     env["module_gdscript_enabled"]
     and env["module_jsonrpc_enabled"]
     and env["module_websocket_enabled"]
-):
-    gdscript_sources = {
-        "mcp_gdscript_provider.cpp",
-        "mcp_gdscript_session_manager.cpp",
-        "mcp_gdscript_tool_utils.cpp",
-        "mcp_script_analysis_sync.cpp",
-        "mcp_script_document.cpp",
-        "mcp_script_provider.cpp",
-        "mcp_script_usages.cpp",
-        "mcp_workspace_edit_planner.cpp",
-        "mcp_workspace_edit_transaction.cpp",
-    }
-    sources = [source for source in sources if source not in gdscript_sources]
+)
+if not gdscript_lsp_enabled:
+    sources = [source for source in sources if source not in gdscript_lsp_sources]
 
 env.add_source_files(env.editor_sources, sources)

@@ -70,9 +70,9 @@ Do not cache one endpoint globally or reuse one project's bridge configuration f
 
 ## Search Class Documentation
 
-`godot.class.search` searches the editor's merged class documentation index, including native engine classes, extension classes, built-in Variant types, and documented project script classes. It supports fuzzy class-name matching, native/script source filtering, inheritance filtering, deprecated-class inclusion, and bounded result counts.
+`godot.class.search` combines the editor documentation index with `ScriptServer`'s global project-class catalog. Native engine classes, extension classes, built-in Variant types, documented project scripts, and undocumented `class_name` scripts therefore remain discoverable. It supports fuzzy class-name matching, native/script source filtering, inheritance filtering, deprecated-class inclusion, and bounded result counts.
 
-`godot.class.get_documentation` reads one exact class from the same index. The default `overview` section returns class-level documentation, tutorials, inheritance, and grouped member counts. Select `all`, `constructors`, `methods`, `operators`, `signals`, `properties`, `constants`, `enums`, `themeItems`, or `annotations` to retrieve compact structured members. Add an exact `member` name to isolate one member, and set `view` to `full` to include member descriptions. Documentation text uses the same Markdown conversion as the built-in GDScript LSP.
+`godot.class.get_documentation` reads one exact native class from the same index. Project script classes, including those without `##` comments, return their authoritative path and direct callers to `godot.script.get` so unsaved ScriptEditor text is not shadowed by a documentation cache. The default `overview` section returns class-level documentation, tutorials, inheritance, and grouped member counts. Select `all`, `constructors`, `methods`, `operators`, `signals`, `properties`, `constants`, `enums`, `themeItems`, or `annotations` to retrieve compact structured members. Add an exact `member` name to isolate one member, and set `view` to `full` to include member descriptions. Documentation text uses the same Markdown conversion as the built-in GDScript LSP.
 
 ## Inspect Node Properties
 
@@ -96,7 +96,11 @@ Snapshots are isolated per MCP session. Targets are revalidated against the visi
 
 ## Edit Project Settings And Autoloads
 
-`godot.project.get_settings` lists visible project settings with prefix filtering, a bounded result count, and values disabled by default to keep responses compact. `godot.project.get_setting` reads one exact setting with its `PropertyInfo` metadata and restricted JSON-native Variant value. `godot.project.set_setting` and `godot.project.erase_setting` use the global editor Undo/Redo history and deliberately leave `project.godot` unsaved; `godot.project.save` is the explicit persistence boundary.
+`godot.project.get_settings` lists visible project settings with prefix filtering, a bounded result count, and values disabled by default to keep responses compact. `godot.project.get_setting` reads one exact setting with its `PropertyInfo` metadata and restricted Variant value. JSON-native strings, numbers, booleans, arrays, and dictionaries stay in their natural JSON representation; Godot-only types use an explicit MCP Variant envelope. Legacy prefixed values remain accepted on writes. `godot.project.set_setting` and `godot.project.erase_setting` use the global editor Undo/Redo history and deliberately leave `project.godot` unsaved; `godot.project.save` is the explicit persistence boundary.
+
+## Tool Result Compatibility
+
+Successful tools return both `structuredContent` and a JSON `TextContent` block. This duplication follows the MCP structured-content backward-compatibility recommendation for clients that only consume `content`. Results up to 16 KiB mirror the complete JSON; larger results keep the authoritative payload only in `structuredContent` and emit a bounded text summary instead. Transport adapters must forward these fields unchanged.
 
 Special namespaces with live editor or runtime semantics are not writable through the generic setter. Autoloads use `godot.autoload.get_all`, `godot.autoload.add`, and `godot.autoload.remove`; these validate project-local Script or PackedScene resources, update the editor's live Autoload state, participate in Undo/Redo, and also remain unsaved until `godot.project.save` is called.
 

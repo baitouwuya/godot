@@ -53,6 +53,10 @@ TEST_CASE("[MCP][Provider] Editor tools register as composable MCP handlers") {
 	const Dictionary state_properties = state_output_schema.get("properties", Dictionary());
 	CHECK(state_properties.has("unsavedScenes"));
 	CHECK(PackedStringArray(state_output_schema.get("required", PackedStringArray())).has("unsavedScenes"));
+	const Dictionary history_output_schema = Dictionary(definitions[1]).get("outputSchema", Dictionary());
+	CHECK(Dictionary(history_output_schema.get("properties", Dictionary())).has("performed"));
+	CHECK(PackedStringArray(history_output_schema.get("required", PackedStringArray())).has("action"));
+	CHECK_FALSE(bool(history_output_schema.get("additionalProperties", true)));
 
 	MCPToolCallContext context;
 	const MCPToolRegistry::CallResult call_result = registry.call_tool("godot.editor.get_state", Dictionary(), context);
@@ -73,6 +77,9 @@ TEST_CASE("[MCP][Provider] Editor tools register as composable MCP handlers") {
 			registry.call_tool("godot.editor.get_state", unexpected_arguments, context);
 	REQUIRE(invalid_call.status == MCPToolRegistry::CALL_OK);
 	CHECK(bool(invalid_call.result.get("isError", false)));
+	const Dictionary invalid_error = Dictionary(invalid_call.result.get("structuredContent", Dictionary())).get("error", Dictionary());
+	CHECK(invalid_error.get("code", String()) == "INVALID_ARGUMENTS");
+	CHECK(Dictionary(invalid_error.get("details", Dictionary())).get("keyword", String()) == "additionalProperties");
 	provider->unregister_tools();
 	CHECK(registry.call_tool("godot.editor.get_state", Dictionary(), context).status == MCPToolRegistry::CALL_TOOL_NOT_FOUND);
 	CHECK(registry.get_tool_names().is_empty());

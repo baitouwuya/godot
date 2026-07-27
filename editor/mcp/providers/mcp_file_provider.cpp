@@ -42,33 +42,24 @@
 namespace {
 
 static Dictionary _create_file_schema() {
-	Dictionary path_property;
-	path_property["type"] = "string";
-	path_property["description"] = "Project-relative file path beginning with res://.";
-
-	Dictionary content_property;
-	content_property["type"] = "string";
-	content_property["description"] = "UTF-8 text to write.";
-
-	Dictionary overwrite_property;
-	overwrite_property["type"] = "boolean";
+	Dictionary overwrite_property = MCPToolUtils::make_property_schema("boolean", "Replace an existing project file.");
 	overwrite_property["default"] = false;
 
 	Dictionary properties;
-	properties["path"] = path_property;
-	properties["content"] = content_property;
+	properties["path"] = MCPToolUtils::make_property_schema("string", "Project-relative file path beginning with res://.");
+	properties["content"] = MCPToolUtils::make_property_schema("string", "UTF-8 text to write.");
 	properties["overwrite"] = overwrite_property;
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "path", "content" });
+}
 
-	Array required;
-	required.push_back("path");
-	required.push_back("content");
-
-	Dictionary schema;
-	schema["type"] = "object";
-	schema["properties"] = properties;
-	schema["required"] = required;
-	schema["additionalProperties"] = false;
-	return schema;
+static Dictionary _create_file_output_schema() {
+	Dictionary bytes_written = MCPToolUtils::make_property_schema("integer", "Number of UTF-8 bytes written.");
+	bytes_written["minimum"] = 0;
+	Dictionary properties;
+	properties["path"] = MCPToolUtils::make_property_schema("string", "Created project resource path.");
+	properties["bytesWritten"] = bytes_written;
+	properties["overwritten"] = MCPToolUtils::make_property_schema("boolean", "Whether an existing file was replaced.");
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "path", "bytesWritten", "overwritten" });
 }
 
 static void _set_error(String *r_error, const String &p_message) {
@@ -100,12 +91,12 @@ Error MCPFileProvider::register_tools(MCPToolRegistry *p_registry, String *r_err
 		return ERR_ALREADY_IN_USE;
 	}
 
-	const Dictionary definition = MCPToolUtils::make_tool_definition(
-			"godot.file.create", "Create a UTF-8 text file inside the current Godot project.", _create_file_schema(), MCPToolUtils::TOOL_DESTRUCTIVE);
-	const Error err = p_registry->register_tool(definition, callable_mp(this, &MCPFileProvider::create_file),
-			this, r_error);
+	const LocalVector<MCPToolUtils::ToolDescriptor> tools{
+		{ "godot.file.create", "Create a UTF-8 text file inside the current Godot project.",
+				_create_file_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPFileProvider::create_file), _create_file_output_schema() },
+	};
+	const Error err = MCPToolUtils::register_tools(p_registry, this, tools, r_error);
 	if (err != OK) {
-		p_registry->unregister_tools_for_owner(this);
 		return err;
 	}
 
@@ -129,12 +120,6 @@ Dictionary MCPFileProvider::create_file(const Dictionary &p_arguments, const Dic
 			overwrite_value.get_type() != Variant::BOOL) {
 		return MCPToolUtils::make_error_result(
 				"INVALID_ARGUMENTS", "Arguments must contain string 'path', string 'content', and optional boolean 'overwrite'.");
-	}
-
-	for (const KeyValue<Variant, Variant> &entry : p_arguments) {
-		if (entry.key != "path" && entry.key != "content" && entry.key != "overwrite") {
-			return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "Unknown argument: " + String(entry.key));
-		}
 	}
 
 	String resource_path;

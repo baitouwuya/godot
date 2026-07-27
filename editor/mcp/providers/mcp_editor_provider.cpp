@@ -43,10 +43,7 @@
 namespace {
 
 static Dictionary _empty_input_schema() {
-	Dictionary schema;
-	schema["type"] = "object";
-	schema["additionalProperties"] = false;
-	return schema;
+	return MCPToolUtils::make_object_schema();
 }
 
 static Dictionary _state_output_schema() {
@@ -74,16 +71,18 @@ static Dictionary _state_output_schema() {
 	required.push_back("canUndo");
 	required.push_back("canRedo");
 
-	Dictionary schema;
-	schema["type"] = "object";
-	schema["properties"] = properties;
-	schema["required"] = required;
-	schema["additionalProperties"] = false;
-	return schema;
+	return MCPToolUtils::make_object_schema(properties, required);
 }
 
-static Dictionary _unexpected_arguments(const String &p_tool_name) {
-	return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", "Tool '" + p_tool_name + "' does not accept arguments.");
+static Dictionary _history_output_schema() {
+	Dictionary action = MCPToolUtils::make_property_schema("string", "History action that was performed.");
+	action["enum"] = PackedStringArray{ "undo", "redo" };
+	Dictionary properties;
+	properties["action"] = action;
+	properties["performed"] = MCPToolUtils::make_property_schema("boolean", "Whether the history action completed.");
+	properties["canUndo"] = MCPToolUtils::make_property_schema("boolean", "Whether another undo is available.");
+	properties["canRedo"] = MCPToolUtils::make_property_schema("boolean", "Whether another redo is available.");
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "action", "performed", "canUndo", "canRedo" });
 }
 
 static void _set_error(String *r_error, const String &p_message) {
@@ -112,24 +111,16 @@ Error MCPEditorProvider::register_tools(MCPToolRegistry *p_registry, String *r_e
 	}
 
 	const Dictionary schema = _empty_input_schema();
-	Dictionary state_definition = MCPToolUtils::make_tool_definition(
-			"godot.editor.get_state", "Get the current scene, unsaved scenes, scripts, and undo state.", schema,
-			MCPToolUtils::TOOL_READ_ONLY, _state_output_schema());
-	Error err = p_registry->register_tool(
-			state_definition,
-			callable_mp(this, &MCPEditorProvider::get_state), this, r_error);
-	if (err == OK) {
-		err = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.editor.undo", "Undo the latest editor action.", schema, MCPToolUtils::TOOL_DESTRUCTIVE),
-				callable_mp(this, &MCPEditorProvider::undo), this, r_error);
-	}
-	if (err == OK) {
-		err = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition("godot.editor.redo", "Redo the latest editor action.", schema, MCPToolUtils::TOOL_DESTRUCTIVE),
-				callable_mp(this, &MCPEditorProvider::redo), this, r_error);
-	}
+	const LocalVector<MCPToolUtils::ToolDescriptor> tools{
+		{ "godot.editor.get_state", "Get the current scene, unsaved scenes, scripts, and undo state.",
+				schema, MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPEditorProvider::get_state), _state_output_schema() },
+		{ "godot.editor.undo", "Undo the latest editor action.",
+				schema, MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPEditorProvider::undo), _history_output_schema() },
+		{ "godot.editor.redo", "Redo the latest editor action.",
+				schema, MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPEditorProvider::redo), _history_output_schema() },
+	};
+	const Error err = MCPToolUtils::register_tools(p_registry, this, tools, r_error);
 	if (err != OK) {
-		p_registry->unregister_tools_for_owner(this);
 		return err;
 	}
 
@@ -145,11 +136,7 @@ void MCPEditorProvider::unregister_tools() {
 	tool_registry = nullptr;
 }
 
-Dictionary MCPEditorProvider::get_state(const Dictionary &p_arguments, const Dictionary &) {
-	if (!p_arguments.is_empty()) {
-		return _unexpected_arguments("godot.editor.get_state");
-	}
-
+Dictionary MCPEditorProvider::get_state(const Dictionary &, const Dictionary &) {
 	String current_scene;
 	EditorNode *editor_node = EditorNode::get_singleton();
 	if (editor_node && EditorNode::get_editor_data().get_edited_scene_count() > 0) {
@@ -213,16 +200,10 @@ Dictionary MCPEditorProvider::_perform_history_action(bool p_undo) {
 	return MCPToolUtils::make_success_result(result);
 }
 
-Dictionary MCPEditorProvider::undo(const Dictionary &p_arguments, const Dictionary &) {
-	if (!p_arguments.is_empty()) {
-		return _unexpected_arguments("godot.editor.undo");
-	}
+Dictionary MCPEditorProvider::undo(const Dictionary &, const Dictionary &) {
 	return _perform_history_action(true);
 }
 
-Dictionary MCPEditorProvider::redo(const Dictionary &p_arguments, const Dictionary &) {
-	if (!p_arguments.is_empty()) {
-		return _unexpected_arguments("godot.editor.redo");
-	}
+Dictionary MCPEditorProvider::redo(const Dictionary &, const Dictionary &) {
 	return _perform_history_action(false);
 }

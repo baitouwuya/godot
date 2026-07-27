@@ -80,6 +80,13 @@ TEST_CASE("[MCP][Provider] Automation batch composes MCP tools in one session") 
 	REQUIRE(registry.register_tool(_definition("test.fail"), callable_mp(recording, &RecordingProvider::fail), recording) == OK);
 
 	CHECK(registry.has_tool("godot.automation.batch"));
+	const Array definitions = registry.get_tool_definitions();
+	REQUIRE(definitions.size() == 3);
+	const Dictionary output_schema = Dictionary(definitions[0]).get("outputSchema", Dictionary());
+	const Dictionary output_properties = output_schema.get("properties", Dictionary());
+	CHECK(output_properties.has("results"));
+	CHECK(PackedStringArray(output_schema.get("required", PackedStringArray())).has("failedCount"));
+	CHECK_FALSE(bool(output_schema.get("additionalProperties", true)));
 
 	Dictionary first_arguments;
 	first_arguments["value"] = 7;
@@ -116,14 +123,30 @@ TEST_CASE("[MCP][Provider] Automation batch validates before mutation and stops 
 	REQUIRE(registry.register_tool(_definition("test.fail"), callable_mp(recording, &RecordingProvider::fail), recording) == OK);
 
 	MCPToolCallContext context;
+	Dictionary malformed_arguments;
+	malformed_arguments["calls"] = Array{ _call("test.succeed") };
+	malformed_arguments["unexpected"] = true;
+	MCPToolRegistry::CallResult result = registry.call_tool("godot.automation.batch", malformed_arguments, context);
+	REQUIRE(result.status == MCPToolRegistry::CALL_OK);
+	CHECK(bool(result.result.get("isError", false)));
+	Dictionary error = Dictionary(result.result.get("structuredContent", Dictionary())).get("error", Dictionary());
+	CHECK(error.get("code", String()) == "INVALID_ARGUMENTS");
+	CHECK(Dictionary(error.get("details", Dictionary())).get("keyword", String()) == "additionalProperties");
+	CHECK(recording->call_count == 0);
+
 	Array invalid_calls;
-	invalid_calls.push_back(_call("test.succeed"));
+	Dictionary malformed_call = _call("test.succeed");
+	malformed_call["unexpected"] = true;
+	invalid_calls.push_back(malformed_call);
 	invalid_calls.push_back(_call("test.missing"));
 	Dictionary invalid_arguments;
 	invalid_arguments["calls"] = invalid_calls;
-	MCPToolRegistry::CallResult result = registry.call_tool("godot.automation.batch", invalid_arguments, context);
+	result = registry.call_tool("godot.automation.batch", invalid_arguments, context);
 	REQUIRE(result.status == MCPToolRegistry::CALL_OK);
 	CHECK(bool(result.result.get("isError", false)));
+	error = Dictionary(result.result.get("structuredContent", Dictionary())).get("error", Dictionary());
+	CHECK(error.get("code", String()) == "INVALID_ARGUMENTS");
+	CHECK(Dictionary(error.get("details", Dictionary())).get("keyword", String()) == "additionalProperties");
 	CHECK(recording->call_count == 0);
 
 	Array calls;
@@ -135,7 +158,7 @@ TEST_CASE("[MCP][Provider] Automation batch validates before mutation and stops 
 	result = registry.call_tool("godot.automation.batch", arguments, context);
 	REQUIRE(result.status == MCPToolRegistry::CALL_OK);
 	CHECK(bool(result.result.get("isError", false)));
-	const Dictionary error = Dictionary(result.result.get("structuredContent", Dictionary())).get("error", Dictionary());
+	error = Dictionary(result.result.get("structuredContent", Dictionary())).get("error", Dictionary());
 	const Dictionary details = error.get("details", Dictionary());
 	CHECK(int(details.get("failedIndex", -1)) == 1);
 	CHECK(String(details.get("failedTool", String())) == "test.fail");

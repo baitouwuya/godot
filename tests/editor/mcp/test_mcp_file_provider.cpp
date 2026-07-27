@@ -76,6 +76,12 @@ TEST_CASE("[MCP][Provider] File create is UTF-8 safe and overwrite-aware") {
 	MCPFileProvider *provider = memnew(MCPFileProvider(project_root));
 	REQUIRE(provider->register_tools(&registry) == OK);
 	CHECK(registry.has_tool("godot.file.create"));
+	const Array definitions = registry.get_tool_definitions();
+	REQUIRE(definitions.size() == 1);
+	const Dictionary output_schema = Dictionary(definitions[0]).get("outputSchema", Dictionary());
+	CHECK(Dictionary(output_schema.get("properties", Dictionary())).has("bytesWritten"));
+	CHECK(PackedStringArray(output_schema.get("required", PackedStringArray())).has("overwritten"));
+	CHECK_FALSE(bool(output_schema.get("additionalProperties", true)));
 
 	const String first_content = "hello " + String::chr(0x4E16) + String::chr(0x754C);
 	Dictionary arguments;
@@ -135,6 +141,9 @@ TEST_CASE("[MCP][Provider] File create rejects traversal and malformed arguments
 	call_result = registry.call_tool("godot.file.create", arguments, context);
 	REQUIRE(call_result.status == MCPToolRegistry::CALL_OK);
 	CHECK(bool(call_result.result.get("isError", false)));
+	const Dictionary malformed_error = Dictionary(call_result.result.get("structuredContent", Dictionary())).get("error", Dictionary());
+	CHECK(malformed_error.get("code", String()) == "INVALID_ARGUMENTS");
+	CHECK(Dictionary(malformed_error.get("details", Dictionary())).get("keyword", String()) == "additionalProperties");
 
 	provider->unregister_tools();
 	memdelete(provider);

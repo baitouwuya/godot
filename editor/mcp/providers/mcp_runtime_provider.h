@@ -30,13 +30,15 @@
 
 #pragma once
 
+#include "../mcp_editor_feature.h"
+
 #include "core/object/object.h"
 #include "core/variant/dictionary.h"
 
 class MCPRuntimeDebugService;
 class MCPToolRegistry;
 
-class MCPRuntimeProvider : public Object {
+class MCPRuntimeProvider : public Object, public MCPEditorFeature {
 	MCPToolRegistry *tool_registry = nullptr;
 	MCPRuntimeDebugService *runtime_service = nullptr;
 
@@ -82,6 +84,9 @@ public:
 	explicit MCPRuntimeProvider(MCPRuntimeDebugService *p_runtime_service);
 	~MCPRuntimeProvider();
 
-	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr);
-	void unregister_tools();
+	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr) override;
+	void unregister_tools() override;
+	void process() override;
+	void on_session_removed(const String &p_session_id) override;
+	void shutdown() override;
 };

@@ -29,6 +29,8 @@
 
 #pragma once
 
+#include "../mcp_editor_feature.h"
+
 #include "core/object/object.h"
 #include "core/templates/hash_map.h"
 #include "core/variant/dictionary.h"
@@ -36,7 +38,7 @@
 class MCPToolRegistry;
 class Resource;
 
-class MCPResourceProvider : public Object {
+class MCPResourceProvider : public Object, public MCPEditorFeature {
 public:
 	using ImportFunction = Error (*)(const String &p_target_path, const HashMap<StringName, Variant> &p_options, const String &p_importer);
 	using ScanFunction = void (*)();
@@ -44,8 +46,8 @@ public:
 	explicit MCPResourceProvider(const String &p_project_root = String(), ImportFunction p_import_function = nullptr, ScanFunction p_scan_function = nullptr);
 	~MCPResourceProvider();
 
-	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr);
-	void unregister_tools();
+	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr) override;
+	void unregister_tools() override;
 
 	Dictionary import_options(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary import_resource(const Dictionary &p_arguments, const Dictionary &p_context);

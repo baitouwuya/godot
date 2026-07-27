@@ -30,18 +30,20 @@
 
 #pragma once
 
+#include "../mcp_editor_feature.h"
+
 #include "core/object/object.h"
 #include "core/variant/dictionary.h"
 
 class MCPToolRegistry;
 
-class MCPAutomationProvider : public Object {
+class MCPAutomationProvider : public Object, public MCPEditorFeature {
 public:
 	MCPAutomationProvider() = default;
 	~MCPAutomationProvider();
 
-	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr);
-	void unregister_tools();
+	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr) override;
+	void unregister_tools() override;
 
 	Dictionary batch(const Dictionary &p_arguments, const Dictionary &p_context);
 

@@ -30,17 +30,18 @@
 
 #pragma once
 
+#include "../mcp_editor_feature.h"
 #include "mcp_harness_service.h"
 
 #include "core/object/object.h"
 
-class MCPHarnessProvider : public Object {
+class MCPHarnessProvider : public Object, public MCPEditorFeature {
 public:
 	MCPHarnessProvider() = default;
 	~MCPHarnessProvider();
 
-	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr);
-	void unregister_tools();
+	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr) override;
+	void unregister_tools() override;
 	void set_trace_service(MCPTraceService *p_service, const Dictionary &p_project_metadata = Dictionary(), const String &p_root_directory_override = String()) { service.set_trace_service(p_service, p_project_metadata, p_root_directory_override); }
 
 	Dictionary start(const Dictionary &p_arguments, const Dictionary &p_context);
@@ -50,7 +51,9 @@ public:
 
 	int poll() { return service.poll(); }
 	void release_session(const String &p_session_id) { service.release_session(p_session_id); }
-	void shutdown() { service.shutdown(); }
+	void process() override { service.poll(); }
+	void on_session_removed(const String &p_session_id) override { service.release_session(p_session_id); }
+	void shutdown() override { service.shutdown(); }
 	MCPHarnessService &get_service() { return service; }
 
 private:

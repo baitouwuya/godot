@@ -29,6 +29,7 @@
 
 #pragma once
 
+#include "mcp_editor_feature.h"
 #include "mcp_host.h"
 #include "mcp_http_health_probe.h"
 #include "mcp_project_heartbeat.h"
@@ -79,6 +80,7 @@ class MCPEditorPlugin : public EditorPlugin, public MCPHostSessionObserver {
 
 	StartupState startup_state = STARTUP_PENDING;
 	MCPToolRegistry tool_registry;
+	MCPEditorFeatureSet feature_set;
 	MCPHost host;
 	MCPProjectHeartbeat project_heartbeat;
 	MCPHTTPProjectLeaseHealthProbe health_probe;

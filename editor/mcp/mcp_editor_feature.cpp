@@ -1,9 +1,9 @@
 /**************************************************************************/
-/*  mcp_input_map_provider.h                                              */
+/*  mcp_editor_feature.cpp                                                */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
-/*                        https://godotengine.org                         */
+/**************************************************************************/
 /* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
 /* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
 /*                                                                        */
@@ -27,26 +27,54 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#pragma once
+#include "mcp_editor_feature.h"
 
-#include "../mcp_editor_feature.h"
+#include "core/mcp/mcp_tool_registry.h"
 
-#include "core/object/object.h"
-#include "core/variant/dictionary.h"
+Error MCPEditorFeatureSet::add_feature(MCPEditorFeature *p_feature) {
+	ERR_FAIL_NULL_V(p_feature, ERR_INVALID_PARAMETER);
+	ERR_FAIL_COND_V(registered_count != 0, ERR_ALREADY_IN_USE);
+	ERR_FAIL_COND_V(features.has(p_feature), ERR_ALREADY_EXISTS);
+	features.push_back(p_feature);
+	return OK;
+}
 
-class MCPToolRegistry;
+Error MCPEditorFeatureSet::register_tools(MCPToolRegistry *p_registry, String *r_error) {
+	ERR_FAIL_NULL_V(p_registry, ERR_INVALID_PARAMETER);
+	ERR_FAIL_COND_V(registered_count != 0, ERR_ALREADY_IN_USE);
 
-class MCPInputMapProvider : public Object, public MCPEditorFeature {
-public:
-	~MCPInputMapProvider();
+	for (MCPEditorFeature *feature : features) {
+		const Error error = feature->register_tools(p_registry, r_error);
+		if (error != OK) {
+			feature->unregister_tools();
+			unregister_tools();
+			return error;
+		}
+		registered_count++;
+	}
+	return OK;
+}
 
-	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr) override;
-	void unregister_tools() override;
+void MCPEditorFeatureSet::unregister_tools() {
+	while (registered_count > 0) {
+		features[--registered_count]->unregister_tools();
+	}
+}
 
-	Dictionary get_actions(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary set_action(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary remove_action(const Dictionary &p_arguments, const Dictionary &p_context);
+void MCPEditorFeatureSet::process() {
+	for (int i = 0; i < registered_count; i++) {
+		features[i]->process();
+	}
+}
 
-private:
-	MCPToolRegistry *tool_registry = nullptr;
-};
+void MCPEditorFeatureSet::on_session_removed(const String &p_session_id) {
+	for (int i = registered_count - 1; i >= 0; i--) {
+		features[i]->on_session_removed(p_session_id);
+	}
+}
+
+void MCPEditorFeatureSet::shutdown() {
+	for (int i = int(features.size()) - 1; i >= 0; i--) {
+		features[i]->shutdown();
+	}
+}

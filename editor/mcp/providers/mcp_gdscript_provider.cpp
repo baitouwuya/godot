@@ -796,3 +796,11 @@ void MCPGDScriptProvider::unregister_tools() {
 	tool_registry->unregister_tools_for_owner(this);
 	tool_registry = nullptr;
 }
+
+void MCPGDScriptProvider::on_session_removed(const String &p_session_id) {
+	release_session(p_session_id);
+}
+
+void MCPGDScriptProvider::shutdown() {
+	clear_sessions();
+}

@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "../mcp_editor_feature.h"
 #include "mcp_gdscript_session_manager.h"
 
 #include "core/object/object.h"
@@ -40,14 +41,16 @@
 
 class MCPToolRegistry;
 
-class MCPGDScriptProvider : public Object {
+class MCPGDScriptProvider : public Object, public MCPEditorFeature {
 public:
 	MCPGDScriptProvider(const Ref<GDScriptAnalysisService> &p_service = Ref<GDScriptAnalysisService>(), const Ref<GDScriptAnalysisSession> &p_fallback_session = Ref<GDScriptAnalysisSession>());
 	explicit MCPGDScriptProvider(const Ref<MCPGDScriptSessionManager> &p_session_manager);
 	~MCPGDScriptProvider();
 
-	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr);
-	void unregister_tools();
+	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr) override;
+	void unregister_tools() override;
+	void on_session_removed(const String &p_session_id) override;
+	void shutdown() override;
 
 	void set_analysis_service(const Ref<GDScriptAnalysisService> &p_service);
 	void set_analysis_session(const Ref<GDScriptAnalysisSession> &p_session);

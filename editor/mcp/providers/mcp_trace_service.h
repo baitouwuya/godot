@@ -7,10 +7,12 @@
 
 #pragma once
 
+#include "../mcp_editor_feature.h"
+
 #include "core/io/structured_trace_writer.h"
 #include "core/os/mutex.h"
 
-class MCPTraceService {
+class MCPTraceService : public MCPEditorFeature {
 public:
 	static constexpr int MAX_DEPTH = 8;
 	static constexpr int MAX_CONTAINER_ENTRIES = 128;
@@ -24,6 +26,7 @@ public:
 	Error record_tool_call(const String &p_tool_name, const String &p_session_id, const String &p_correlation_id, const Dictionary &p_arguments, const Dictionary &p_result = Dictionary(), const Dictionary &p_error = Dictionary(), String *r_error = nullptr);
 	Error record_job_event(const String &p_job_id, const String &p_event, const String &p_severity, const Dictionary &p_data, const Dictionary &p_payloads = Dictionary(), const Dictionary &p_error = Dictionary(), String *r_error = nullptr);
 	void stop();
+	void shutdown() override { stop(); }
 
 	bool is_started() const;
 	String get_session_directory() const;

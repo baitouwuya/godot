@@ -86,131 +86,15 @@ Error MCPEditorPlugin::_register_tools(String &r_error) {
 	}
 	gdscript_session_manager->set_analysis_service(language_protocol->get_analysis_service());
 #endif
-
-	Error error = automation_provider->register_tools(&tool_registry, &r_error);
-	if (error != OK) {
-		return error;
-	}
-	error = class_provider->register_tools(&tool_registry, &r_error);
-	if (error != OK) {
-		_unregister_tools();
-		return error;
-	}
-	error = debug_provider->register_tools(&tool_registry, &r_error);
-	if (error != OK) {
-		_unregister_tools();
-		return error;
-	}
-	error = runtime_provider->register_tools(&tool_registry, &r_error);
-	if (error != OK) {
-		_unregister_tools();
-		return error;
-	}
-	error = harness_provider->register_tools(&tool_registry, &r_error);
-	if (error != OK) {
-		_unregister_tools();
-		return error;
-	}
-	error = editor_provider->register_tools(&tool_registry, &r_error);
-	if (error != OK) {
-		_unregister_tools();
-		return error;
-	}
-	error = editor_ui_provider->register_tools(&tool_registry, &r_error);
-	if (error != OK) {
-		_unregister_tools();
-		return error;
-	}
-	error = file_provider->register_tools(&tool_registry, &r_error);
-	if (error != OK) {
-		_unregister_tools();
-		return error;
-	}
-	error = scene_provider->register_tools(&tool_registry, &r_error);
-	if (error != OK) {
-		_unregister_tools();
-		return error;
-	}
-	error = node_provider->register_tools(&tool_registry, &r_error);
-	if (error != OK) {
-		_unregister_tools();
-		return error;
-	}
-	error = node_structure_provider->register_tools(&tool_registry, &r_error);
-	if (error != OK) {
-		_unregister_tools();
-		return error;
-	}
-	error = project_provider->register_tools(&tool_registry, &r_error);
-	if (error != OK) {
-		_unregister_tools();
-		return error;
-	}
-	error = input_map_provider->register_tools(&tool_registry, &r_error);
-	if (error != OK) {
-		_unregister_tools();
-		return error;
-	}
-#if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
-	error = script_provider->register_tools(&tool_registry, &r_error);
-	if (error != OK) {
-		_unregister_tools();
-		return error;
-	}
-#endif
-	error = resource_provider->register_tools(&tool_registry, &r_error);
-	if (error != OK) {
-		_unregister_tools();
-		return error;
-	}
-#if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
-	error = gdscript_provider->register_tools(&tool_registry, &r_error);
-	if (error != OK) {
-		_unregister_tools();
-		return error;
-	}
-#endif
-	return OK;
+	return feature_set.register_tools(&tool_registry, &r_error);
 }
 
 void MCPEditorPlugin::_unregister_tools() {
-#if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
-	gdscript_provider->unregister_tools();
-#endif
-	resource_provider->unregister_tools();
-#if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
-	script_provider->unregister_tools();
-#endif
-	input_map_provider->unregister_tools();
-	project_provider->unregister_tools();
-	node_structure_provider->unregister_tools();
-	node_provider->unregister_tools();
-	scene_provider->unregister_tools();
-	file_provider->unregister_tools();
-	editor_ui_provider->unregister_tools();
-	editor_provider->unregister_tools();
-	harness_provider->unregister_tools();
-	runtime_provider->unregister_tools();
-	debug_provider->unregister_tools();
-	class_provider->unregister_tools();
-	automation_provider->unregister_tools();
+	feature_set.unregister_tools();
 }
 
 void MCPEditorPlugin::on_mcp_session_removed(const String &p_session_id) {
-	if (harness_provider) {
-		harness_provider->release_session(p_session_id);
-	}
-	if (runtime_debug_service) {
-		runtime_debug_service->release_mcp_session(p_session_id);
-	}
-	if (editor_ui_provider) {
-		editor_ui_provider->release_session(p_session_id);
-	}
-#if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
-	if (gdscript_session_manager) {
-		gdscript_session_manager->release_session(p_session_id);
-	}
-#endif
+	feature_set.on_session_removed(p_session_id);
 }
 
 Error MCPEditorPlugin::_publish_discovery(String &r_error) {
@@ -300,9 +184,7 @@ Error MCPEditorPlugin::_start_mcp(String &r_error) {
 
 void MCPEditorPlugin::_stop_mcp() {
 	project_heartbeat.stop();
-	harness_provider->shutdown();
-	trace_service->stop();
-	runtime_debug_service->shutdown_input();
+	feature_set.shutdown();
 	if (runtime_observation_debugger_registered) {
 		remove_debugger_plugin(runtime_observation_debugger_plugin);
 		runtime_observation_debugger_registered = false;
@@ -316,11 +198,6 @@ void MCPEditorPlugin::_stop_mcp() {
 	if (host.is_running()) {
 		host.stop();
 	}
-#if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
-	if (gdscript_session_manager) {
-		gdscript_session_manager->clear();
-	}
-#endif
 	_unregister_tools();
 	if (!discovery_directory.is_empty() && project_identity.is_valid()) {
 		MCPDiscovery::remove_record(discovery_directory, project_identity.project_id, project_identity.instance_id);
@@ -419,8 +296,7 @@ void MCPEditorPlugin::_notification(int p_what) {
 				startup_state = STARTUP_RUNNING;
 			}
 			host.poll();
-			runtime_debug_service->process_input();
-			harness_provider->poll();
+			feature_set.process();
 			String heartbeat_failure;
 			if (project_heartbeat.poll_failure(heartbeat_failure)) {
 				_exit_with_error("Godot MCP Host lost its project lease: " + heartbeat_failure);
@@ -468,6 +344,27 @@ MCPEditorPlugin::MCPEditorPlugin() {
 #if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
 	gdscript_provider = memnew(MCPGDScriptProvider(session_manager));
 #endif
+	ERR_FAIL_COND(feature_set.add_feature(automation_provider) != OK);
+	ERR_FAIL_COND(feature_set.add_feature(class_provider) != OK);
+	ERR_FAIL_COND(feature_set.add_feature(debug_provider) != OK);
+	ERR_FAIL_COND(feature_set.add_feature(runtime_provider) != OK);
+	ERR_FAIL_COND(feature_set.add_feature(trace_service) != OK);
+	ERR_FAIL_COND(feature_set.add_feature(harness_provider) != OK);
+	ERR_FAIL_COND(feature_set.add_feature(editor_provider) != OK);
+	ERR_FAIL_COND(feature_set.add_feature(editor_ui_provider) != OK);
+	ERR_FAIL_COND(feature_set.add_feature(file_provider) != OK);
+	ERR_FAIL_COND(feature_set.add_feature(scene_provider) != OK);
+	ERR_FAIL_COND(feature_set.add_feature(node_provider) != OK);
+	ERR_FAIL_COND(feature_set.add_feature(node_structure_provider) != OK);
+	ERR_FAIL_COND(feature_set.add_feature(project_provider) != OK);
+	ERR_FAIL_COND(feature_set.add_feature(input_map_provider) != OK);
+#if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
+	ERR_FAIL_COND(feature_set.add_feature(script_provider) != OK);
+#endif
+	ERR_FAIL_COND(feature_set.add_feature(resource_provider) != OK);
+#if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
+	ERR_FAIL_COND(feature_set.add_feature(gdscript_provider) != OK);
+#endif
 	set_process_internal(requested);
 }
 
@@ -488,9 +385,9 @@ MCPEditorPlugin::~MCPEditorPlugin() {
 	memdelete(file_provider);
 	memdelete(editor_ui_provider);
 	memdelete(editor_provider);
-	memdelete(runtime_provider);
 	memdelete(harness_provider);
 	memdelete(trace_service);
+	memdelete(runtime_provider);
 	memdelete(runtime_debug_service);
 	memdelete(debug_provider);
 	memdelete(debug_capture);

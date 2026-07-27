@@ -160,6 +160,10 @@ void MCPEditorUIProvider::unregister_tools() {
 	tool_registry = nullptr;
 }
 
+void MCPEditorUIProvider::on_session_removed(const String &p_session_id) {
+	release_session(p_session_id);
+}
+
 void MCPEditorUIProvider::release_session(const String &p_session_id) {
 	service.release_session(p_session_id);
 }

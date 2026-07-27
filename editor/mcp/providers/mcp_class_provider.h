@@ -30,19 +30,21 @@
 
 #pragma once
 
+#include "../mcp_editor_feature.h"
+
 #include "core/object/object.h"
 #include "core/variant/dictionary.h"
 
 class DocTools;
 class MCPToolRegistry;
 
-class MCPClassProvider : public Object {
+class MCPClassProvider : public Object, public MCPEditorFeature {
 public:
 	explicit MCPClassProvider(DocTools *p_doc_tools = nullptr);
 	~MCPClassProvider();
 
-	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr);
-	void unregister_tools();
+	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr) override;
+	void unregister_tools() override;
 
 	Dictionary search(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary get_documentation(const Dictionary &p_arguments, const Dictionary &p_context);

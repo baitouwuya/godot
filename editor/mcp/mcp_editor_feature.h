@@ -1,9 +1,9 @@
 /**************************************************************************/
-/*  mcp_input_map_provider.h                                              */
+/*  mcp_editor_feature.h                                                  */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
-/*                        https://godotengine.org                         */
+/**************************************************************************/
 /* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
 /* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
 /*                                                                        */
@@ -29,24 +29,36 @@
 
 #pragma once
 
-#include "../mcp_editor_feature.h"
-
-#include "core/object/object.h"
-#include "core/variant/dictionary.h"
+#include "core/error/error_list.h"
+#include "core/string/ustring.h"
+#include "core/templates/local_vector.h"
 
 class MCPToolRegistry;
 
-class MCPInputMapProvider : public Object, public MCPEditorFeature {
+class MCPEditorFeature {
 public:
-	~MCPInputMapProvider();
+	virtual ~MCPEditorFeature() = default;
 
-	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr) override;
-	void unregister_tools() override;
+	virtual Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr) { return OK; }
+	virtual void unregister_tools() {}
+	virtual void process() {}
+	virtual void on_session_removed(const String &p_session_id) {}
+	virtual void shutdown() {}
+};
 
-	Dictionary get_actions(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary set_action(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary remove_action(const Dictionary &p_arguments, const Dictionary &p_context);
+// Non-owning lifecycle composition; the caller controls feature allocation.
+class MCPEditorFeatureSet {
+	LocalVector<MCPEditorFeature *> features;
+	int registered_count = 0;
 
-private:
-	MCPToolRegistry *tool_registry = nullptr;
+public:
+	Error add_feature(MCPEditorFeature *p_feature);
+	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr);
+	void unregister_tools();
+	void process();
+	void on_session_removed(const String &p_session_id);
+	void shutdown();
+
+	int get_feature_count() const { return features.size(); }
+	int get_registered_count() const { return registered_count; }
 };

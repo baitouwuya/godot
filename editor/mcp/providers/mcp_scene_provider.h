@@ -30,19 +30,21 @@
 
 #pragma once
 
+#include "../mcp_editor_feature.h"
+
 #include "core/object/object.h"
 #include "core/variant/dictionary.h"
 
 class MCPToolRegistry;
 class Node;
 
-class MCPSceneProvider : public Object {
+class MCPSceneProvider : public Object, public MCPEditorFeature {
 public:
 	explicit MCPSceneProvider(Node *p_scene_root = nullptr);
 	~MCPSceneProvider();
 
-	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr);
-	void unregister_tools();
+	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr) override;
+	void unregister_tools() override;
 
 	Dictionary get_tree(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary get_selection(const Dictionary &p_arguments, const Dictionary &p_context);

@@ -30,6 +30,8 @@
 
 #pragma once
 
+#include "../mcp_editor_feature.h"
+
 #include "core/object/object.h"
 #include "core/variant/dictionary.h"
 
@@ -37,13 +39,13 @@ class MCPToolRegistry;
 class MCPUndoRedoAction;
 class Node;
 
-class MCPNodeStructureProvider : public Object {
+class MCPNodeStructureProvider : public Object, public MCPEditorFeature {
 public:
 	MCPNodeStructureProvider(Node *p_scene_root = nullptr, MCPUndoRedoAction *p_undo_redo = nullptr);
 	~MCPNodeStructureProvider();
 
-	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr);
-	void unregister_tools();
+	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr) override;
+	void unregister_tools() override;
 
 	Dictionary delete_node(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary rename_node(const Dictionary &p_arguments, const Dictionary &p_context);

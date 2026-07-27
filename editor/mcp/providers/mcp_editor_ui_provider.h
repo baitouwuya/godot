@@ -30,18 +30,20 @@
 
 #pragma once
 
+#include "../mcp_editor_feature.h"
 #include "mcp_editor_ui_service.h"
 
 #include "core/object/object.h"
 
 class MCPToolRegistry;
 
-class MCPEditorUIProvider : public Object {
+class MCPEditorUIProvider : public Object, public MCPEditorFeature {
 public:
 	~MCPEditorUIProvider();
 
-	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr);
-	void unregister_tools();
+	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr) override;
+	void unregister_tools() override;
+	void on_session_removed(const String &p_session_id) override;
 	void release_session(const String &p_session_id);
 	void clear();
 

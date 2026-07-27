@@ -569,6 +569,18 @@ void MCPRuntimeProvider::unregister_tools() {
 	tool_registry = nullptr;
 }
 
+void MCPRuntimeProvider::process() {
+	runtime_service->process_input();
+}
+
+void MCPRuntimeProvider::on_session_removed(const String &p_session_id) {
+	runtime_service->release_mcp_session(p_session_id);
+}
+
+void MCPRuntimeProvider::shutdown() {
+	runtime_service->shutdown_input();
+}
+
 Dictionary MCPRuntimeProvider::_get_state(const Dictionary &p_arguments, const Dictionary &) {
 	Dictionary error;
 	return _has_only(p_arguments, PackedStringArray(), error) ? runtime_service->get_state() : error;

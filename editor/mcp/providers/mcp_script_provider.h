@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "../mcp_editor_feature.h"
 #include "mcp_gdscript_session_manager.h"
 
 #include "core/object/object.h"
@@ -38,15 +39,15 @@
 class MCPToolRegistry;
 class GDScriptAnalysisSession;
 
-class MCPScriptProvider : public Object {
+class MCPScriptProvider : public Object, public MCPEditorFeature {
 public:
 	static constexpr const char *STALE_REVISION_ERROR_CODE = "stale_revision";
 
 	MCPScriptProvider(const Ref<MCPGDScriptSessionManager> &p_session_manager = Ref<MCPGDScriptSessionManager>());
 	~MCPScriptProvider();
 
-	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr);
-	void unregister_tools();
+	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr) override;
+	void unregister_tools() override;
 	void set_session_manager(const Ref<MCPGDScriptSessionManager> &p_session_manager) { session_manager = p_session_manager; }
 	const Ref<MCPGDScriptSessionManager> &get_session_manager() const { return session_manager; }
 

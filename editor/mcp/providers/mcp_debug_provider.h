@@ -30,19 +30,21 @@
 
 #pragma once
 
+#include "../mcp_editor_feature.h"
+
 #include "core/object/object.h"
 #include "core/variant/dictionary.h"
 
 class MCPDebugEventStore;
 class MCPToolRegistry;
 
-class MCPDebugProvider : public Object {
+class MCPDebugProvider : public Object, public MCPEditorFeature {
 public:
 	explicit MCPDebugProvider(MCPDebugEventStore *p_event_store);
 	~MCPDebugProvider();
 
-	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr);
-	void unregister_tools();
+	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr) override;
+	void unregister_tools() override;
 
 	Dictionary get_logs(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary get_errors(const Dictionary &p_arguments, const Dictionary &p_context);

@@ -451,18 +451,20 @@ TEST_CASE("[SceneTree][MCP][Provider][GDScript] Node script attachment is undoab
 	CHECK(speed_property.get("hintString", String()) == "0.0,10.0,0.5");
 	CHECK(bool(speed_property.get("valueAvailable", false)));
 	CHECK(bool(speed_property.get("encodable", false)));
-	CHECK(speed_property.get("value", Variant()) == "f:2.5");
+	CHECK(speed_property.get("value", Variant()) == Variant(2.5));
 
 	const Dictionary path_property = _find_property(properties, "exported_path");
 	REQUIRE_FALSE(path_property.is_empty());
 	CHECK(path_property.get("source", String()) == "script");
-	CHECK(path_property.get("value", Variant()) == "np:.");
+	Variant decoded_path;
+	REQUIRE(MCPVariantCodec::decode(path_property.get("value", Variant()), decoded_path) == OK);
+	CHECK(decoded_path == Variant(NodePath(".")));
 	const String base_script_path = "res://tests/editor/mcp/data/mcp_node_base_script.gd";
 	const Dictionary base_property = _find_property(properties, "exported_base");
 	REQUIRE_FALSE(base_property.is_empty());
 	CHECK(base_property.get("source", String()) == "script");
 	CHECK(base_property.get("scriptPath", String()) == base_script_path);
-	CHECK(base_property.get("value", Variant()) == "i:11");
+	CHECK(base_property.get("value", Variant()) == Variant(11));
 
 	const Dictionary node_property = _find_property(properties, "exported_node");
 	REQUIRE_FALSE(node_property.is_empty());
@@ -629,7 +631,7 @@ TEST_CASE("[SceneTree][Editor][MCP][Provider][GDScript] Placeholder node propert
 	CHECK(in_memory_property.get("source", String()) == "script");
 	CHECK(bool(in_memory_property.get("scriptExposed", false)));
 	CHECK_FALSE(in_memory_property.has("scriptPath"));
-	CHECK(in_memory_property.get("value", Variant()) == "i:7");
+	CHECK(in_memory_property.get("value", Variant()) == Variant(7));
 	const Dictionary memory_group = _find_layout_entry(in_memory_content.get("propertyLayout", Array()), "group", "Memory");
 	REQUIRE_FALSE(memory_group.is_empty());
 	CHECK(memory_group.get("source", String()) == "script");

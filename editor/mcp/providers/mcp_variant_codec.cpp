@@ -36,6 +36,7 @@
 #include "core/io/resource.h"
 #include "core/io/resource_loader.h"
 #include "core/math/math_funcs.h"
+#include "core/object/class_db.h"
 
 namespace {
 
@@ -66,7 +67,7 @@ static bool _looks_like_legacy_native_dictionary(const Dictionary &p_dictionary)
 	if (type_value.get_type() != Variant::STRING && type_value.get_type() != Variant::STRING_NAME) {
 		return false;
 	}
-	return Variant::get_type_by_name(type_value) != Variant::VARIANT_MAX;
+	return Variant::get_type_by_name(type_value) != Variant::VARIANT_MAX || ClassDB::class_exists(type_value);
 }
 
 static Dictionary _wrap_native_encoding(const Variant &p_value) {

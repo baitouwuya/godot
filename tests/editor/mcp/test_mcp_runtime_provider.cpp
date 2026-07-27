@@ -114,7 +114,28 @@ TEST_CASE("[MCP][Provider] Runtime tools register in a stable order") {
 		const Dictionary schema = Dictionary(definition_value).get("inputSchema", Dictionary());
 		CHECK(schema.get("type", String()) == "object");
 		CHECK_FALSE(bool(schema.get("additionalProperties", true)));
+		const Dictionary output_schema = Dictionary(definition_value).get("outputSchema", Dictionary());
+		CHECK(output_schema.get("type", String()) == "object");
+		CHECK_FALSE(Dictionary(output_schema.get("properties", Dictionary())).is_empty());
 	}
+	const Dictionary state_output = Dictionary(definitions[0]).get("outputSchema", Dictionary());
+	CHECK_FALSE(bool(state_output.get("additionalProperties", true)));
+	const Dictionary state_properties = state_output.get("properties", Dictionary());
+	CHECK(state_properties.has("processId"));
+	CHECK(state_properties.has("sessions"));
+	const Dictionary target_output = Dictionary(definitions[17]).get("outputSchema", Dictionary());
+	CHECK(bool(target_output.get("additionalProperties", false)));
+	CHECK(Dictionary(target_output.get("properties", Dictionary())).has("action"));
+	const Dictionary wait_output = Dictionary(definitions[24]).get("outputSchema", Dictionary());
+	CHECK_FALSE(bool(wait_output.get("additionalProperties", true)));
+	CHECK(Dictionary(wait_output.get("properties", Dictionary())).has("evaluationCount"));
+	const Dictionary properties_output = Dictionary(definitions[30]).get("outputSchema", Dictionary());
+	CHECK(bool(properties_output.get("additionalProperties", false)));
+	CHECK(Dictionary(properties_output.get("properties", Dictionary())).has("propertyLayout"));
+
+	const MCPToolRegistry::CallResult state_result = _call(registry, "godot.runtime.get_state", Dictionary());
+	REQUIRE(state_result.status == MCPToolRegistry::CALL_OK);
+	CHECK_FALSE(bool(state_result.result.get("isError", false)));
 
 	Dictionary invalid;
 	invalid["unknown"] = true;

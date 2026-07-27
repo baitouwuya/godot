@@ -30,6 +30,64 @@
 
 #include "mcp_tool_registry.h"
 
+namespace {
+
+static bool _find_unknown_argument(const Dictionary &p_arguments, const Dictionary &p_schema,
+		String &r_unknown_argument, PackedStringArray &r_valid_arguments) {
+	r_unknown_argument = String();
+	r_valid_arguments.clear();
+	const Variant additional_properties = p_schema.get("additionalProperties", true);
+	if (additional_properties.get_type() != Variant::BOOL || bool(additional_properties)) {
+		return false;
+	}
+
+	const Dictionary properties = p_schema.get("properties", Dictionary());
+	for (const Variant &key : properties.keys()) {
+		if (key.is_string()) {
+			r_valid_arguments.push_back(key);
+		}
+	}
+	r_valid_arguments.sort();
+	for (const KeyValue<Variant, Variant> &entry : p_arguments) {
+		if (!entry.key.is_string() || !properties.has(entry.key)) {
+			r_unknown_argument = entry.key;
+			return true;
+		}
+	}
+	return false;
+}
+
+static Dictionary _make_unknown_argument_result(const String &p_unknown_argument, const PackedStringArray &p_valid_arguments) {
+	String message = "Unknown argument: " + p_unknown_argument + ".";
+	if (p_valid_arguments.is_empty()) {
+		message += " This tool accepts no arguments.";
+	} else {
+		message += " Valid arguments: " + String(", ").join(p_valid_arguments) + ".";
+	}
+
+	Dictionary details;
+	details["unknownArgument"] = p_unknown_argument;
+	details["validArguments"] = p_valid_arguments;
+	Dictionary error;
+	error["code"] = "INVALID_ARGUMENTS";
+	error["message"] = message;
+	error["details"] = details;
+	Dictionary structured_content;
+	structured_content["error"] = error;
+	Dictionary text_content;
+	text_content["type"] = "text";
+	text_content["text"] = message;
+	Array content;
+	content.push_back(text_content);
+	Dictionary result;
+	result["content"] = content;
+	result["structuredContent"] = structured_content;
+	result["isError"] = true;
+	return result;
+}
+
+} // namespace
+
 Dictionary MCPToolCallContext::to_dictionary() const {
 	Dictionary context;
 	context["requestId"] = request_id;
@@ -218,6 +276,13 @@ MCPToolRegistry::CallResult MCPToolRegistry::call_tool(const StringName &p_name,
 	if (!entry->handler.is_valid()) {
 		call_result.status = CALL_TOOL_UNAVAILABLE;
 		call_result.message = "Tool is no longer available: " + String(p_name);
+		return call_result;
+	}
+	String unknown_argument;
+	PackedStringArray valid_arguments;
+	const Dictionary input_schema = entry->definition.get("inputSchema", Dictionary());
+	if (_find_unknown_argument(p_arguments, input_schema, unknown_argument, valid_arguments)) {
+		call_result.result = _make_unknown_argument_result(unknown_argument, valid_arguments);
 		return call_result;
 	}
 

@@ -38,7 +38,10 @@ namespace TestMCPToolRegistry {
 
 class ToolProvider : public Object {
 public:
+	int call_count = 0;
+
 	Dictionary echo(const Dictionary &p_arguments, const Dictionary &p_context) {
+		call_count++;
 		Dictionary result;
 		result["arguments"] = p_arguments;
 		result["context"] = p_context;
@@ -55,6 +58,39 @@ static Dictionary make_definition(const String &p_name) {
 	definition["name"] = p_name;
 	definition["description"] = "Test tool.";
 	return definition;
+}
+
+TEST_CASE("[MCP][ToolRegistry] Closed schemas reject unknown arguments with valid names") {
+	MCPToolRegistry registry;
+	ToolProvider *provider = memnew(ToolProvider);
+	Dictionary properties;
+	properties["zeta"] = Dictionary();
+	properties["alpha"] = Dictionary();
+	Dictionary input_schema;
+	input_schema["type"] = "object";
+	input_schema["properties"] = properties;
+	input_schema["additionalProperties"] = false;
+	Dictionary definition = make_definition("closed");
+	definition["inputSchema"] = input_schema;
+	REQUIRE(registry.register_tool(definition, callable_mp(provider, &ToolProvider::echo), provider) == OK);
+
+	Dictionary arguments;
+	arguments["alpah"] = true;
+	MCPToolCallContext context;
+	const MCPToolRegistry::CallResult result = registry.call_tool("closed", arguments, context);
+	REQUIRE(result.status == MCPToolRegistry::CALL_OK);
+	CHECK(provider->call_count == 0);
+	CHECK(bool(result.result.get("isError", false)));
+	const Dictionary structured = result.result.get("structuredContent", Dictionary());
+	const Dictionary error = structured.get("error", Dictionary());
+	CHECK(error.get("code", String()) == "INVALID_ARGUMENTS");
+	CHECK(String(error.get("message", String())).contains("Valid arguments: alpha, zeta."));
+	const Dictionary details = error.get("details", Dictionary());
+	CHECK(details.get("unknownArgument", String()) == "alpah");
+	CHECK(PackedStringArray(details.get("validArguments", PackedStringArray())) == PackedStringArray{ "alpha", "zeta" });
+
+	registry.unregister_tools_for_owner(provider);
+	memdelete(provider);
 }
 
 TEST_CASE("[MCP][ToolRegistry] Registers in order and rejects duplicates") {

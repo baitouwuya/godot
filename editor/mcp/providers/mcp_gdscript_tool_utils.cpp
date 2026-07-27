@@ -112,6 +112,7 @@ namespace MCPGDScriptToolUtils {
 
 Dictionary diagnostics_schema() {
 	Dictionary schema = MCPToolUtils::make_object_schema(_document_properties());
+	schema["description"] = "Exactly one document selector is required: path or uri.";
 	schema["oneOf"] = _document_selector_options();
 	return schema;
 }

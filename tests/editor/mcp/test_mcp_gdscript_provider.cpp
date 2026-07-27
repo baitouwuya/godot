@@ -144,7 +144,11 @@ TEST_CASE("[MCP][Provider] GDScript semantic tools use injected analysis session
 	const Array definitions = registry.get_tool_definitions();
 	REQUIRE(definitions.size() == 10);
 	const Dictionary diagnostics_schema = Dictionary(definitions[0]).get("inputSchema", Dictionary());
+	CHECK(String(diagnostics_schema.get("description", String())).contains("Exactly one"));
 	CHECK(Array(diagnostics_schema.get("oneOf", Array())).size() == 2);
+	const Array document_options = diagnostics_schema.get("oneOf", Array());
+	CHECK(PackedStringArray(Dictionary(document_options[0]).get("required", PackedStringArray())) == PackedStringArray{ "path" });
+	CHECK(PackedStringArray(Dictionary(document_options[1]).get("required", PackedStringArray())) == PackedStringArray{ "uri" });
 	const Dictionary completion_schema = Dictionary(definitions[2]).get("inputSchema", Dictionary());
 	const Dictionary completion_properties = completion_schema.get("properties", Dictionary());
 	CHECK(completion_properties.has("path"));

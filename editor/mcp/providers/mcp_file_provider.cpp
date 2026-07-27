@@ -30,6 +30,7 @@
 
 #include "mcp_file_provider.h"
 
+#include "mcp_file_tool_utils.h"
 #include "mcp_path_utils.h"
 #include "mcp_tool_utils.h"
 
@@ -40,27 +41,6 @@
 #include "editor/file_system/editor_file_system.h"
 
 namespace {
-
-static Dictionary _create_file_schema() {
-	Dictionary overwrite_property = MCPToolUtils::make_property_schema("boolean", "Replace an existing project file.");
-	overwrite_property["default"] = false;
-
-	Dictionary properties;
-	properties["path"] = MCPToolUtils::make_property_schema("string", "Project-relative file path beginning with res://.");
-	properties["content"] = MCPToolUtils::make_property_schema("string", "UTF-8 text to write.");
-	properties["overwrite"] = overwrite_property;
-	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "path", "content" });
-}
-
-static Dictionary _create_file_output_schema() {
-	Dictionary bytes_written = MCPToolUtils::make_property_schema("integer", "Number of UTF-8 bytes written.");
-	bytes_written["minimum"] = 0;
-	Dictionary properties;
-	properties["path"] = MCPToolUtils::make_property_schema("string", "Created project resource path.");
-	properties["bytesWritten"] = bytes_written;
-	properties["overwritten"] = MCPToolUtils::make_property_schema("boolean", "Whether an existing file was replaced.");
-	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "path", "bytesWritten", "overwritten" });
-}
 
 static void _set_error(String *r_error, const String &p_message) {
 	if (r_error) {
@@ -93,7 +73,7 @@ Error MCPFileProvider::register_tools(MCPToolRegistry *p_registry, String *r_err
 
 	const LocalVector<MCPToolUtils::ToolDescriptor> tools{
 		{ "godot.file.create", "Create a UTF-8 text file inside the current Godot project.",
-				_create_file_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPFileProvider::create_file), _create_file_output_schema() },
+				MCPFileToolUtils::create_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPFileProvider::create_file), MCPFileToolUtils::create_output_schema() },
 	};
 	const Error err = MCPToolUtils::register_tools(p_registry, this, tools, r_error);
 	if (err != OK) {
@@ -113,26 +93,22 @@ void MCPFileProvider::unregister_tools() {
 }
 
 Dictionary MCPFileProvider::create_file(const Dictionary &p_arguments, const Dictionary &) {
-	const Variant path_value = p_arguments.get("path", Variant());
-	const Variant content_value = p_arguments.get("content", Variant());
-	const Variant overwrite_value = p_arguments.get("overwrite", false);
-	if (path_value.get_type() != Variant::STRING || content_value.get_type() != Variant::STRING ||
-			overwrite_value.get_type() != Variant::BOOL) {
-		return MCPToolUtils::make_error_result(
-				"INVALID_ARGUMENTS", "Arguments must contain string 'path', string 'content', and optional boolean 'overwrite'.");
+	MCPFileToolUtils::CreateOptions options;
+	String argument_error;
+	if (!MCPFileToolUtils::parse_create_options(p_arguments, options, argument_error)) {
+		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", argument_error);
 	}
 
 	String resource_path;
 	String absolute_path;
 	String path_error;
-	const Error path_result = project_root.is_empty() ? MCPPathUtils::resolve_project_file_path(path_value, resource_path, absolute_path, &path_error) : MCPPathUtils::resolve_project_file_path_for_root(path_value, project_root, resource_path, absolute_path, &path_error);
+	const Error path_result = project_root.is_empty() ? MCPPathUtils::resolve_project_file_path(options.path, resource_path, absolute_path, &path_error) : MCPPathUtils::resolve_project_file_path_for_root(options.path, project_root, resource_path, absolute_path, &path_error);
 	if (path_result != OK) {
 		return MCPToolUtils::make_error_result("INVALID_PATH", path_error);
 	}
 
-	const bool overwrite = overwrite_value;
 	const bool existed = FileAccess::exists(absolute_path);
-	if (existed && !overwrite) {
+	if (existed && !options.overwrite) {
 		return MCPToolUtils::make_error_result("FILE_EXISTS", "File already exists: " + resource_path);
 	}
 
@@ -151,8 +127,7 @@ Dictionary MCPFileProvider::create_file(const Dictionary &p_arguments, const Dic
 		return MCPToolUtils::make_error_result("FILE_OPEN_FAILED", "Could not open file for writing: " + resource_path);
 	}
 
-	const String content = content_value;
-	if (!file->store_string(content)) {
+	if (!file->store_string(options.content)) {
 		return MCPToolUtils::make_error_result("FILE_WRITE_FAILED", "Could not write file: " + resource_path);
 	}
 	file->flush();
@@ -163,7 +138,7 @@ Dictionary MCPFileProvider::create_file(const Dictionary &p_arguments, const Dic
 
 	Dictionary result;
 	result["path"] = resource_path;
-	result["bytesWritten"] = content.utf8().length();
+	result["bytesWritten"] = options.content.utf8().length();
 	result["overwritten"] = existed;
 	return MCPToolUtils::make_success_result(result);
 }

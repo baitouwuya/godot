@@ -33,6 +33,7 @@
 #include "core/mcp/mcp_tool_registry.h"
 #include "core/os/os.h"
 #include "editor/mcp/providers/mcp_file_provider.h"
+#include "editor/mcp/providers/mcp_file_tool_utils.h"
 #include "tests/test_macros.h"
 
 TEST_FORCE_LINK(test_mcp_file_provider);
@@ -78,6 +79,11 @@ TEST_CASE("[MCP][Provider] File create is UTF-8 safe and overwrite-aware") {
 	CHECK(registry.has_tool("godot.file.create"));
 	const Array definitions = registry.get_tool_definitions();
 	REQUIRE(definitions.size() == 1);
+	const Dictionary input_schema = Dictionary(definitions[0]).get("inputSchema", Dictionary());
+	const Dictionary input_properties = input_schema.get("properties", Dictionary());
+	CHECK(PackedStringArray(input_schema.get("required", PackedStringArray())).has("path"));
+	CHECK(PackedStringArray(input_schema.get("required", PackedStringArray())).has("content"));
+	CHECK_FALSE(bool(Dictionary(input_properties.get("overwrite", Dictionary())).get("default", true)));
 	const Dictionary output_schema = Dictionary(definitions[0]).get("outputSchema", Dictionary());
 	CHECK(Dictionary(output_schema.get("properties", Dictionary())).has("bytesWritten"));
 	CHECK(PackedStringArray(output_schema.get("required", PackedStringArray())).has("overwritten"));
@@ -120,6 +126,31 @@ TEST_CASE("[MCP][Provider] File create is UTF-8 safe and overwrite-aware") {
 	provider->unregister_tools();
 	CHECK(registry.call_tool("godot.file.create", arguments, context).status == MCPToolRegistry::CALL_TOOL_NOT_FOUND);
 	memdelete(provider);
+}
+
+TEST_CASE("[MCP][Provider] File create contract parses arguments consistently") {
+	MCPFileToolUtils::CreateOptions options;
+	String error_message;
+	Dictionary arguments;
+	arguments["path"] = "res://notes.txt";
+	arguments["content"] = "content";
+	CHECK(MCPFileToolUtils::parse_create_options(arguments, options, error_message));
+	CHECK(options.path == "res://notes.txt");
+	CHECK(options.content == "content");
+	CHECK_FALSE(options.overwrite);
+	CHECK(error_message.is_empty());
+
+	arguments["overwrite"] = true;
+	CHECK(MCPFileToolUtils::parse_create_options(arguments, options, error_message));
+	CHECK(options.overwrite);
+	arguments["overwrite"] = 1;
+	CHECK_FALSE(MCPFileToolUtils::parse_create_options(arguments, options, error_message));
+	CHECK(error_message.contains("overwrite"));
+	arguments.erase("overwrite");
+	arguments["content"] = false;
+	CHECK_FALSE(MCPFileToolUtils::parse_create_options(arguments, options, error_message));
+	arguments.erase("content");
+	CHECK_FALSE(MCPFileToolUtils::parse_create_options(arguments, options, error_message));
 }
 
 TEST_CASE("[MCP][Provider] File create rejects traversal and malformed arguments before writing") {

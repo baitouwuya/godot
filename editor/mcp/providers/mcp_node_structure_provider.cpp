@@ -220,14 +220,7 @@ Error MCPNodeStructureProvider::register_tools(MCPToolRegistry *p_registry, Stri
 		return ERR_ALREADY_IN_USE;
 	}
 
-	struct ToolRegistration {
-		String name;
-		String description;
-		Dictionary schema;
-		MCPToolUtils::ToolBehavior behavior;
-		Callable handler;
-	};
-	const ToolRegistration tools[] = {
+	const LocalVector<MCPToolUtils::ToolDescriptor> tools{
 		{ "godot.node.delete", "Delete a node through editor undo/redo.",
 				_path_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPNodeStructureProvider::delete_node) },
 		{ "godot.node.rename", "Rename a node and update scene path references through editor undo/redo.",
@@ -241,13 +234,9 @@ Error MCPNodeStructureProvider::register_tools(MCPToolRegistry *p_registry, Stri
 		{ "godot.node.instantiate_scene", "Instantiate a project PackedScene through editor undo/redo.",
 				_instantiate_schema(), MCPToolUtils::TOOL_ADDITIVE, callable_mp(this, &MCPNodeStructureProvider::instantiate_scene) },
 	};
-	for (const ToolRegistration &tool : tools) {
-		const Error err = p_registry->register_tool(MCPToolUtils::make_tool_definition(tool.name, tool.description, tool.schema, tool.behavior),
-				tool.handler, this, r_error);
-		if (err != OK) {
-			p_registry->unregister_tools_for_owner(this);
-			return err;
-		}
+	const Error err = MCPToolUtils::register_tools(p_registry, this, tools, r_error);
+	if (err != OK) {
+		return err;
 	}
 	tool_registry = p_registry;
 	return OK;

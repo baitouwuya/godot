@@ -30,9 +30,13 @@
 
 #pragma once
 
+#include "core/templates/local_vector.h"
+#include "core/variant/callable.h"
 #include "core/variant/dictionary.h"
 #include "core/variant/variant.h"
 
+class MCPToolRegistry;
+class Object;
 struct PropertyInfo;
 
 namespace MCPToolUtils {
@@ -43,7 +47,17 @@ enum ToolBehavior {
 	TOOL_DESTRUCTIVE,
 };
 
+struct ToolDescriptor {
+	String name;
+	String description;
+	Dictionary input_schema;
+	ToolBehavior behavior = TOOL_READ_ONLY;
+	Callable handler;
+	Dictionary output_schema;
+};
+
 Dictionary make_tool_definition(const String &p_name, const String &p_description, const Dictionary &p_input_schema, ToolBehavior p_behavior, const Dictionary &p_output_schema = Dictionary());
+Error register_tools(MCPToolRegistry *p_registry, Object *p_owner, const LocalVector<ToolDescriptor> &p_tools, String *r_error = nullptr);
 Dictionary make_property_schema(const String &p_type, const String &p_description);
 Dictionary make_enum_schema(const PackedStringArray &p_values, const String &p_description, const String &p_default);
 Dictionary make_object_schema(const Dictionary &p_properties = Dictionary(), const PackedStringArray &p_required = PackedStringArray(), bool p_allow_additional_properties = false);

@@ -448,14 +448,7 @@ Error MCPRuntimeProvider::register_tools(MCPToolRegistry *p_registry, String *r_
 		return ERR_ALREADY_IN_USE;
 	}
 
-	struct ToolRegistration {
-		const char *name;
-		const char *description;
-		Dictionary schema;
-		MCPToolUtils::ToolBehavior behavior;
-		Callable callable;
-	};
-	const ToolRegistration tools[] = {
+	const LocalVector<MCPToolUtils::ToolDescriptor> tools{
 		{ "godot.runtime.get_state", "Get editor run state and all active runtime debugger sessions.",
 				MCPToolUtils::make_object_schema(Dictionary()), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPRuntimeProvider::_get_state) },
 		{ "godot.runtime.play", "Run the main, current, or a specific project scene from the editor.",
@@ -532,14 +525,9 @@ Error MCPRuntimeProvider::register_tools(MCPToolRegistry *p_registry, String *r_
 				_session_schema(true, false), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPRuntimeProvider::_release_input) },
 	};
 
-	for (const ToolRegistration &tool : tools) {
-		const Error error = p_registry->register_tool(
-				MCPToolUtils::make_tool_definition(tool.name, tool.description, tool.schema, tool.behavior), tool.callable,
-				this, r_error);
-		if (error != OK) {
-			p_registry->unregister_tools_for_owner(this);
-			return error;
-		}
+	const Error error = MCPToolUtils::register_tools(p_registry, this, tools, r_error);
+	if (error != OK) {
+		return error;
 	}
 	tool_registry = p_registry;
 	return OK;

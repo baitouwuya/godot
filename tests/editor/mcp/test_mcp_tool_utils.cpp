@@ -29,6 +29,8 @@
 /**************************************************************************/
 
 #include "core/io/json.h"
+#include "core/mcp/mcp_tool_registry.h"
+#include "core/object/callable_mp.h"
 #include "core/object/property_info.h"
 #include "editor/mcp/providers/mcp_tool_utils.h"
 #include "tests/test_macros.h"
@@ -38,6 +40,38 @@
 TEST_FORCE_LINK(test_mcp_tool_utils);
 
 namespace TestMCPToolUtils {
+
+class DescriptorProvider : public Object {
+public:
+	Dictionary echo(const Dictionary &p_arguments, const Dictionary &) { return MCPToolUtils::make_success_result(p_arguments); }
+};
+
+TEST_CASE("[MCP][Provider] Tool descriptors register in order and roll back only the current batch") {
+	DescriptorProvider *provider = memnew(DescriptorProvider);
+	MCPToolRegistry registry;
+	const Dictionary schema = MCPToolUtils::make_object_schema();
+	const LocalVector<MCPToolUtils::ToolDescriptor> descriptors{
+		{ "test.first", "First tool.", schema, MCPToolUtils::TOOL_READ_ONLY, callable_mp(provider, &DescriptorProvider::echo) },
+		{ "test.second", "Second tool.", schema, MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(provider, &DescriptorProvider::echo) }
+	};
+	REQUIRE(MCPToolUtils::register_tools(&registry, provider, descriptors) == OK);
+	CHECK(registry.get_tool_names() == PackedStringArray{ "test.first", "test.second" });
+	CHECK(registry.unregister_tools_for_owner(provider) == 2);
+	REQUIRE(registry.register_tool(
+			MCPToolUtils::make_tool_definition("test.stable", "Stable tool.", schema, MCPToolUtils::TOOL_READ_ONLY),
+			descriptors[0].handler, provider) == OK);
+
+	const LocalVector<MCPToolUtils::ToolDescriptor> duplicate_batch{
+		{ "test.duplicate", "First duplicate.", schema, MCPToolUtils::TOOL_READ_ONLY, callable_mp(provider, &DescriptorProvider::echo) },
+		{ "test.duplicate", "Second duplicate.", schema, MCPToolUtils::TOOL_READ_ONLY, callable_mp(provider, &DescriptorProvider::echo) }
+	};
+	String error;
+	CHECK(MCPToolUtils::register_tools(&registry, provider, duplicate_batch, &error) == ERR_ALREADY_EXISTS);
+	CHECK(error.contains("already registered"));
+	CHECK(registry.get_tool_names() == PackedStringArray{ "test.stable" });
+	CHECK(registry.unregister_tools_for_owner(provider) == 1);
+	memdelete(provider);
+}
 
 TEST_CASE("[MCP][Provider] Shared schema builders preserve closed object contracts") {
 	Dictionary properties;

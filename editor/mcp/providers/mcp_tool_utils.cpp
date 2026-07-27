@@ -32,6 +32,7 @@
 
 #include "core/io/json.h"
 #include "core/math/math_funcs.h"
+#include "core/mcp/mcp_tool_registry.h"
 #include "core/object/property_info.h"
 
 namespace MCPToolUtils {
@@ -71,6 +72,28 @@ Dictionary make_tool_definition(const String &p_name, const String &p_descriptio
 	definition["outputSchema"] = output_schema.duplicate(true);
 	definition["annotations"] = annotations;
 	return definition;
+}
+
+Error register_tools(MCPToolRegistry *p_registry, Object *p_owner, const LocalVector<ToolDescriptor> &p_tools, String *r_error) {
+	if (r_error) {
+		*r_error = String();
+	}
+	ERR_FAIL_NULL_V(p_registry, ERR_INVALID_PARAMETER);
+	ERR_FAIL_NULL_V(p_owner, ERR_INVALID_PARAMETER);
+
+	LocalVector<StringName> registered_names;
+	for (const ToolDescriptor &tool : p_tools) {
+		const Dictionary definition = make_tool_definition(tool.name, tool.description, tool.input_schema, tool.behavior, tool.output_schema);
+		const Error error = p_registry->register_tool(definition, tool.handler, p_owner, r_error);
+		if (error != OK) {
+			for (int i = int(registered_names.size()) - 1; i >= 0; i--) {
+				p_registry->unregister_tool(registered_names[i]);
+			}
+			return error;
+		}
+		registered_names.push_back(tool.name);
+	}
+	return OK;
 }
 
 Dictionary make_property_schema(const String &p_type, const String &p_description) {

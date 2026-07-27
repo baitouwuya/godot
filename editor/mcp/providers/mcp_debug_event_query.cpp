@@ -1,0 +1,370 @@
+/**************************************************************************/
+/*  mcp_debug_event_query.cpp                                             */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
+
+#include "mcp_debug_event_query.h"
+
+#include "mcp_tool_utils.h"
+
+#include "core/config/project_settings.h"
+
+namespace {
+
+struct QueryOptions {
+	String source = "all";
+	Vector<MCPDebugEventStore::Severity> levels;
+	String query;
+	uint64_t since_sequence = 0;
+	int limit = 100;
+	bool deduplicate = true;
+	bool include_stack = false;
+	int debugger_session = -1;
+	uint64_t runtime_generation = 0;
+};
+
+struct Group {
+	MCPDebugEventStore::Event representative;
+	uint64_t count = 0;
+	uint64_t first_sequence = 0;
+	uint64_t last_sequence = 0;
+	uint64_t first_timestamp_usec = 0;
+	uint64_t last_timestamp_usec = 0;
+};
+
+static String _severity_name(MCPDebugEventStore::Severity p_severity) {
+	switch (p_severity) {
+		case MCPDebugEventStore::SEVERITY_DEBUG:
+			return "debug";
+		case MCPDebugEventStore::SEVERITY_WARNING:
+			return "warning";
+		case MCPDebugEventStore::SEVERITY_ERROR:
+			return "error";
+		default:
+			return "info";
+	}
+}
+
+static String _source_name(MCPDebugEventStore::Source p_source) {
+	return p_source == MCPDebugEventStore::SOURCE_RUNTIME ? "runtime" : "editor";
+}
+
+static bool _parse_severity(const String &p_value, MCPDebugEventStore::Severity &r_severity) {
+	if (p_value == "debug") {
+		r_severity = MCPDebugEventStore::SEVERITY_DEBUG;
+	} else if (p_value == "info") {
+		r_severity = MCPDebugEventStore::SEVERITY_INFO;
+	} else if (p_value == "warning") {
+		r_severity = MCPDebugEventStore::SEVERITY_WARNING;
+	} else if (p_value == "error") {
+		r_severity = MCPDebugEventStore::SEVERITY_ERROR;
+	} else {
+		return false;
+	}
+	return true;
+}
+
+static bool _has_severity(const Vector<MCPDebugEventStore::Severity> &p_levels, MCPDebugEventStore::Severity p_value) {
+	return p_levels.is_empty() || p_levels.has(p_value);
+}
+
+static String _normalized_message(const String &p_message) {
+	String value = p_message.replace("\r", " ").replace("\n", " ").strip_edges();
+	while (value.contains("  ")) {
+		value = value.replace("  ", " ");
+	}
+	return value;
+}
+
+static String _group_key(const MCPDebugEventStore::Event &p_event) {
+	String top_frame;
+	if (!p_event.stack.is_empty()) {
+		const MCPDebugEventStore::Frame &frame = p_event.stack[0];
+		top_frame = frame.file + ":" + itos(frame.line) + ":" + frame.function;
+	}
+	return vformat("%d\x1f%d\x1f%s\x1f%d\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%d\x1f%s\x1f%s", int(p_event.source), p_event.debugger_session,
+			String::num_uint64(p_event.runtime_generation), int(p_event.severity), p_event.category, _normalized_message(p_event.message),
+			p_event.expression, p_event.description, p_event.file, p_event.line, p_event.function, top_frame);
+}
+
+static String _safe_file_path(const String &p_path) {
+	if (p_path.is_empty() || p_path.begins_with("res://")) {
+		return p_path;
+	}
+	if (ProjectSettings::get_singleton()) {
+		const String localized = ProjectSettings::get_singleton()->localize_path(p_path);
+		if (localized.begins_with("res://")) {
+			return localized;
+		}
+	}
+	return "external://" + p_path.get_file();
+}
+
+static Dictionary _frame_to_dictionary(const MCPDebugEventStore::Frame &p_frame, int p_index) {
+	Dictionary frame;
+	frame["index"] = p_index;
+	frame["file"] = _safe_file_path(p_frame.file);
+	frame["line"] = p_frame.line;
+	frame["function"] = p_frame.function;
+	return frame;
+}
+
+static Dictionary _location(const MCPDebugEventStore::Event &p_event) {
+	Dictionary location;
+	location["file"] = _safe_file_path(p_event.file);
+	location["line"] = p_event.line;
+	location["function"] = p_event.function;
+	return location;
+}
+
+static Dictionary _group_to_dictionary(const Group &p_group, bool p_include_stack) {
+	const MCPDebugEventStore::Event &event = p_group.representative;
+	Dictionary result;
+	result["errorId"] = MCPDebugEventQuery::make_error_id(event);
+	result["source"] = _source_name(event.source);
+	result["debuggerSession"] = event.debugger_session;
+	result["runtimeGeneration"] = int64_t(event.runtime_generation);
+	result["threadId"] = event.thread_id >= 0 ? Variant(event.thread_id) : Variant();
+	result["level"] = _severity_name(event.severity);
+	result["category"] = event.category;
+	result["message"] = _normalized_message(event.message);
+	if (!event.expression.is_empty()) {
+		result["expression"] = event.expression;
+	}
+	if (!event.description.is_empty()) {
+		result["description"] = event.description;
+	}
+	result["count"] = int64_t(p_group.count);
+	result["firstSequence"] = int64_t(p_group.first_sequence);
+	result["lastSequence"] = int64_t(p_group.last_sequence);
+	result["firstTimestampUsec"] = String::num_uint64(p_group.first_timestamp_usec);
+	result["lastTimestampUsec"] = String::num_uint64(p_group.last_timestamp_usec);
+	result["rich"] = event.rich;
+	result["truncated"] = event.truncated;
+	result["location"] = _location(event);
+	result["stackAvailable"] = !event.stack.is_empty();
+	result["stackDepth"] = event.stack.size();
+	if (p_include_stack) {
+		bool stack_truncated = false;
+		result["stack"] = MCPDebugEventQuery::serialize_frames(event.stack, 64, stack_truncated);
+		result["stackTruncated"] = stack_truncated;
+	} else if (!event.stack.is_empty()) {
+		result["topFrame"] = _frame_to_dictionary(event.stack[0], 0);
+	}
+	return result;
+}
+
+static bool _parse_common_query(const Dictionary &p_arguments, bool p_errors_only, QueryOptions &r_options, String &r_error) {
+	const Variant source = p_arguments.get("source", "all");
+	const Variant query = p_arguments.get("query", "");
+	const Variant deduplicate = p_arguments.get("deduplicate", true);
+	const Variant include_stack = p_arguments.get("includeStack", false);
+	if (source.get_type() != Variant::STRING || query.get_type() != Variant::STRING || deduplicate.get_type() != Variant::BOOL || include_stack.get_type() != Variant::BOOL) {
+		r_error = "source, query, deduplicate, or includeStack has an invalid type.";
+		return false;
+	}
+	r_options.source = source;
+	r_options.query = String(query).strip_edges().to_lower();
+	r_options.deduplicate = deduplicate;
+	r_options.include_stack = include_stack;
+	if (r_options.source != "all" && r_options.source != "editor" && r_options.source != "runtime") {
+		r_error = "source must be all, editor, or runtime.";
+		return false;
+	}
+
+	int64_t since_sequence = 0;
+	int64_t limit = p_errors_only ? 50 : 100;
+	if (!MCPToolUtils::try_get_json_integer(p_arguments.get("sinceSequence", 0), 0, INT64_MAX, since_sequence) ||
+			!MCPToolUtils::try_get_json_integer(p_arguments.get("limit", limit), 1, 500, limit)) {
+		r_error = "sinceSequence or limit is outside its allowed range.";
+		return false;
+	}
+	r_options.since_sequence = uint64_t(since_sequence);
+	r_options.limit = int(limit);
+
+	if (p_arguments.has("debuggerSession")) {
+		int64_t debugger_session = 0;
+		if (!MCPToolUtils::try_get_json_integer(p_arguments["debuggerSession"], 0, INT32_MAX, debugger_session)) {
+			r_error = "debuggerSession must be a non-negative integer.";
+			return false;
+		}
+		r_options.debugger_session = int(debugger_session);
+	}
+	if (p_arguments.has("runtimeGeneration")) {
+		int64_t runtime_generation = 0;
+		if (!MCPToolUtils::try_get_json_integer(p_arguments["runtimeGeneration"], 1, INT64_MAX, runtime_generation)) {
+			r_error = "runtimeGeneration must be a positive integer.";
+			return false;
+		}
+		r_options.runtime_generation = uint64_t(runtime_generation);
+	}
+
+	if (p_errors_only) {
+		const Variant include_warnings = p_arguments.get("includeWarnings", true);
+		if (include_warnings.get_type() != Variant::BOOL) {
+			r_error = "includeWarnings must be boolean.";
+			return false;
+		}
+		r_options.levels.push_back(MCPDebugEventStore::SEVERITY_ERROR);
+		if (include_warnings) {
+			r_options.levels.push_back(MCPDebugEventStore::SEVERITY_WARNING);
+		}
+	} else if (p_arguments.has("levels")) {
+		if (p_arguments["levels"].get_type() != Variant::ARRAY) {
+			r_error = "levels must be an array.";
+			return false;
+		}
+		const Array levels = p_arguments["levels"];
+		for (const Variant &level : levels) {
+			MCPDebugEventStore::Severity severity;
+			if (level.get_type() != Variant::STRING || !_parse_severity(level, severity)) {
+				r_error = "levels contains an unknown severity.";
+				return false;
+			}
+			if (!r_options.levels.has(severity)) {
+				r_options.levels.push_back(severity);
+			}
+		}
+	}
+	return true;
+}
+
+static bool _matches(const MCPDebugEventStore::Event &p_event, const QueryOptions &p_options) {
+	if (p_event.sequence <= p_options.since_sequence || !_has_severity(p_options.levels, p_event.severity)) {
+		return false;
+	}
+	if (p_options.source != "all" && p_options.source != _source_name(p_event.source)) {
+		return false;
+	}
+	if (p_options.debugger_session >= 0 && p_event.debugger_session != p_options.debugger_session) {
+		return false;
+	}
+	if (p_options.runtime_generation > 0 && p_event.runtime_generation != p_options.runtime_generation) {
+		return false;
+	}
+	if (!p_options.query.is_empty()) {
+		const String haystack = (p_event.message + "\n" + p_event.description + "\n" + p_event.expression + "\n" + p_event.file + "\n" + p_event.function).to_lower();
+		if (!haystack.contains(p_options.query)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+static Vector<Group> _make_groups(const MCPDebugEventStore::Snapshot &p_snapshot, const QueryOptions &p_options,
+		int64_t &r_raw_count, uint64_t &r_next_sequence, bool &r_truncated) {
+	Vector<Group> groups;
+	HashMap<String, int> index_by_key;
+	r_raw_count = 0;
+	r_next_sequence = p_options.since_sequence;
+	r_truncated = false;
+	for (const MCPDebugEventStore::Event &event : p_snapshot.events) {
+		if (event.sequence <= p_options.since_sequence) {
+			continue;
+		}
+		if (!_matches(event, p_options)) {
+			r_next_sequence = event.sequence;
+			continue;
+		}
+		const String key = p_options.deduplicate ? _group_key(event) : String::num_uint64(event.sequence);
+		const int *existing = index_by_key.getptr(key);
+		if (existing) {
+			r_raw_count++;
+			r_next_sequence = event.sequence;
+			Group &group = groups.write[*existing];
+			group.count++;
+			group.last_sequence = event.sequence;
+			group.last_timestamp_usec = event.timestamp_usec;
+			group.representative = event;
+			continue;
+		}
+		if (groups.size() >= p_options.limit) {
+			r_truncated = true;
+			break;
+		}
+		r_raw_count++;
+		r_next_sequence = event.sequence;
+		Group group;
+		group.representative = event;
+		group.count = 1;
+		group.first_sequence = event.sequence;
+		group.last_sequence = event.sequence;
+		group.first_timestamp_usec = event.timestamp_usec;
+		group.last_timestamp_usec = event.timestamp_usec;
+		index_by_key.insert(key, groups.size());
+		groups.push_back(group);
+	}
+	return groups;
+}
+
+} // namespace
+
+namespace MCPDebugEventQuery {
+
+String make_error_id(const MCPDebugEventStore::Event &p_event) {
+	return "debug-" + String::num_uint64(p_event.sequence);
+}
+
+Array serialize_frames(const Vector<MCPDebugEventStore::Frame> &p_frames, int p_max_frames, bool &r_truncated) {
+	Array frames;
+	const int count = MIN(p_frames.size(), p_max_frames);
+	for (int i = 0; i < count; i++) {
+		frames.push_back(_frame_to_dictionary(p_frames[i], i));
+	}
+	r_truncated = p_frames.size() > count;
+	return frames;
+}
+
+Dictionary execute(MCPDebugEventStore *p_store, const Dictionary &p_arguments, bool p_errors_only) {
+	QueryOptions options;
+	String error;
+	if (!_parse_common_query(p_arguments, p_errors_only, options, error)) {
+		return MCPToolUtils::make_error_result("INVALID_ARGUMENTS", error);
+	}
+	const MCPDebugEventStore::Snapshot snapshot = p_store->snapshot();
+	int64_t raw_count = 0;
+	uint64_t next_sequence = options.since_sequence;
+	bool truncated = false;
+	Vector<Group> groups = _make_groups(snapshot, options, raw_count, next_sequence, truncated);
+	Array results;
+	for (int i = 0; i < groups.size(); i++) {
+		results.push_back(_group_to_dictionary(groups[i], options.include_stack));
+	}
+	Dictionary content;
+	content["generation"] = int64_t(snapshot.generation);
+	content["nextSequence"] = int64_t(next_sequence);
+	content["storeHighWatermark"] = int64_t(snapshot.next_sequence - 1);
+	content["dropped"] = int64_t(snapshot.dropped);
+	content["rawCount"] = raw_count;
+	content["groupCount"] = groups.size();
+	content["truncated"] = truncated;
+	content[p_errors_only ? "errors" : "groups"] = results;
+	return MCPToolUtils::make_success_result(content);
+}
+
+} // namespace MCPDebugEventQuery

@@ -38,6 +38,7 @@
 #include "core/io/file_access.h"
 #include "core/mcp/mcp_tool_registry.h"
 #include "editor/mcp/providers/mcp_gdscript_provider.h"
+#include "editor/mcp/providers/mcp_gdscript_request_parser.h"
 #include "editor/mcp/providers/mcp_gdscript_tool_utils.h"
 
 #endif
@@ -114,6 +115,48 @@ TEST_CASE("[MCP][Provider] GDScript tool utilities preserve position and complet
 	CHECK(MCPGDScriptToolUtils::completion_kind(ScriptLanguage::CODE_COMPLETION_KIND_KEYWORD) == LSP::CompletionItemKind::Keyword);
 	CHECK(MCPGDScriptToolUtils::completion_kind(ScriptLanguage::CODE_COMPLETION_KIND_PLAIN_TEXT) == LSP::CompletionItemKind::Text);
 	CHECK(MCPGDScriptToolUtils::completion_kind(ScriptLanguage::CODE_COMPLETION_KIND_MAX) == LSP::CompletionItemKind::Text);
+}
+
+TEST_CASE("[MCP][Provider] GDScript request parser adapts document selectors to LSP positions") {
+	Error temp_error = OK;
+	Ref<DirAccess> temporary_directory = DirAccess::create_temp("mcp_gdscript_request_parser", false, &temp_error);
+	REQUIRE(temp_error == OK);
+	REQUIRE(temporary_directory.is_valid());
+
+	Ref<GDScriptWorkspace> workspace;
+	workspace.instantiate();
+	const String project_root = temporary_directory->get_current_dir();
+	MCPGDScriptRequestParser parser(workspace, project_root);
+
+	Dictionary arguments;
+	arguments["path"] = "res://request_parser.gd";
+	arguments["position"] = Dictionary{ { "line", 7 }, { "character", 11 } };
+	String path;
+	String error;
+	LSP::TextDocumentPositionParams position;
+	CHECK(parser.parse_position(arguments, path, position, &error) == OK);
+	CHECK(path == "res://request_parser.gd");
+	CHECK(position.textDocument.uri == workspace->get_file_uri(path));
+	CHECK(position.position.line == 7);
+	CHECK(position.position.character == 11);
+
+	arguments.erase("position");
+	arguments["line"] = 3;
+	arguments["character"] = 5;
+	arguments["includeDeclaration"] = true;
+	LSP::ReferenceParams references;
+	CHECK(parser.parse_reference_position(arguments, path, references, &error) == OK);
+	CHECK(references.position.line == 3);
+	CHECK(references.position.character == 5);
+	CHECK(references.context.includeDeclaration);
+
+	arguments["uri"] = "file:///request_parser.gd";
+	CHECK(parser.parse_document_path(arguments, path, &error) == ERR_INVALID_PARAMETER);
+	CHECK(error == "Exactly one of path or uri is required.");
+	arguments.erase("uri");
+	arguments.erase("line");
+	CHECK(parser.parse_position(arguments, path, position, &error) == ERR_INVALID_PARAMETER);
+	CHECK(error == "Either position or both line and character are required.");
 }
 
 TEST_CASE("[MCP][Provider] GDScript semantic tools use injected analysis sessions") {

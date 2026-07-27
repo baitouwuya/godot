@@ -30,9 +30,9 @@
 
 #include "mcp_gdscript_provider.h"
 
+#include "mcp_gdscript_request_parser.h"
 #include "mcp_gdscript_tool_utils.h"
 #include "mcp_script_analysis_sync.h"
-#include "mcp_script_buffer.h"
 #include "mcp_tool_utils.h"
 #include "mcp_workspace_edit_transaction.h"
 
@@ -163,115 +163,18 @@ bool MCPGDScriptProvider::_prepare_document(const Dictionary &p_context, const S
 }
 
 bool MCPGDScriptProvider::_parse_path(const Dictionary &p_arguments, String &r_path, String &r_error) const {
-	const bool has_path = p_arguments.has("path");
-	const bool has_uri = p_arguments.has("uri");
-	if (has_path == has_uri) {
-		r_error = "Exactly one of path or uri is required.";
-		return false;
-	}
-
-	String raw_path;
-	if (has_path) {
-		if (!MCPGDScriptToolUtils::get_string_argument(p_arguments, "path", raw_path, r_error)) {
-			return false;
-		}
-	} else if (!MCPGDScriptToolUtils::get_string_argument(p_arguments, "uri", raw_path, r_error)) {
-		return false;
-	}
-	if (raw_path.is_empty()) {
-		r_error = "path or uri must not be empty.";
-		return false;
-	}
-
-	Ref<GDScriptWorkspace> workspace = _get_workspace();
-	if (has_uri || raw_path.begins_with("file:")) {
-		if (workspace.is_null()) {
-			r_error = "A configured GDScript workspace is required to resolve a file URI.";
-			return false;
-		}
-		r_path = workspace->get_file_path(raw_path);
-	} else {
-		r_path = raw_path;
-	}
-	if (r_path.is_empty()) {
-		r_error = "The script path could not be resolved.";
-		return false;
-	}
-
-	String resource_path;
-	String absolute_path;
-	bool built_in = false;
-	const Error path_error = MCPScriptBuffer::resolve_script_path_for_root(r_path, _get_project_root(), resource_path, absolute_path, built_in, &r_error);
-	if (path_error != OK) {
-		r_path = String();
-		return false;
-	}
-	r_path = resource_path;
-	return true;
+	const MCPGDScriptRequestParser parser(_get_workspace(), _get_project_root());
+	return parser.parse_document_path(p_arguments, r_path, &r_error) == OK;
 }
 
 bool MCPGDScriptProvider::_parse_position(const Dictionary &p_arguments, String &r_path, LSP::TextDocumentPositionParams &r_params, String &r_error) const {
-	if (!_parse_path(p_arguments, r_path, r_error)) {
-		return false;
-	}
-
-	int line = 0;
-	int character = 0;
-	const bool has_position = p_arguments.has("position");
-	const bool has_line = p_arguments.has("line");
-	const bool has_character = p_arguments.has("character");
-	if (has_position && (has_line || has_character)) {
-		r_error = "Use either position or top-level line and character, not both.";
-		return false;
-	}
-	if (!has_position && (!has_line || !has_character)) {
-		r_error = "Either position or both line and character are required.";
-		return false;
-	}
-
-	const Variant position_value = p_arguments.get("position", Variant());
-	if (has_position && position_value.get_type() != Variant::DICTIONARY) {
-		r_error = "position must be an object.";
-		return false;
-	}
-	if (has_position) {
-		const Dictionary position = position_value;
-		if (!MCPGDScriptToolUtils::get_position_argument(position, "line", line, r_error) || !MCPGDScriptToolUtils::get_position_argument(position, "character", character, r_error)) {
-			return false;
-		}
-	} else {
-		if (!MCPGDScriptToolUtils::get_position_argument(p_arguments, "line", line, r_error) || !MCPGDScriptToolUtils::get_position_argument(p_arguments, "character", character, r_error)) {
-			return false;
-		}
-	}
-
-	Ref<GDScriptWorkspace> workspace = _get_workspace();
-	Dictionary text_document;
-	text_document["uri"] = workspace->get_file_uri(r_path);
-	Dictionary position;
-	position["line"] = line;
-	position["character"] = character;
-	Dictionary request;
-	request["textDocument"] = text_document;
-	request["position"] = position;
-	r_params.load(request);
-	return true;
+	const MCPGDScriptRequestParser parser(_get_workspace(), _get_project_root());
+	return parser.parse_position(p_arguments, r_path, r_params, &r_error) == OK;
 }
 
 bool MCPGDScriptProvider::_parse_reference_position(const Dictionary &p_arguments, String &r_path, LSP::ReferenceParams &r_params, String &r_error) const {
-	LSP::TextDocumentPositionParams position_params;
-	if (!_parse_position(p_arguments, r_path, position_params, r_error)) {
-		return false;
-	}
-	r_params.textDocument = position_params.textDocument;
-	r_params.position = position_params.position;
-	const Variant include_declaration = p_arguments.get("includeDeclaration", false);
-	if (include_declaration.get_type() != Variant::BOOL) {
-		r_error = "includeDeclaration must be a boolean.";
-		return false;
-	}
-	r_params.context.includeDeclaration = include_declaration;
-	return true;
+	const MCPGDScriptRequestParser parser(_get_workspace(), _get_project_root());
+	return parser.parse_reference_position(p_arguments, r_path, r_params, &r_error) == OK;
 }
 
 Dictionary MCPGDScriptProvider::_metadata(const Ref<GDScriptAnalysisSession> &p_session, const String &p_path) const {

@@ -29,10 +29,17 @@
 /**************************************************************************/
 
 #include "editor/mcp/providers/mcp_runtime_debugger_wait.h"
+#include "editor/mcp/providers/mcp_runtime_debugger_gateway.h"
 #include "editor/mcp/providers/mcp_runtime_request_broker.h"
 #include "tests/test_macros.h"
 
 TEST_FORCE_LINK(test_mcp_runtime_debugger_wait);
+
+struct MCPRuntimeDebuggerGatewayTestAccess {
+	static MCPRuntimeRequestBroker &broker(MCPRuntimeDebuggerGateway &p_gateway) {
+		return p_gateway.request_broker;
+	}
+};
 
 namespace TestMCPRuntimeDebuggerWait {
 
@@ -73,7 +80,8 @@ TEST_CASE("[MCP][Provider] Runtime debugger wait reports terminal states without
 
 	debugger.completed = false;
 	debugger.stale = true;
-	CHECK(MCPRuntimeDebuggerWait::wait_until(&debugger, 0, [&]() { return debugger.completed; }, [&]() { return debugger.stale; }) == MCPRuntimeDebuggerWait::WAIT_STALE);
+	CHECK(MCPRuntimeDebuggerWait::wait_until(&debugger, 0, [&]() { return debugger.completed; },
+			  [&]() { return debugger.stale; }) == MCPRuntimeDebuggerWait::WAIT_STALE);
 	CHECK(debugger.poll_count == 0);
 
 	debugger.stale = false;
@@ -97,7 +105,8 @@ TEST_CASE("[MCP][Provider] Runtime debugger wait observes state changes produced
 
 	debugger = FakeDebugger();
 	debugger.stale_after_poll = true;
-	CHECK(MCPRuntimeDebuggerWait::wait_until(&debugger, MCPRuntimeDebuggerWait::deadline_from_timeout_msec(100), [&]() { return debugger.completed; }, [&]() { return debugger.stale; }) == MCPRuntimeDebuggerWait::WAIT_STALE);
+	CHECK(MCPRuntimeDebuggerWait::wait_until(&debugger, MCPRuntimeDebuggerWait::deadline_from_timeout_msec(100),
+			  [&]() { return debugger.completed; }, [&]() { return debugger.stale; }) == MCPRuntimeDebuggerWait::WAIT_STALE);
 	CHECK(debugger.poll_count == 1);
 
 	debugger = FakeDebugger();
@@ -146,18 +155,38 @@ TEST_CASE("[MCP][Provider] Runtime request broker preserves pending work after m
 	CHECK(broker.has_request(3, "request"));
 }
 
-TEST_CASE("[MCP][Provider] Runtime request broker clears buffered responses by owner and disconnect") {
+TEST_CASE("[MCP][Provider] Runtime request broker clears buffered responses by owner and cancellation") {
 	MCPRuntimeRequestBroker broker;
 	REQUIRE(broker.register_request(0, "owned", "query_nodes", "client-a"));
 	REQUIRE(broker.handle_response(0, Array{ "owned", "query_nodes", true, String(), String(), Dictionary() }));
 	broker.release_session("client-a");
 	CHECK_FALSE(broker.has_request(0, "owned"));
 
-	REQUIRE(broker.register_request(0, "disconnected", "query_nodes", "client-b"));
+	REQUIRE(broker.register_request(0, "cancelled", "query_nodes", "client-b"));
+	broker.cancel_request(0, "cancelled");
+	CHECK_FALSE(broker.has_request(0, "cancelled"));
+}
+
+TEST_CASE("[MCP][Provider] Runtime debugger gateway routes and releases shared broker responses") {
+	MCPRuntimeDebuggerGateway gateway(nullptr);
+	MCPRuntimeRequestBroker &broker = MCPRuntimeDebuggerGatewayTestAccess::broker(gateway);
+
+	REQUIRE(broker.register_request(1, "observation", "query_nodes", "client-a"));
+	CHECK(gateway.handle_response(1, Array{ "observation", "query_nodes", true, String(), String(), Dictionary() }));
 	MCPRuntimeRequestBroker::Response response;
-	CHECK(broker.wait_for_response(nullptr, 0, "disconnected", 100, response) ==
-			MCPRuntimeRequestBroker::WAIT_DISCONNECTED);
-	CHECK_FALSE(broker.has_request(0, "disconnected"));
+	CHECK(broker.take_response(1, "observation", response));
+
+	REQUIRE(broker.register_request(2, "input", "send", "client-b"));
+	CHECK(gateway.handle_response(2, Array{ "input", "send", true, String(), String(), Dictionary() }));
+	CHECK(broker.take_response(2, "input", response));
+
+	REQUIRE(broker.register_request(1, "owned-a", "query_nodes", "client-a"));
+	REQUIRE(broker.register_request(1, "owned-b", "query_nodes", "client-b"));
+	gateway.release_session_requests("client-a");
+	CHECK_FALSE(broker.has_request(1, "owned-a"));
+	CHECK(broker.has_request(1, "owned-b"));
+	gateway.clear_requests();
+	CHECK(broker.get_request_count() == 0);
 }
 
 } // namespace TestMCPRuntimeDebuggerWait

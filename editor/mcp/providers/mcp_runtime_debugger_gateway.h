@@ -30,11 +30,13 @@
 
 #pragma once
 
+#include "mcp_runtime_request_broker.h"
+
 #include "core/variant/dictionary.h"
 
 class MCPDebugCapture;
-class MCPRuntimeObservationDebuggerPlugin;
 class ScriptEditorDebugger;
+struct MCPRuntimeDebuggerGatewayTestAccess;
 
 class MCPRuntimeDebuggerGateway {
 public:
@@ -44,19 +46,42 @@ public:
 		uint64_t runtime_generation = 0;
 	};
 
+	enum RoundTripStatus {
+		ROUND_TRIP_COMPLETED,
+		ROUND_TRIP_BUSY,
+		ROUND_TRIP_TIMEOUT,
+		ROUND_TRIP_DISCONNECTED,
+		ROUND_TRIP_STALE,
+		ROUND_TRIP_REMOTE_ERROR,
+	};
+
+	struct RoundTripResult {
+		RoundTripStatus status = ROUND_TRIP_DISCONNECTED;
+		MCPRuntimeRequestBroker::Response response;
+		String message;
+	};
+
 private:
 	MCPDebugCapture *debug_capture = nullptr;
-	MCPRuntimeObservationDebuggerPlugin *response_plugin = nullptr;
+	MCPRuntimeRequestBroker request_broker;
+
+	friend struct MCPRuntimeDebuggerGatewayTestAccess;
+
 public:
 	explicit MCPRuntimeDebuggerGateway(MCPDebugCapture *p_debug_capture);
 
 	Dictionary resolve_session(const Dictionary &p_arguments, bool p_require_generation, Session &r_session) const;
+	bool resolve_current_session(int p_debugger_session, uint64_t p_runtime_generation, Session &r_session) const;
 	Dictionary request(const Dictionary &p_arguments, const String &p_capture, const String &p_operation,
-			const Dictionary &p_payload, bool p_require_generation = false) const;
+			const Dictionary &p_payload, bool p_require_generation = false);
+	RoundTripResult round_trip(const Session &p_session, const String &p_mcp_session_id, const String &p_request_id_prefix,
+			const String &p_message, const String &p_operation, const Array &p_arguments, int p_timeout_msec);
 	Dictionary make_session_identity(int p_debugger_session, uint64_t p_runtime_generation) const;
 	bool get_runtime_generation(int p_debugger_session, uint64_t &r_runtime_generation) const;
 	bool is_runtime_current(int p_debugger_session, uint64_t p_runtime_generation) const;
 	bool send_message(int p_debugger_session, const String &p_message, const Array &p_arguments) const;
-
-	void set_response_plugin(MCPRuntimeObservationDebuggerPlugin *p_plugin) { response_plugin = p_plugin; }
+	void broadcast_message(const String &p_message, const Array &p_arguments) const;
+	bool handle_response(int p_debugger_session, const Array &p_data);
+	void release_session_requests(const String &p_mcp_session_id);
+	void clear_requests();
 };

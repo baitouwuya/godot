@@ -31,7 +31,7 @@
 #include "mcp_runtime_debugger_gateway.h"
 
 #include "mcp_debug_capture.h"
-#include "mcp_runtime_observation_debugger_plugin.h"
+#include "mcp_runtime_debugger_wait.h"
 #include "mcp_tool_utils.h"
 
 #include "editor/debugger/editor_debugger_node.h"
@@ -116,8 +116,90 @@ Dictionary MCPRuntimeDebuggerGateway::resolve_session(const Dictionary &p_argume
 	return Dictionary();
 }
 
+bool MCPRuntimeDebuggerGateway::resolve_current_session(int p_debugger_session, uint64_t p_runtime_generation,
+		Session &r_session) const {
+	r_session = Session();
+	EditorDebuggerNode *debugger_node = EditorDebuggerNode::get_singleton();
+	if (!debugger_node || p_debugger_session < 0 || p_debugger_session >= debugger_node->get_debugger_count() ||
+			!is_runtime_current(p_debugger_session, p_runtime_generation)) {
+		return false;
+	}
+	ScriptEditorDebugger *debugger = debugger_node->get_debugger(p_debugger_session);
+	if (!debugger || !debugger->is_session_active()) {
+		return false;
+	}
+	r_session.debugger = debugger;
+	r_session.debugger_session = p_debugger_session;
+	r_session.runtime_generation = p_runtime_generation;
+	return true;
+}
+
+MCPRuntimeDebuggerGateway::RoundTripResult MCPRuntimeDebuggerGateway::round_trip(const Session &p_session,
+		const String &p_mcp_session_id, const String &p_request_id_prefix, const String &p_message,
+		const String &p_operation, const Array &p_arguments, int p_timeout_msec) {
+	RoundTripResult result;
+	if (!p_session.debugger || !p_session.debugger->is_session_active()) {
+		result.status = ROUND_TRIP_DISCONNECTED;
+		result.message = "The running project debugger is not connected.";
+		return result;
+	}
+	if (!is_runtime_current(p_session.debugger_session, p_session.runtime_generation)) {
+		result.status = ROUND_TRIP_STALE;
+		result.message = "The running project restarted before the debugger request was sent.";
+		return result;
+	}
+
+	const String request_id = request_broker.create_request_id(p_request_id_prefix);
+	if (!request_broker.register_request(p_session.debugger_session, request_id, p_operation, p_mcp_session_id)) {
+		result.status = ROUND_TRIP_BUSY;
+		result.message = "The runtime debugger request limit is full.";
+		return result;
+	}
+	Array arguments = p_arguments.duplicate();
+	arguments.push_front(request_id);
+	p_session.debugger->send_message(p_message, arguments);
+
+	const uint64_t deadline = MCPRuntimeDebuggerWait::deadline_from_timeout_msec(p_timeout_msec);
+	const MCPRuntimeDebuggerWait::WaitStatus wait_status = MCPRuntimeDebuggerWait::wait_until(
+			p_session.debugger,
+			deadline,
+			[&]() { return request_broker.take_response(p_session.debugger_session, request_id, result.response); },
+			[&]() { return !is_runtime_current(p_session.debugger_session, p_session.runtime_generation); });
+	if (wait_status != MCPRuntimeDebuggerWait::WAIT_COMPLETED) {
+		request_broker.cancel_request(p_session.debugger_session, request_id);
+	}
+	switch (wait_status) {
+		case MCPRuntimeDebuggerWait::WAIT_TIMEOUT:
+			result.status = ROUND_TRIP_TIMEOUT;
+			result.message = "Timed out waiting for the running project's debugger response.";
+			return result;
+		case MCPRuntimeDebuggerWait::WAIT_DISCONNECTED:
+			result.status = ROUND_TRIP_DISCONNECTED;
+			result.message = "The running project stopped before returning the debugger response.";
+			return result;
+		case MCPRuntimeDebuggerWait::WAIT_STALE:
+			result.status = ROUND_TRIP_STALE;
+			result.message = "The running project restarted while resolving the debugger request.";
+			return result;
+		case MCPRuntimeDebuggerWait::WAIT_COMPLETED:
+			break;
+	}
+	if (!is_runtime_current(p_session.debugger_session, p_session.runtime_generation)) {
+		result.status = ROUND_TRIP_STALE;
+		result.message = "The running project restarted while resolving the debugger request.";
+		return result;
+	}
+	if (!result.response.ok) {
+		result.status = ROUND_TRIP_REMOTE_ERROR;
+		result.message = result.response.message.is_empty() ? result.response.code : result.response.message;
+		return result;
+	}
+	result.status = ROUND_TRIP_COMPLETED;
+	return result;
+}
+
 Dictionary MCPRuntimeDebuggerGateway::request(const Dictionary &p_arguments, const String &p_capture, const String &p_operation,
-		const Dictionary &p_payload, bool p_require_generation) const {
+		const Dictionary &p_payload, bool p_require_generation) {
 	int timeout_msec = DEFAULT_REQUEST_TIMEOUT_MSEC;
 	if (!_read_timeout(p_arguments, timeout_msec)) {
 		return _error("INVALID_ARGUMENTS", vformat("timeoutMs must be an integer between 50 and %d for runtime observations.", MAX_REQUEST_TIMEOUT_MSEC));
@@ -127,32 +209,27 @@ Dictionary MCPRuntimeDebuggerGateway::request(const Dictionary &p_arguments, con
 	if (!session_error.is_empty()) {
 		return session_error;
 	}
-	if (!response_plugin) {
-		return _error("RUNTIME_DEBUGGER_UNAVAILABLE", "The MCP runtime debugger response plugin is not active.");
+	const RoundTripResult round_trip_result = round_trip(
+			session, String(), "observation", p_capture + ":" + p_operation, p_operation, Array{ p_payload }, timeout_msec);
+	if (round_trip_result.status == ROUND_TRIP_BUSY) {
+		return _error("RUNTIME_DEBUGGER_BUSY", round_trip_result.message);
 	}
-	const String request_id = response_plugin->create_request_id("observation");
-	if (!response_plugin->register_request(session.debugger_session, request_id, p_operation)) {
-		return _error("RUNTIME_DEBUGGER_BUSY", "Unable to reserve a runtime debugger request.");
+	if (round_trip_result.status == ROUND_TRIP_TIMEOUT) {
+		return _error("RUNTIME_TIMEOUT", round_trip_result.message);
 	}
-	session.debugger->send_message(p_capture + ":" + p_operation, Array{ request_id, p_payload });
-	MCPRuntimeObservationDebuggerPlugin::Response response;
-	const MCPRuntimeObservationDebuggerPlugin::WaitStatus wait_status = response_plugin->wait_for_response(
-			session.debugger, session.debugger_session, request_id, timeout_msec, response);
-	if (wait_status == MCPRuntimeRequestBroker::WAIT_TIMEOUT) {
-		return _error("RUNTIME_TIMEOUT", "Timed out waiting for the running project's debugger response.");
+	if (round_trip_result.status == ROUND_TRIP_DISCONNECTED) {
+		return _error("RUNTIME_NOT_RUNNING", round_trip_result.message);
 	}
-	if (wait_status == MCPRuntimeRequestBroker::WAIT_DISCONNECTED) {
-		return _error("RUNTIME_NOT_RUNNING", "The running project stopped before returning the debugger response.");
+	if (round_trip_result.status == ROUND_TRIP_STALE) {
+		return _error("STALE_RUNTIME", round_trip_result.message);
 	}
-	if (!is_runtime_current(session.debugger_session, session.runtime_generation)) {
-		return _error("STALE_RUNTIME", "The running project restarted while resolving runtime targets.");
-	}
-	if (!response.ok) {
+	if (round_trip_result.status == ROUND_TRIP_REMOTE_ERROR) {
+		const MCPRuntimeRequestBroker::Response &response = round_trip_result.response;
 		return MCPToolUtils::make_error_result(response.code.is_empty() ? "RUNTIME_DEBUGGER_REQUEST_FAILED" : response.code,
 				response.message.is_empty() ? "Runtime debugger request failed." : response.message, response.data);
 	}
 	Dictionary result = make_session_identity(session.debugger_session, session.runtime_generation);
-	result.merge(response.data, true);
+	result.merge(round_trip_result.response.data, true);
 	return MCPToolUtils::make_success_result(result);
 }
 
@@ -181,4 +258,29 @@ bool MCPRuntimeDebuggerGateway::send_message(int p_debugger_session, const Strin
 	}
 	debugger->send_message(p_message, p_arguments);
 	return true;
+}
+
+void MCPRuntimeDebuggerGateway::broadcast_message(const String &p_message, const Array &p_arguments) const {
+	EditorDebuggerNode *debugger_node = EditorDebuggerNode::get_singleton();
+	if (!debugger_node) {
+		return;
+	}
+	for (int i = 0; i < debugger_node->get_debugger_count(); i++) {
+		ScriptEditorDebugger *debugger = debugger_node->get_debugger(i);
+		if (debugger && debugger->is_session_active()) {
+			debugger->send_message(p_message, p_arguments);
+		}
+	}
+}
+
+bool MCPRuntimeDebuggerGateway::handle_response(int p_debugger_session, const Array &p_data) {
+	return request_broker.handle_response(p_debugger_session, p_data);
+}
+
+void MCPRuntimeDebuggerGateway::release_session_requests(const String &p_mcp_session_id) {
+	request_broker.release_session(p_mcp_session_id);
+}
+
+void MCPRuntimeDebuggerGateway::clear_requests() {
+	request_broker.clear();
 }

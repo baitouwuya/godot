@@ -82,8 +82,9 @@ Error MCPBuiltinFeatures::initialize() {
 	runtime_debug_service = memnew(MCPRuntimeDebugService(debug_capture));
 	runtime_input_debugger_plugin.instantiate();
 	runtime_input_debugger_plugin->set_scheduler(runtime_debug_service->get_input_scheduler());
+	runtime_input_debugger_plugin->set_runtime_gateway(runtime_debug_service->get_runtime_gateway());
 	runtime_observation_debugger_plugin.instantiate();
-	runtime_debug_service->set_observation_plugin(runtime_observation_debugger_plugin.ptr());
+	runtime_observation_debugger_plugin->set_runtime_gateway(runtime_debug_service->get_runtime_gateway());
 	runtime_provider = memnew(MCPRuntimeProvider(runtime_debug_service));
 	trace_service = memnew(MCPTraceService);
 	harness_provider = memnew(MCPHarnessProvider);
@@ -196,8 +197,8 @@ void MCPBuiltinFeatures::stop_debug_capture() {
 }
 
 void MCPBuiltinFeatures::clear_runtime_requests() {
-	if (runtime_observation_debugger_plugin.is_valid()) {
-		runtime_observation_debugger_plugin->clear_requests();
+	if (runtime_debug_service) {
+		runtime_debug_service->clear_runtime_requests();
 	}
 }
 
@@ -205,11 +206,12 @@ void MCPBuiltinFeatures::_reset() {
 	feature_set.clear();
 	clear_runtime_requests();
 	stop_debug_capture();
-	if (runtime_debug_service) {
-		runtime_debug_service->set_observation_plugin(nullptr);
+	if (runtime_observation_debugger_plugin.is_valid()) {
+		runtime_observation_debugger_plugin->set_runtime_gateway(nullptr);
 	}
 	if (runtime_input_debugger_plugin.is_valid()) {
 		runtime_input_debugger_plugin->set_scheduler(nullptr);
+		runtime_input_debugger_plugin->set_runtime_gateway(nullptr);
 	}
 	runtime_observation_debugger_plugin.unref();
 	runtime_input_debugger_plugin.unref();

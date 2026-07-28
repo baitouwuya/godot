@@ -33,14 +33,12 @@
 #include "mcp_runtime_debugger_gateway.h"
 #include "mcp_runtime_input_scheduler.h"
 
-class MCPDebugCapture;
-
 class MCPRuntimeInputService {
 	MCPRuntimeDebuggerGateway *runtime_gateway = nullptr;
 	MCPRuntimeInputScheduler input_scheduler;
 
 public:
-	MCPRuntimeInputService(MCPRuntimeDebuggerGateway *p_runtime_gateway, MCPDebugCapture *p_debug_capture);
+	explicit MCPRuntimeInputService(MCPRuntimeDebuggerGateway *p_runtime_gateway);
 
 	Dictionary dispatch_target_events(const Dictionary &p_arguments, const String &p_mcp_session_id,
 			const Array &p_events, const Dictionary &p_metadata);

@@ -30,24 +30,14 @@
 
 #pragma once
 
-#include "mcp_runtime_debugger_wait.h"
-
 #include "core/string/ustring.h"
 #include "core/templates/hash_map.h"
 #include "core/variant/array.h"
 #include "core/variant/dictionary.h"
 
-class ScriptEditorDebugger;
-
 // Correlates short debugger round trips and exposes non-blocking response access.
 class MCPRuntimeRequestBroker {
 public:
-	using WaitStatus = MCPRuntimeDebuggerWait::WaitStatus;
-	static constexpr WaitStatus WAIT_COMPLETED = MCPRuntimeDebuggerWait::WAIT_COMPLETED;
-	static constexpr WaitStatus WAIT_TIMEOUT = MCPRuntimeDebuggerWait::WAIT_TIMEOUT;
-	static constexpr WaitStatus WAIT_DISCONNECTED = MCPRuntimeDebuggerWait::WAIT_DISCONNECTED;
-	static constexpr WaitStatus WAIT_STALE = MCPRuntimeDebuggerWait::WAIT_STALE;
-
 	struct Response {
 		String operation;
 		bool ok = false;
@@ -82,8 +72,6 @@ public:
 			const String &p_mcp_session_id = String());
 	bool handle_response(int p_debugger_session, const Array &p_data);
 	bool take_response(int p_debugger_session, const String &p_request_id, Response &r_response);
-	WaitStatus wait_for_response(ScriptEditorDebugger *p_debugger, int p_debugger_session, const String &p_request_id,
-			int p_timeout_msec, Response &r_response);
 	void cancel_request(int p_debugger_session, const String &p_request_id);
 	void release_session(const String &p_mcp_session_id);
 	void clear();

@@ -30,32 +30,21 @@
 
 #pragma once
 
-#include "mcp_runtime_request_broker.h"
-
 #include "editor/debugger/editor_debugger_plugin.h"
 
-class ScriptEditorDebugger;
+class MCPRuntimeDebuggerGateway;
 
 class MCPRuntimeObservationDebuggerPlugin : public EditorDebuggerPlugin {
 	GDCLASS(MCPRuntimeObservationDebuggerPlugin, EditorDebuggerPlugin);
 
 private:
-	MCPRuntimeRequestBroker request_broker;
+	MCPRuntimeDebuggerGateway *runtime_gateway = nullptr;
 
 protected:
 	static void _bind_methods();
 
 public:
-	using Response = MCPRuntimeRequestBroker::Response;
-	using WaitStatus = MCPRuntimeRequestBroker::WaitStatus;
-
 	bool capture(const String &p_message, const Array &p_data, int p_session) override;
 	bool has_capture(const String &p_capture) const override;
-	bool register_request(int p_session, const String &p_request_id, const String &p_operation);
-	bool take_response(int p_session, const String &p_request_id, Response &r_response);
-	WaitStatus wait_for_response(ScriptEditorDebugger *p_debugger, int p_session, const String &p_request_id,
-			int p_timeout_msec, Response &r_response);
-	String create_request_id(const String &p_prefix) { return request_broker.create_request_id(p_prefix); }
-	void cancel_request(int p_session, const String &p_request_id);
-	void clear_requests();
+	void set_runtime_gateway(MCPRuntimeDebuggerGateway *p_runtime_gateway) { runtime_gateway = p_runtime_gateway; }
 };

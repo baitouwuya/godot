@@ -32,11 +32,13 @@
 #include "editor/debugger/editor_debugger_plugin.h"
 
 class MCPRuntimeInputScheduler;
+class MCPRuntimeDebuggerGateway;
 
 class MCPRuntimeInputDebuggerPlugin : public EditorDebuggerPlugin {
 	GDCLASS(MCPRuntimeInputDebuggerPlugin, EditorDebuggerPlugin);
 
 	MCPRuntimeInputScheduler *scheduler = nullptr;
+	MCPRuntimeDebuggerGateway *runtime_gateway = nullptr;
 
 protected:
 	static void _bind_methods();
@@ -45,4 +47,5 @@ public:
 	bool capture(const String &p_message, const Array &p_data, int p_session) override;
 	bool has_capture(const String &p_capture) const override;
 	void set_scheduler(MCPRuntimeInputScheduler *p_scheduler);
+	void set_runtime_gateway(MCPRuntimeDebuggerGateway *p_runtime_gateway);
 };

@@ -81,10 +81,10 @@ MCPRuntimeJobService::Config _performance_job_config() {
 MCPRuntimeDebugService::MCPRuntimeDebugService(MCPDebugCapture *p_debug_capture) :
 		runtime_gateway(p_debug_capture),
 		observation_service(&runtime_gateway),
-		remote_scene_service(&runtime_gateway),
-		condition_jobs(&runtime_gateway, _condition_job_config()),
-		performance_jobs(&runtime_gateway, _performance_job_config()),
-		input_service(&runtime_gateway, p_debug_capture),
+			remote_scene_service(&runtime_gateway),
+			condition_jobs(&runtime_gateway, _condition_job_config()),
+			performance_jobs(&runtime_gateway, _performance_job_config()),
+			input_service(&runtime_gateway),
 		target_action_service(&runtime_gateway, &input_service) {
 }
 

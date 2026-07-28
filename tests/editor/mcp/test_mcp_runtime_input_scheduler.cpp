@@ -45,20 +45,12 @@ struct MCPRuntimeInputSchedulerTestAccess {
 		return true;
 	}
 
-	static void add_response(MCPRuntimeInputScheduler &p_scheduler, const String &p_id, const String &p_session_id) {
-		REQUIRE(p_scheduler.request_broker.register_request(0, p_id, "test", p_session_id));
-	}
-
 	static int max_retained_sequences() {
 		return MCPRuntimeInputScheduler::MAX_RETAINED_SEQUENCES;
 	}
 
 	static int sequence_count(const MCPRuntimeInputScheduler &p_scheduler) {
 		return p_scheduler.sequences.size();
-	}
-
-	static int response_count(const MCPRuntimeInputScheduler &p_scheduler) {
-		return p_scheduler.request_broker.get_request_count();
 	}
 
 	static int sequence_order_count(const MCPRuntimeInputScheduler &p_scheduler) {
@@ -69,15 +61,20 @@ struct MCPRuntimeInputSchedulerTestAccess {
 		return p_scheduler.sequences.has(p_id);
 	}
 
-	static bool has_response(const MCPRuntimeInputScheduler &p_scheduler, const String &p_id) {
-		return p_scheduler.request_broker.has_request(0, p_id);
+	static void activate(MCPRuntimeInputScheduler &p_scheduler) {
+		p_scheduler.active_epoch = true;
+	}
+
+	static bool is_active(const MCPRuntimeInputScheduler &p_scheduler) {
+		return p_scheduler.active_epoch;
 	}
 };
 
 namespace TestMCPRuntimeInputScheduler {
 
 TEST_CASE("[MCP][Provider] Runtime input scheduler bounds retained terminal sequences") {
-	MCPRuntimeInputScheduler scheduler(nullptr);
+	MCPRuntimeDebuggerGateway gateway(nullptr);
+	MCPRuntimeInputScheduler scheduler(&gateway);
 	const int retained_limit = MCPRuntimeInputSchedulerTestAccess::max_retained_sequences();
 	for (int i = 0; i < retained_limit * 4; i++) {
 		CHECK(MCPRuntimeInputSchedulerTestAccess::retain_sequence(scheduler, "terminal-" + itos(i), "session", "completed"));
@@ -90,7 +87,8 @@ TEST_CASE("[MCP][Provider] Runtime input scheduler bounds retained terminal sequ
 }
 
 TEST_CASE("[MCP][Provider] Runtime input scheduler preserves active sequences at the retention limit") {
-	MCPRuntimeInputScheduler scheduler(nullptr);
+	MCPRuntimeDebuggerGateway gateway(nullptr);
+	MCPRuntimeInputScheduler scheduler(&gateway);
 	const int retained_limit = MCPRuntimeInputSchedulerTestAccess::max_retained_sequences();
 	for (int i = 0; i < retained_limit; i++) {
 		REQUIRE(MCPRuntimeInputSchedulerTestAccess::retain_sequence(scheduler, "active-" + itos(i), "session", "running"));
@@ -101,23 +99,23 @@ TEST_CASE("[MCP][Provider] Runtime input scheduler preserves active sequences at
 }
 
 TEST_CASE("[MCP][Provider] Runtime input scheduler releases local session and shutdown state") {
-	MCPRuntimeInputScheduler scheduler(nullptr);
+	MCPRuntimeDebuggerGateway gateway(nullptr);
+	MCPRuntimeInputScheduler scheduler(&gateway);
 	REQUIRE(MCPRuntimeInputSchedulerTestAccess::retain_sequence(scheduler, "sequence-a", "session-a", "running"));
 	REQUIRE(MCPRuntimeInputSchedulerTestAccess::retain_sequence(scheduler, "sequence-b", "session-b", "running"));
-	MCPRuntimeInputSchedulerTestAccess::add_response(scheduler, "response-a", "session-a");
-	MCPRuntimeInputSchedulerTestAccess::add_response(scheduler, "response-b", "session-b");
 
 	scheduler.release_mcp_session("session-a");
 	CHECK_FALSE(MCPRuntimeInputSchedulerTestAccess::has_sequence(scheduler, "sequence-a"));
-	CHECK_FALSE(MCPRuntimeInputSchedulerTestAccess::has_response(scheduler, "response-a"));
 	CHECK(MCPRuntimeInputSchedulerTestAccess::has_sequence(scheduler, "sequence-b"));
-	CHECK(MCPRuntimeInputSchedulerTestAccess::has_response(scheduler, "response-b"));
 	CHECK(MCPRuntimeInputSchedulerTestAccess::sequence_order_count(scheduler) == 1);
 
+	MCPRuntimeInputSchedulerTestAccess::activate(scheduler);
 	scheduler.release_all();
 	CHECK(MCPRuntimeInputSchedulerTestAccess::sequence_count(scheduler) == 0);
-	CHECK(MCPRuntimeInputSchedulerTestAccess::response_count(scheduler) == 0);
 	CHECK(MCPRuntimeInputSchedulerTestAccess::sequence_order_count(scheduler) == 0);
+	CHECK_FALSE(MCPRuntimeInputSchedulerTestAccess::is_active(scheduler));
+	scheduler.release_all();
+	CHECK_FALSE(MCPRuntimeInputSchedulerTestAccess::is_active(scheduler));
 }
 
 } // namespace TestMCPRuntimeInputScheduler

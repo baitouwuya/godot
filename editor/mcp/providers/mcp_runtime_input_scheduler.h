@@ -29,14 +29,12 @@
 
 #pragma once
 
+#include "mcp_runtime_debugger_gateway.h"
 #include "mcp_runtime_input_sequence.h"
-#include "mcp_runtime_request_broker.h"
 
 #include "core/templates/hash_map.h"
 #include "core/templates/vector.h"
 
-class MCPDebugCapture;
-class ScriptEditorDebugger;
 struct MCPRuntimeInputSchedulerTestAccess;
 
 class MCPRuntimeInputScheduler {
@@ -51,15 +49,15 @@ class MCPRuntimeInputScheduler {
 	static constexpr int MAX_RETAINED_SEQUENCES = 128;
 	static constexpr uint64_t HEARTBEAT_INTERVAL_USEC = 1000 * 1000;
 
-	MCPDebugCapture *debug_capture = nullptr;
-	MCPRuntimeRequestBroker request_broker;
+	MCPRuntimeDebuggerGateway *runtime_gateway = nullptr;
 	HashMap<String, SequenceRecord> sequences;
 	Vector<String> sequence_order;
 	uint64_t next_sequence_id = 1;
 	uint64_t last_heartbeat_usec = 0;
+	bool active_epoch = false;
 
-	bool _resolve_debugger(int p_debugger_session, uint64_t p_runtime_generation, ScriptEditorDebugger *&r_debugger) const;
-	Error _request(const String &p_mcp_session_id, ScriptEditorDebugger *p_debugger, const String &p_message, const String &p_operation, const Array &p_arguments,
+	Error _request(const String &p_mcp_session_id, const MCPRuntimeDebuggerGateway::Session &p_session,
+			const String &p_message, const String &p_operation, const Array &p_arguments,
 			Dictionary &r_data, String &r_error, int p_timeout_msec = RESPONSE_TIMEOUT_MSEC);
 	static bool _is_terminal(const SequenceRecord &p_record);
 	bool _prepare_sequence_capacity();
@@ -71,22 +69,22 @@ class MCPRuntimeInputScheduler {
 	friend struct MCPRuntimeInputSchedulerTestAccess;
 
 public:
-	explicit MCPRuntimeInputScheduler(MCPDebugCapture *p_debug_capture);
+	explicit MCPRuntimeInputScheduler(MCPRuntimeDebuggerGateway *p_runtime_gateway);
 	~MCPRuntimeInputScheduler();
 
-	Error dispatch_immediate(const String &p_mcp_session_id, ScriptEditorDebugger *p_debugger, int p_debugger_session,
-			uint64_t p_runtime_generation, const Vector<MCPRuntimeInput::EncodedEvent> &p_events, int &r_dispatched,
+	Error dispatch_immediate(const String &p_mcp_session_id, const MCPRuntimeDebuggerGateway::Session &p_session,
+			const Vector<MCPRuntimeInput::EncodedEvent> &p_events, int &r_dispatched,
 			String &r_error, int p_timeout_msec = RESPONSE_TIMEOUT_MSEC);
-	Error start_sequence(const String &p_mcp_session_id, int p_debugger_session, uint64_t p_runtime_generation,
+	Error start_sequence(const String &p_mcp_session_id, const MCPRuntimeDebuggerGateway::Session &p_session,
 			const Vector<MCPRuntimeInputSequence::Step> &p_steps, Dictionary &r_result, String &r_error,
 			int p_timeout_msec = RESPONSE_TIMEOUT_MSEC);
 	Error get_sequence(const String &p_mcp_session_id, const String &p_sequence_id, Dictionary &r_result, String &r_error);
-	Error cancel_sequence(const String &p_mcp_session_id, const String &p_sequence_id, int p_debugger_session,
-			uint64_t p_runtime_generation, Dictionary &r_result, String &r_error);
-	Error release_session_inputs(const String &p_mcp_session_id, int p_debugger_session, uint64_t p_runtime_generation,
+	Error cancel_sequence(const String &p_mcp_session_id, const String &p_sequence_id,
+			const MCPRuntimeDebuggerGateway::Session &p_session, Dictionary &r_result, String &r_error);
+	Error release_session_inputs(const String &p_mcp_session_id, const MCPRuntimeDebuggerGateway::Session &p_session,
 			bool p_cancel_sequences, int &r_released, String &r_error);
 	void release_mcp_session(const String &p_mcp_session_id);
 	void release_all();
 	void process();
-	bool handle_runtime_message(int p_debugger_session, const String &p_message, const Array &p_data);
+	bool handle_sequence_message(int p_debugger_session, const String &p_message, const Array &p_data);
 };

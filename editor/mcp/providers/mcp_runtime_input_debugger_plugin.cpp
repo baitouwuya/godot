@@ -29,13 +29,20 @@
 
 #include "mcp_runtime_input_debugger_plugin.h"
 
+#include "mcp_runtime_debugger_gateway.h"
 #include "mcp_runtime_input_scheduler.h"
 
 void MCPRuntimeInputDebuggerPlugin::_bind_methods() {
 }
 
 bool MCPRuntimeInputDebuggerPlugin::capture(const String &p_message, const Array &p_data, int p_session) {
-	return scheduler ? scheduler->handle_runtime_message(p_session, p_message, p_data) : true;
+	if (p_message == "mcp_input:response") {
+		if (runtime_gateway) {
+			runtime_gateway->handle_response(p_session, p_data);
+		}
+		return true;
+	}
+	return scheduler ? scheduler->handle_sequence_message(p_session, p_message, p_data) : true;
 }
 
 bool MCPRuntimeInputDebuggerPlugin::has_capture(const String &p_capture) const {
@@ -44,4 +51,8 @@ bool MCPRuntimeInputDebuggerPlugin::has_capture(const String &p_capture) const {
 
 void MCPRuntimeInputDebuggerPlugin::set_scheduler(MCPRuntimeInputScheduler *p_scheduler) {
 	scheduler = p_scheduler;
+}
+
+void MCPRuntimeInputDebuggerPlugin::set_runtime_gateway(MCPRuntimeDebuggerGateway *p_runtime_gateway) {
+	runtime_gateway = p_runtime_gateway;
 }

@@ -55,8 +55,8 @@ bool _target_timeout_from_arguments(const Dictionary &p_arguments, int &r_timeou
 
 } // namespace
 
-MCPRuntimeInputService::MCPRuntimeInputService(MCPRuntimeDebuggerGateway *p_runtime_gateway, MCPDebugCapture *p_debug_capture) :
-		input_scheduler(p_debug_capture) {
+MCPRuntimeInputService::MCPRuntimeInputService(MCPRuntimeDebuggerGateway *p_runtime_gateway) :
+		input_scheduler(p_runtime_gateway) {
 	runtime_gateway = p_runtime_gateway;
 }
 
@@ -88,8 +88,8 @@ Dictionary MCPRuntimeInputService::dispatch_target_events(const Dictionary &p_ar
 	}
 	int dispatched = 0;
 	String dispatch_error;
-	if (input_scheduler.dispatch_immediate(p_mcp_session_id, session.debugger, session.debugger_session,
-				session.runtime_generation, encoded_events, dispatched, dispatch_error, timeout_msec) != OK) {
+	if (input_scheduler.dispatch_immediate(p_mcp_session_id, session, encoded_events, dispatched, dispatch_error,
+				timeout_msec) != OK) {
 		return _error("RUNTIME_INPUT_FAILED", dispatch_error);
 	}
 	Dictionary result = runtime_gateway->make_session_identity(session.debugger_session, session.runtime_generation);
@@ -117,8 +117,7 @@ Dictionary MCPRuntimeInputService::start_target_sequence(const Dictionary &p_arg
 	}
 	Dictionary result;
 	String scheduler_error;
-	const Error error = input_scheduler.start_sequence(p_mcp_session_id, session.debugger_session,
-			session.runtime_generation, steps, result, scheduler_error, timeout_msec);
+	const Error error = input_scheduler.start_sequence(p_mcp_session_id, session, steps, result, scheduler_error, timeout_msec);
 	if (error != OK) {
 		return _error(error == ERR_BUSY ? "INPUT_SEQUENCE_BUSY" : "INPUT_SEQUENCE_FAILED", scheduler_error);
 	}
@@ -155,8 +154,7 @@ Dictionary MCPRuntimeInputService::send_input(const Dictionary &p_arguments, con
 	}
 	int dispatched = 0;
 	String dispatch_error;
-	if (input_scheduler.dispatch_immediate(p_mcp_session_id, session.debugger, session.debugger_session,
-				session.runtime_generation, encoded_events, dispatched, dispatch_error) != OK) {
+	if (input_scheduler.dispatch_immediate(p_mcp_session_id, session, encoded_events, dispatched, dispatch_error) != OK) {
 		return _error("RUNTIME_INPUT_FAILED", dispatch_error);
 	}
 	Dictionary result = runtime_gateway->make_session_identity(session.debugger_session, session.runtime_generation);
@@ -182,8 +180,7 @@ Dictionary MCPRuntimeInputService::start_sequence(const Dictionary &p_arguments,
 	}
 	Dictionary result;
 	String scheduler_error;
-	const Error error = input_scheduler.start_sequence(p_mcp_session_id, session.debugger_session,
-			session.runtime_generation, steps, result, scheduler_error);
+	const Error error = input_scheduler.start_sequence(p_mcp_session_id, session, steps, result, scheduler_error);
 	if (error != OK) {
 		return _error(error == ERR_BUSY ? "INPUT_SEQUENCE_BUSY" : "INPUT_SEQUENCE_FAILED", scheduler_error);
 	}
@@ -216,8 +213,7 @@ Dictionary MCPRuntimeInputService::cancel_sequence(const Dictionary &p_arguments
 	}
 	Dictionary result;
 	String scheduler_error;
-	const Error error = input_scheduler.cancel_sequence(p_mcp_session_id, sequence_value, session.debugger_session,
-			session.runtime_generation, result, scheduler_error);
+	const Error error = input_scheduler.cancel_sequence(p_mcp_session_id, sequence_value, session, result, scheduler_error);
 	if (error != OK) {
 		return _error(error == ERR_DOES_NOT_EXIST ? "INPUT_SEQUENCE_NOT_FOUND" : "INPUT_SEQUENCE_MISMATCH", scheduler_error);
 	}
@@ -232,8 +228,7 @@ Dictionary MCPRuntimeInputService::release_input(const Dictionary &p_arguments, 
 	}
 	int released = 0;
 	String release_error;
-	if (input_scheduler.release_session_inputs(p_mcp_session_id, session.debugger_session, session.runtime_generation,
-				true, released, release_error) != OK) {
+	if (input_scheduler.release_session_inputs(p_mcp_session_id, session, true, released, release_error) != OK) {
 		return _error("RUNTIME_INPUT_RELEASE_FAILED", release_error);
 	}
 	Dictionary result = runtime_gateway->make_session_identity(session.debugger_session, session.runtime_generation);

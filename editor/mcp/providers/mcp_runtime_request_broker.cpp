@@ -32,7 +32,6 @@
 
 #include "core/os/os.h"
 #include "core/templates/vector.h"
-#include "editor/debugger/script_editor_debugger.h"
 
 uint32_t MCPRuntimeRequestBroker::RequestKey::hash(const RequestKey &p_key) {
 	return hash_murmur3_one_32(HashMapHasherDefault::hash(p_key.request_id), HashMapHasherDefault::hash(p_key.debugger_session));
@@ -101,22 +100,6 @@ bool MCPRuntimeRequestBroker::take_response(int p_debugger_session, const String
 	responses.erase(key);
 	pending_requests.erase(key);
 	return true;
-}
-
-MCPRuntimeRequestBroker::WaitStatus MCPRuntimeRequestBroker::wait_for_response(ScriptEditorDebugger *p_debugger,
-		int p_debugger_session, const String &p_request_id, int p_timeout_msec, Response &r_response) {
-	if (!p_debugger || !p_debugger->is_session_active()) {
-		cancel_request(p_debugger_session, p_request_id);
-		return WAIT_DISCONNECTED;
-	}
-	const uint64_t deadline = MCPRuntimeDebuggerWait::deadline_from_timeout_msec(p_timeout_msec);
-	const WaitStatus status = MCPRuntimeDebuggerWait::wait_until(p_debugger, deadline, [&]() {
-		return take_response(p_debugger_session, p_request_id, r_response);
-	});
-	if (status != WAIT_COMPLETED) {
-		cancel_request(p_debugger_session, p_request_id);
-	}
-	return status;
 }
 
 void MCPRuntimeRequestBroker::cancel_request(int p_debugger_session, const String &p_request_id) {

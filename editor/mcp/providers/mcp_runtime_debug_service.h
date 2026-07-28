@@ -93,6 +93,7 @@ public:
 	void process_input();
 	void release_mcp_session(const String &p_mcp_session_id);
 	void shutdown_input();
-	void set_observation_plugin(MCPRuntimeObservationDebuggerPlugin *p_plugin) { runtime_gateway.set_response_plugin(p_plugin); }
+	void clear_runtime_requests() { runtime_gateway.clear_requests(); }
+	MCPRuntimeDebuggerGateway *get_runtime_gateway() { return &runtime_gateway; }
 	MCPRuntimeInputScheduler *get_input_scheduler() { return input_service.get_scheduler(); }
 };

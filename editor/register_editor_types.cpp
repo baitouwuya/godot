@@ -79,7 +79,9 @@
 #include "editor/inspector/input_event_editor_plugin.h"
 #include "editor/inspector/sub_viewport_preview_editor_plugin.h"
 #include "editor/inspector/tool_button_editor_plugin.h"
+#ifdef MCP_ENABLED
 #include "editor/mcp/mcp_editor_plugin.h"
+#endif
 #include "editor/scene/2d/camera_2d_editor_plugin.h"
 #include "editor/scene/2d/light_occluder_2d_editor_plugin.h"
 #include "editor/scene/2d/line_2d_editor_plugin.h"
@@ -244,7 +246,9 @@ void register_editor_types() {
 	EditorPlugins::add_by_type<InputEventEditorPlugin>();
 	EditorPlugins::add_by_type<LightmapGIEditorPlugin>();
 	EditorPlugins::add_by_type<MarginContainerEditorPlugin>();
+#ifdef MCP_ENABLED
 	EditorPlugins::add_by_type<MCPEditorPlugin>();
+#endif
 	EditorPlugins::add_by_type<MaterialEditorPlugin>();
 	EditorPlugins::add_by_type<MeshEditorPlugin>();
 	EditorPlugins::add_by_type<MeshInstance3DEditorPlugin>();

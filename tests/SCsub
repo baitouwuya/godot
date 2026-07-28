@@ -7,8 +7,18 @@ import test_builders
 
 Import("env")
 
+MCP_TEST_PREFIXES = ("core/mcp/", "editor/mcp/", "main/test_mcp_")
+
+
+def is_mcp_test_source(source):
+    return source.replace("\\", "/").startswith(MCP_TEST_PREFIXES)
+
+
 # Sources with tests must be explicitly linked first.
 force_link_sources = glob.glob("*/**/*.cpp", recursive=True)
+editor_mcp_enabled = env.editor_build and env["mcp"]
+if not editor_mcp_enabled:
+    force_link_sources = [source for source in force_link_sources if not is_mcp_test_source(source)]
 force_link_header = env.CommandNoCache(
     "force_link.gen.h", env.Value(force_link_sources), env.Run(test_builders.force_link_builder)
 )
@@ -18,6 +28,8 @@ tests_obj = []
 if env["scu_build"]:
     # HACK: SCU setup doesn't support recursive/dynamic setup, so we must manually pass the files.
     env.add_source_files(tests_obj, glob.glob(".scu/*.cpp"))
+    if editor_mcp_enabled:
+        env.add_source_files(tests_obj, [source for source in force_link_sources if is_mcp_test_source(source)])
 else:
     env.add_source_files(tests_obj, glob.glob("*.cpp") + force_link_sources)
 

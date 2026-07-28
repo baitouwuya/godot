@@ -30,10 +30,12 @@
 
 #include "scene_debugger.h"
 
+#ifdef MCP_ENABLED
 #include "mcp_runtime_condition_scheduler.h"
 #include "mcp_runtime_input_controller.h"
 #include "mcp_runtime_observation_controller.h"
 #include "mcp_runtime_performance_sampler.h"
+#endif
 
 #include "core/config/engine.h"
 #include "core/debugger/debugger_marshalls.h"
@@ -77,10 +79,12 @@ SceneDebugger::SceneDebugger() {
 #ifdef DEBUG_ENABLED
 	LiveEditor::singleton = memnew(LiveEditor);
 	RuntimeNodeSelect::singleton = memnew(RuntimeNodeSelect);
+#ifdef MCP_ENABLED
 	MCPRuntimeConditionScheduler::initialize();
 	MCPRuntimeInputController::initialize();
 	MCPRuntimeObservationController::initialize();
 	MCPRuntimePerformanceSampler::initialize();
+#endif
 
 	EngineDebugger::register_message_capture("scene", EngineDebugger::Capture(nullptr, SceneDebugger::parse_message));
 #endif
@@ -88,10 +92,12 @@ SceneDebugger::SceneDebugger() {
 
 SceneDebugger::~SceneDebugger() {
 #ifdef DEBUG_ENABLED
+#ifdef MCP_ENABLED
 	MCPRuntimePerformanceSampler::deinitialize();
 	MCPRuntimeObservationController::deinitialize();
 	MCPRuntimeInputController::deinitialize();
 	MCPRuntimeConditionScheduler::deinitialize();
+#endif
 	if (LiveEditor::singleton) {
 		EngineDebugger::unregister_message_capture("scene");
 		memdelete(LiveEditor::singleton);

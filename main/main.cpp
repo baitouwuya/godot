@@ -125,12 +125,16 @@
 #include "editor/file_system/editor_file_system.h"
 #include "editor/file_system/editor_paths.h"
 #include "editor/gui/progress_dialog.h"
+#ifdef MCP_ENABLED
 #include "editor/mcp/mcp_editor_plugin.h"
+#endif
 #include "editor/project_manager/project_manager.h"
 #include "editor/register_editor_types.h"
 #include "editor/settings/editor_settings.h"
 #include "editor/translations/editor_translation.h"
+#ifdef MCP_ENABLED
 #include "main/mcp_cli_bootstrap.h"
+#endif
 
 #if defined(TOOLS_ENABLED) && !defined(NO_EDITOR_SPLASH)
 #include "main/splash_editor.gen.h"
@@ -230,6 +234,7 @@ static bool auto_build_solutions = false;
 static String debug_server_uri;
 static bool wait_for_import = false;
 static bool restore_editor_window_layout = true;
+#ifdef MCP_ENABLED
 static bool mcp_editor_requested = false;
 static bool mcp_port_overridden = false;
 static int mcp_port = 0;
@@ -244,6 +249,7 @@ static Error invoke_selected_cli_command(MCPCLIRuntime &p_runtime, const MCPCLIC
 	}
 	return p_runtime.invoke_selected(command_arguments, r_exit_code, &r_error);
 }
+#endif
 
 #ifndef DISABLE_DEPRECATED
 static int converter_max_kb_file = 4 * 1024; // 4MB
@@ -582,8 +588,10 @@ void Main::print_help(const char *p_binary) {
 	print_help_option("--recovery-mode", "Start the editor in recovery mode, which disables features that can typically cause startup crashes, such as tool scripts, editor plugins, GDExtension addons, and others.\n", CLI_OPTION_AVAILABILITY_EDITOR);
 	print_help_option("--debug-server <uri>", "Start the editor debug server (<protocol>://<host/IP>[:port], e.g. tcp://127.0.0.1:6007)\n", CLI_OPTION_AVAILABILITY_EDITOR);
 	print_help_option("--dap-port <port>", "Use the specified port for the GDScript Debug Adapter Protocol. Recommended port range [1024, 49151].\n", CLI_OPTION_AVAILABILITY_EDITOR);
+#ifdef MCP_ENABLED
 	print_help_option("--mcp", "Start the project's MCP Streamable HTTP Host. Requires --editor and an explicit --path.\n", CLI_OPTION_AVAILABILITY_EDITOR);
 	print_help_option("--mcp-port <port>", "Use the specified MCP port. Port 0 selects an available loopback port.\n", CLI_OPTION_AVAILABILITY_EDITOR);
+#endif
 #if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
 	print_help_option("--lsp-port <port>", "Use the specified port for the GDScript Language Server Protocol. Recommended port range [1024, 49151].\n", CLI_OPTION_AVAILABILITY_EDITOR);
 #endif // MODULE_GDSCRIPT_ENABLED && !GDSCRIPT_NO_LSP
@@ -717,6 +725,7 @@ void Main::print_help(const char *p_binary) {
 #endif // defined(OVERRIDE_PATH_ENABLED)
 #ifdef TOOLS_ENABLED
 	print_help_option("--import", "Starts the editor, waits for any resources to be imported, and then quits.\n", CLI_OPTION_AVAILABILITY_EDITOR);
+#ifdef MCP_ENABLED
 	if (mcp_cli_bootstrap) {
 		const Vector<MCPCLICommandDefinition> commands = mcp_cli_bootstrap->get_runtime().get_command_registry().get_commands();
 		for (const MCPCLICommandDefinition &command : commands) {
@@ -725,6 +734,7 @@ void Main::print_help(const char *p_binary) {
 			print_help_option(usage.get_data(), description.get_data(), CLI_OPTION_AVAILABILITY_EDITOR);
 		}
 	}
+#endif
 	print_help_option("--export-release <preset> <path>", "Export the project in release mode using the given preset and output path. The preset name should match one defined in \"export_presets.cfg\".\n", CLI_OPTION_AVAILABILITY_EDITOR);
 	print_help_option("", "<path> should be absolute or relative to the project directory, and include the filename for the binary (e.g. \"builds/game.exe\").\n");
 	print_help_option("", "The target directory must exist.\n");
@@ -1063,7 +1073,7 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 
 	CoreGlobals::print_ready = true;
 
-#ifdef TOOLS_ENABLED
+#if defined(TOOLS_ENABLED) && defined(MCP_ENABLED)
 	if (mcp_cli_bootstrap) {
 		memdelete(mcp_cli_bootstrap);
 		mcp_cli_bootstrap = nullptr;
@@ -1194,7 +1204,7 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 	// It's returned as the program exit code. ERR_HELP is special cased and handled as success (0).
 	Error exit_err = ERR_INVALID_PARAMETER;
 
-#ifdef TOOLS_ENABLED
+#if defined(TOOLS_ENABLED) && defined(MCP_ENABLED)
 	auto apply_cli_startup_policy = [&](const MCPCLICommandDefinition &p_command) {
 		if (p_command.terminal) {
 			cmdline_tool = true;
@@ -1258,6 +1268,7 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 #endif
 
 #ifdef TOOLS_ENABLED
+#ifdef MCP_ENABLED
 		if (mcp_cli_bootstrap && mcp_cli_bootstrap->get_runtime().has_selected_command() && arg != "--path") {
 			String cli_error;
 			if (mcp_cli_bootstrap->get_runtime().append_raw_argument(arg, &cli_error) != OK) {
@@ -1267,6 +1278,7 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 			I = N;
 			continue;
 		}
+#endif
 
 		if (arg == "--debug" ||
 				arg == "--verbose" ||
@@ -1695,6 +1707,7 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 			project_manager = true;
 		} else if (arg == "--recovery-mode") { // Enables recovery mode.
 			recovery_mode = true;
+#ifdef MCP_ENABLED
 		} else if (arg == "--mcp") {
 			mcp_editor_requested = true;
 		} else if (arg == "--mcp-port") {
@@ -1723,6 +1736,7 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 				goto error;
 			}
 			apply_cli_startup_policy(*command);
+#endif
 		} else if (arg == "--debug-server") {
 			if (N) {
 				debug_server_uri = N->get();
@@ -1890,7 +1904,7 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 #if defined(OVERRIDE_PATH_ENABLED)
 			if (N) {
 				String p = N->get();
-#ifdef TOOLS_ENABLED
+#if defined(TOOLS_ENABLED) && defined(MCP_ENABLED)
 				mcp_cli_explicit_project_path = true;
 				const bool path_argument_only = startup_cli_command && startup_cli_command->has_flag(MCP_CLI_COMMAND_FLAG_PATH_ARGUMENT_ONLY);
 				if (path_argument_only) {
@@ -1910,7 +1924,7 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 						OS::get_singleton()->printerr("Invalid project path specified: \"%s\", aborting.\n", p.utf8().get_data());
 						goto error;
 					}
-#ifdef TOOLS_ENABLED
+#if defined(TOOLS_ENABLED) && defined(MCP_ENABLED)
 					mcp_cli_project_path = OS::get_singleton()->get_cwd();
 #endif
 				}
@@ -2217,6 +2231,7 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 	}
 
 #ifdef TOOLS_ENABLED
+#ifdef MCP_ENABLED
 	if (mcp_editor_requested && !mcp_cli_explicit_project_path) {
 		OS::get_singleton()->printerr("--mcp requires an explicit --path <project> argument.\n");
 		goto error;
@@ -2244,6 +2259,7 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 		}
 	}
 	MCPEditorPlugin::configure(mcp_editor_requested, mcp_port);
+#endif
 
 	if (editor && project_manager) {
 		OS::get_singleton()->print(
@@ -2448,7 +2464,7 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 	register_early_core_singletons();
 	initialize_modules(MODULE_INITIALIZATION_LEVEL_CORE);
 
-#ifdef TOOLS_ENABLED
+#if defined(TOOLS_ENABLED) && defined(MCP_ENABLED)
 	{
 		MCPCLIRuntime &runtime = mcp_cli_bootstrap->get_runtime();
 		const MCPCLICommandDefinition *command = runtime.get_selected_definition();
@@ -3160,7 +3176,7 @@ error:
 		print_help(execpath);
 	}
 
-#ifdef TOOLS_ENABLED
+#if defined(TOOLS_ENABLED) && defined(MCP_ENABLED)
 	if (mcp_cli_bootstrap) {
 		memdelete(mcp_cli_bootstrap);
 		mcp_cli_bootstrap = nullptr;
@@ -4253,7 +4269,7 @@ int Main::start() {
 	main_timer_sync.init(OS::get_singleton()->get_ticks_usec());
 	List<String> args = OS::get_singleton()->get_cmdline_args();
 
-#ifdef TOOLS_ENABLED
+#if defined(TOOLS_ENABLED) && defined(MCP_ENABLED)
 	if (mcp_cli_bootstrap && mcp_cli_bootstrap->get_runtime().has_selected_command()) {
 		MCPCLIRuntime &runtime = mcp_cli_bootstrap->get_runtime();
 		const MCPCLICommandDefinition *command = runtime.get_selected_definition();
@@ -5614,7 +5630,7 @@ void Main::cleanup(bool p_force) {
 	}
 #endif
 
-#ifdef TOOLS_ENABLED
+#if defined(TOOLS_ENABLED) && defined(MCP_ENABLED)
 	if (mcp_cli_bootstrap) {
 		memdelete(mcp_cli_bootstrap);
 		mcp_cli_bootstrap = nullptr;

@@ -238,6 +238,15 @@ opts.Add(
     )
 )
 opts.Add(BoolVariable("tests", "Build the unit tests", False))
+opts.Add(
+    EnumVariable(
+        "mcp",
+        "Enable the embedded MCP development tools (auto enables the editor; debug templates may opt into the runtime bridge)",
+        "auto",
+        ["auto", "no", "yes"],
+        ignorecase=2,
+    )
+)
 opts.Add(BoolVariable("fast_unsafe", "Enable unsafe options for faster incremental builds", False))
 opts.Add(BoolVariable("ninja", "Use the ninja backend for faster rebuilds", False))
 opts.Add(BoolVariable("ninja_auto_run", "Run ninja automatically after generating the ninja file", True))
@@ -533,6 +542,16 @@ env.platform_apis = platform_apis
 env.editor_build = env["target"] == "editor"
 env.dev_build = env["dev_build"]
 env.debug_features = env["target"] in ["editor", "template_debug"]
+
+mcp_mode = env["mcp"]
+env["mcp"] = env.editor_build if mcp_mode == "auto" else mcp_mode == "yes"
+
+if env["target"] == "template_release" and env["mcp"]:
+    print_error("The embedded MCP development tools cannot be enabled in release templates.")
+    Exit(255)
+
+if env["mcp"]:
+    env.Append(CPPDEFINES=["MCP_ENABLED"])
 
 if env["optimize"] == "auto":
     if env.dev_build:

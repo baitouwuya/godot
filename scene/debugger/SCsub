@@ -3,4 +3,8 @@ from misc.utility.scons_hints import *
 
 Import("env")
 
-env.add_source_files(env.scene_sources, "*.cpp")
+if env["mcp"]:
+    env.add_source_files(env.scene_sources, "*.cpp")
+else:
+    debugger_sources = [source for source in env.Glob("*.cpp") if not source.name.startswith("mcp_runtime_")]
+    env.add_source_files(env.scene_sources, debugger_sources)

@@ -9,7 +9,11 @@ env.main_sources = []
 
 env_main = env.Clone()
 
-env_main.add_source_files(env.main_sources, "*.cpp")
+if env_main.editor_build and env_main["mcp"]:
+    env_main.add_source_files(env.main_sources, "*.cpp")
+else:
+    main_sources = [source for source in env_main.Glob("*.cpp") if not source.name.startswith("mcp_")]
+    env_main.add_source_files(env.main_sources, main_sources)
 
 if env["steamapi"] and env.editor_build:
     env_main.Append(CPPDEFINES=["STEAMAPI_ENABLED"])

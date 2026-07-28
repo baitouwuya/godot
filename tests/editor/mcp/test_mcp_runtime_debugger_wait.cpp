@@ -62,6 +62,9 @@ public:
 };
 
 TEST_CASE("[MCP][Provider] Runtime debugger wait reports terminal states without polling") {
+	CHECK(MCPRuntimeDebuggerWait::is_expired(0));
+	CHECK_FALSE(MCPRuntimeDebuggerWait::is_expired(MCPRuntimeDebuggerWait::deadline_from_timeout_msec(100)));
+
 	FakeDebugger debugger;
 	debugger.completed = true;
 	CHECK(MCPRuntimeDebuggerWait::wait_until(&debugger, 0, [&]() { return debugger.completed; }) ==
@@ -102,6 +105,19 @@ TEST_CASE("[MCP][Provider] Runtime debugger wait observes state changes produced
 	CHECK(MCPRuntimeDebuggerWait::wait_until(&debugger, MCPRuntimeDebuggerWait::deadline_from_timeout_msec(100),
 				  [&]() { return debugger.completed; }) == MCPRuntimeDebuggerWait::WAIT_DISCONNECTED);
 	CHECK(debugger.poll_count == 1);
+}
+
+TEST_CASE("[MCP][Provider] Runtime debugger wait shares one absolute deadline across stages") {
+	const uint64_t deadline = MCPRuntimeDebuggerWait::deadline_from_timeout_msec(10);
+	FakeDebugger first_stage;
+	first_stage.complete_after_poll = true;
+	CHECK(MCPRuntimeDebuggerWait::wait_until(&first_stage, deadline, [&]() { return first_stage.completed; }) ==
+			MCPRuntimeDebuggerWait::WAIT_COMPLETED);
+
+	FakeDebugger second_stage;
+	CHECK(MCPRuntimeDebuggerWait::wait_until(&second_stage, deadline, [&]() { return second_stage.completed; }) ==
+			MCPRuntimeDebuggerWait::WAIT_TIMEOUT);
+	CHECK(MCPRuntimeDebuggerWait::is_expired(deadline));
 }
 
 TEST_CASE("[MCP][Provider] Runtime request broker isolates debugger sessions and rejects duplicate responses") {

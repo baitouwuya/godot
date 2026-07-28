@@ -43,6 +43,7 @@ public:
 	};
 
 	static uint64_t deadline_from_timeout_msec(int p_timeout_msec);
+	static bool is_expired(uint64_t p_deadline_usec);
 
 	template <typename TDebugger, typename TCompletionPredicate, typename TStalePredicate>
 	static WaitStatus wait_until(TDebugger *p_debugger, uint64_t p_deadline_usec,

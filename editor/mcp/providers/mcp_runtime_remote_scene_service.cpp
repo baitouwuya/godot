@@ -30,10 +30,10 @@
 
 #include "mcp_runtime_remote_scene_service.h"
 
+#include "mcp_runtime_debugger_wait.h"
 #include "mcp_tool_utils.h"
 #include "mcp_variant_codec.h"
 
-#include "core/os/os.h"
 #include "editor/debugger/editor_debugger_inspector.h"
 #include "editor/debugger/script_editor_debugger.h"
 #include "scene/debugger/scene_debugger_object.h"
@@ -44,6 +44,20 @@ constexpr int DEFAULT_TIMEOUT_MSEC = 750;
 
 Dictionary _error(const String &p_code, const String &p_message) {
 	return MCPToolUtils::make_error_result(p_code, p_message);
+}
+
+Dictionary _wait_error(MCPRuntimeDebuggerWait::WaitStatus p_status, const String &p_subject) {
+	switch (p_status) {
+		case MCPRuntimeDebuggerWait::WAIT_DISCONNECTED:
+			return _error("RUNTIME_NOT_RUNNING", "The running project stopped while refreshing " + p_subject + ".");
+		case MCPRuntimeDebuggerWait::WAIT_STALE:
+			return _error("STALE_RUNTIME", "The running project restarted while refreshing " + p_subject + ".");
+		case MCPRuntimeDebuggerWait::WAIT_TIMEOUT:
+			return _error("RUNTIME_TIMEOUT", "Timed out waiting for " + p_subject + ".");
+		case MCPRuntimeDebuggerWait::WAIT_COMPLETED:
+			return Dictionary();
+	}
+	return _error("RUNTIME_DEBUGGER_REQUEST_FAILED", "The runtime debugger returned an unknown wait status.");
 }
 
 int _timeout_from_arguments(const Dictionary &p_arguments) {
@@ -180,18 +194,16 @@ MCPRuntimeRemoteSceneService::MCPRuntimeRemoteSceneService(MCPRuntimeDebuggerGat
 	runtime_gateway = p_runtime_gateway;
 }
 
-Dictionary MCPRuntimeRemoteSceneService::_refresh_tree(ScriptEditorDebugger *p_debugger, int p_timeout_msec) const {
-	const uint64_t previous_revision = p_debugger->get_remote_tree_revision();
-	p_debugger->request_remote_tree();
-	const uint64_t deadline = OS::get_singleton()->get_ticks_usec() + uint64_t(p_timeout_msec) * 1000;
-	while (p_debugger->is_session_active() && OS::get_singleton()->get_ticks_usec() < deadline) {
-		p_debugger->poll_peer_messages(2000);
-		if (p_debugger->get_remote_tree_revision() > previous_revision) {
-			return Dictionary();
-		}
-		OS::get_singleton()->delay_usec(500);
-	}
-	return _error("RUNTIME_TIMEOUT", "Timed out waiting for the running project's scene tree.");
+Dictionary MCPRuntimeRemoteSceneService::_refresh_tree(const MCPRuntimeDebuggerGateway::Session &p_session,
+		uint64_t p_deadline_usec) const {
+	const uint64_t previous_revision = p_session.debugger->get_remote_tree_revision();
+	p_session.debugger->request_remote_tree();
+	const MCPRuntimeDebuggerWait::WaitStatus status = MCPRuntimeDebuggerWait::wait_until(
+			p_session.debugger,
+			p_deadline_usec,
+			[&]() { return p_session.debugger->get_remote_tree_revision() > previous_revision; },
+			[&]() { return !runtime_gateway->is_runtime_current(p_session.debugger_session, p_session.runtime_generation); });
+	return _wait_error(status, "the running project's scene tree");
 }
 
 Dictionary MCPRuntimeRemoteSceneService::_find_node(ScriptEditorDebugger *p_debugger, const String &p_path,
@@ -203,21 +215,28 @@ Dictionary MCPRuntimeRemoteSceneService::_find_node(ScriptEditorDebugger *p_debu
 	return Dictionary();
 }
 
-Dictionary MCPRuntimeRemoteSceneService::_refresh_object(ScriptEditorDebugger *p_debugger, ObjectID p_object_id,
-		int p_timeout_msec) const {
-	const uint64_t previous_revision = p_debugger->get_remote_object_revision(p_object_id);
+Dictionary MCPRuntimeRemoteSceneService::_refresh_object(const MCPRuntimeDebuggerGateway::Session &p_session,
+		ObjectID p_object_id, uint64_t p_deadline_usec) const {
+	const uint64_t previous_revision = p_session.debugger->get_remote_object_revision(p_object_id);
 	TypedArray<uint64_t> ids;
 	ids.push_back(uint64_t(p_object_id));
-	p_debugger->request_remote_objects(ids, false);
-	const uint64_t deadline = OS::get_singleton()->get_ticks_usec() + uint64_t(p_timeout_msec) * 1000;
-	while (p_debugger->is_session_active() && OS::get_singleton()->get_ticks_usec() < deadline) {
-		p_debugger->poll_peer_messages(2000);
-		if (p_debugger->get_remote_object_revision(p_object_id) > previous_revision) {
-			return Dictionary();
-		}
-		OS::get_singleton()->delay_usec(500);
+	p_session.debugger->request_remote_objects(ids, false);
+	const MCPRuntimeDebuggerWait::WaitStatus status = MCPRuntimeDebuggerWait::wait_until(
+			p_session.debugger,
+			p_deadline_usec,
+			[&]() { return p_session.debugger->get_remote_object_revision(p_object_id) > previous_revision; },
+			[&]() { return !runtime_gateway->is_runtime_current(p_session.debugger_session, p_session.runtime_generation); });
+	return _wait_error(status, "the running project's node properties");
+}
+
+Dictionary MCPRuntimeRemoteSceneService::_validate_current(const MCPRuntimeDebuggerGateway::Session &p_session) const {
+	if (!p_session.debugger || !p_session.debugger->is_session_active()) {
+		return _error("RUNTIME_NOT_RUNNING", "The running project stopped while resolving the runtime scene.");
 	}
-	return _error("RUNTIME_TIMEOUT", "Timed out waiting for the running project's node properties.");
+	if (!runtime_gateway->is_runtime_current(p_session.debugger_session, p_session.runtime_generation)) {
+		return _error("STALE_RUNTIME", "The running project restarted while resolving the runtime scene.");
+	}
+	return Dictionary();
 }
 
 Dictionary MCPRuntimeRemoteSceneService::get_tree(const Dictionary &p_arguments) const {
@@ -226,7 +245,12 @@ Dictionary MCPRuntimeRemoteSceneService::get_tree(const Dictionary &p_arguments)
 	if (!error.is_empty()) {
 		return error;
 	}
-	error = _refresh_tree(session.debugger, _timeout_from_arguments(p_arguments));
+	const uint64_t deadline = MCPRuntimeDebuggerWait::deadline_from_timeout_msec(_timeout_from_arguments(p_arguments));
+	error = _refresh_tree(session, deadline);
+	if (!error.is_empty()) {
+		return error;
+	}
+	error = _validate_current(session);
 	if (!error.is_empty()) {
 		return error;
 	}
@@ -247,8 +271,8 @@ Dictionary MCPRuntimeRemoteSceneService::get_properties(const Dictionary &p_argu
 	if (!error.is_empty()) {
 		return error;
 	}
-	const int timeout = _timeout_from_arguments(p_arguments);
-	error = _refresh_tree(session.debugger, timeout);
+	const uint64_t deadline = MCPRuntimeDebuggerWait::deadline_from_timeout_msec(_timeout_from_arguments(p_arguments));
+	error = _refresh_tree(session, deadline);
 	if (!error.is_empty()) {
 		return error;
 	}
@@ -258,7 +282,11 @@ Dictionary MCPRuntimeRemoteSceneService::get_properties(const Dictionary &p_argu
 	if (!error.is_empty()) {
 		return error;
 	}
-	error = _refresh_object(session.debugger, object_id, timeout);
+	error = _refresh_object(session, object_id, deadline);
+	if (!error.is_empty()) {
+		return error;
+	}
+	error = _validate_current(session);
 	if (!error.is_empty()) {
 		return error;
 	}
@@ -285,8 +313,8 @@ Dictionary MCPRuntimeRemoteSceneService::set_property(const Dictionary &p_argume
 	if (!error.is_empty()) {
 		return error;
 	}
-	const int timeout = _timeout_from_arguments(p_arguments);
-	error = _refresh_tree(session.debugger, timeout);
+	const uint64_t deadline = MCPRuntimeDebuggerWait::deadline_from_timeout_msec(_timeout_from_arguments(p_arguments));
+	error = _refresh_tree(session, deadline);
 	if (!error.is_empty()) {
 		return error;
 	}
@@ -296,7 +324,11 @@ Dictionary MCPRuntimeRemoteSceneService::set_property(const Dictionary &p_argume
 	if (!error.is_empty()) {
 		return error;
 	}
-	error = _refresh_object(session.debugger, object_id, timeout);
+	error = _refresh_object(session, object_id, deadline);
+	if (!error.is_empty()) {
+		return error;
+	}
+	error = _validate_current(session);
 	if (!error.is_empty()) {
 		return error;
 	}
@@ -314,8 +346,15 @@ Dictionary MCPRuntimeRemoteSceneService::set_property(const Dictionary &p_argume
 		return _error("INVALID_VALUE", codec_error);
 	}
 	const Variant previous_value = remote_object->get_variant(property_value);
+	if (MCPRuntimeDebuggerWait::is_expired(deadline)) {
+		return _error("RUNTIME_TIMEOUT", "Timed out before the runtime property could be updated.");
+	}
 	session.debugger->update_remote_object(object_id, property_value, decoded_value);
-	error = _refresh_object(session.debugger, object_id, timeout);
+	error = _refresh_object(session, object_id, deadline);
+	if (!error.is_empty()) {
+		return error;
+	}
+	error = _validate_current(session);
 	if (!error.is_empty()) {
 		return error;
 	}

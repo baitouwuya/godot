@@ -37,6 +37,10 @@ uint64_t MCPRuntimeDebuggerWait::deadline_from_timeout_msec(int p_timeout_msec) 
 	return _get_ticks_usec() + timeout_usec;
 }
 
+bool MCPRuntimeDebuggerWait::is_expired(uint64_t p_deadline_usec) {
+	return _get_ticks_usec() >= p_deadline_usec;
+}
+
 uint64_t MCPRuntimeDebuggerWait::_get_ticks_usec() {
 	return OS::get_singleton()->get_ticks_usec();
 }

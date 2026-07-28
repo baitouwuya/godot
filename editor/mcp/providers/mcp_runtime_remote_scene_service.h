@@ -37,10 +37,12 @@ class ScriptEditorDebugger;
 class MCPRuntimeRemoteSceneService {
 	MCPRuntimeDebuggerGateway *runtime_gateway = nullptr;
 
-	Dictionary _refresh_tree(ScriptEditorDebugger *p_debugger, int p_timeout_msec) const;
+	Dictionary _refresh_tree(const MCPRuntimeDebuggerGateway::Session &p_session, uint64_t p_deadline_usec) const;
 	Dictionary _find_node(ScriptEditorDebugger *p_debugger, const String &p_path, ObjectID &r_object_id,
 			Dictionary &r_node) const;
-	Dictionary _refresh_object(ScriptEditorDebugger *p_debugger, ObjectID p_object_id, int p_timeout_msec) const;
+	Dictionary _refresh_object(const MCPRuntimeDebuggerGateway::Session &p_session, ObjectID p_object_id,
+			uint64_t p_deadline_usec) const;
+	Dictionary _validate_current(const MCPRuntimeDebuggerGateway::Session &p_session) const;
 
 public:
 	explicit MCPRuntimeRemoteSceneService(MCPRuntimeDebuggerGateway *p_runtime_gateway);

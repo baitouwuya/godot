@@ -89,16 +89,18 @@ def validate_mcp_dependencies(repository_root: Path) -> tuple[list[DependencyVio
     repository_root = repository_root.resolve()
     core_mcp = repository_root / "core/mcp"
     editor_mcp = repository_root / "editor/mcp"
+    main_mcp = repository_root / "main"
     providers = editor_mcp / "providers"
     scene_debugger = repository_root / "scene/debugger"
 
-    required_directories = (core_mcp, editor_mcp, providers, scene_debugger)
+    required_directories = (core_mcp, editor_mcp, main_mcp, providers, scene_debugger)
     missing = [path.relative_to(repository_root).as_posix() for path in required_directories if not path.is_dir()]
     if missing:
         raise ValueError("Repository root is missing required MCP directories: " + ", ".join(missing))
 
     sources = set(_source_files(core_mcp, "**/*"))
     sources.update(_source_files(editor_mcp))
+    sources.update(_source_files(main_mcp, "mcp_*"))
     sources.update(_source_files(providers, "**/*"))
     sources.update(_source_files(scene_debugger, "mcp_runtime_*"))
 
@@ -143,6 +145,20 @@ def validate_mcp_dependencies(repository_root: Path) -> tuple[list[DependencyVio
                         resolved_include,
                         "a provider must not include another provider header",
                     )
+
+            if source.parent == main_mcp and source.name.startswith("mcp_") and resolved_include.startswith(
+                ("editor/mcp/", "scene/debugger/mcp_runtime_")
+            ):
+                _add_violation(
+                    violations,
+                    repository_root,
+                    source,
+                    line,
+                    "cli-adapter-isolation",
+                    include,
+                    resolved_include,
+                    "main/mcp_* adapters must not depend on the editor Host, Providers, or runtime bridge",
+                )
 
             if source.parent == scene_debugger and source.name.startswith("mcp_runtime_") and resolved_include.startswith(
                 "editor/"

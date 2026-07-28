@@ -51,6 +51,24 @@ public:
 	String invalid_result(const Dictionary &, const Dictionary &) {
 		return "invalid";
 	}
+
+	Dictionary structured_result(const Dictionary &, const Dictionary &) {
+		Dictionary structured_content;
+		structured_content["count"] = 1;
+		Dictionary result;
+		result["content"] = Array();
+		result["structuredContent"] = structured_content;
+		return result;
+	}
+
+	Dictionary invalid_structured_result(const Dictionary &, const Dictionary &) {
+		Dictionary structured_content;
+		structured_content["count"] = "one";
+		Dictionary result;
+		result["content"] = Array();
+		result["structuredContent"] = structured_content;
+		return result;
+	}
 };
 
 static Dictionary make_definition(const String &p_name) {
@@ -255,6 +273,50 @@ TEST_CASE("[MCP][ToolRegistry] Reports invalid handler results without a transpo
 
 	CHECK_EQ(registry.unregister_tools_for_owner(provider), 1);
 	memdelete(provider);
+}
+
+TEST_CASE("[MCP][ToolRegistry] Validates structured tool results against output schemas") {
+	MCPToolRegistry registry;
+	ToolProvider *provider = memnew(ToolProvider);
+	Dictionary output_schema;
+	output_schema["type"] = "object";
+	Dictionary properties;
+	Dictionary count_schema;
+	count_schema["type"] = "integer";
+	properties["count"] = count_schema;
+	output_schema["properties"] = properties;
+	output_schema["required"] = PackedStringArray{ "count" };
+	output_schema["additionalProperties"] = false;
+	Dictionary definition = make_definition("structured");
+	definition["outputSchema"] = output_schema;
+	REQUIRE(registry.register_tool(definition, callable_mp(provider, &ToolProvider::structured_result), provider) == OK);
+
+	MCPToolRegistry::CallResult result = registry.call_tool("structured", Dictionary(), MCPToolCallContext());
+	CHECK(result.status == MCPToolRegistry::CALL_OK);
+	CHECK(int(Dictionary(result.result["structuredContent"]).get("count", 0)) == 1);
+
+	Dictionary broken_definition = make_definition("broken_structured");
+	broken_definition["outputSchema"] = output_schema;
+	ToolProvider *broken_provider = memnew(ToolProvider);
+	REQUIRE(registry.register_tool(broken_definition, callable_mp(broken_provider, &ToolProvider::echo), broken_provider) == OK);
+	result = registry.call_tool("broken_structured", Dictionary(), MCPToolCallContext());
+	CHECK(result.status == MCPToolRegistry::CALL_INVALID_RESULT);
+	CHECK(result.message.contains("structuredContent"));
+
+	Dictionary invalid_definition = make_definition("invalid_structured");
+	invalid_definition["outputSchema"] = output_schema;
+	ToolProvider *invalid_provider = memnew(ToolProvider);
+	REQUIRE(registry.register_tool(invalid_definition, callable_mp(invalid_provider, &ToolProvider::invalid_structured_result), invalid_provider) == OK);
+	result = registry.call_tool("invalid_structured", Dictionary(), MCPToolCallContext());
+	CHECK(result.status == MCPToolRegistry::CALL_INVALID_RESULT);
+	CHECK(result.message.contains("must be an integer"));
+
+	registry.unregister_tools_for_owner(provider);
+	registry.unregister_tools_for_owner(broken_provider);
+	registry.unregister_tools_for_owner(invalid_provider);
+	memdelete(provider);
+	memdelete(broken_provider);
+	memdelete(invalid_provider);
 }
 
 } // namespace TestMCPToolRegistry

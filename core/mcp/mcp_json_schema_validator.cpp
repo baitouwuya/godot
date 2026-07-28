@@ -66,6 +66,20 @@ static bool _is_finite_number(const Variant &p_value) {
 	return _is_number(p_value) && Math::is_finite(double(p_value));
 }
 
+static bool _is_json_array(const Variant &p_value) {
+	switch (p_value.get_type()) {
+		case Variant::ARRAY:
+		case Variant::PACKED_INT32_ARRAY:
+		case Variant::PACKED_INT64_ARRAY:
+		case Variant::PACKED_FLOAT32_ARRAY:
+		case Variant::PACKED_FLOAT64_ARRAY:
+		case Variant::PACKED_STRING_ARRAY:
+			return true;
+		default:
+			return false;
+	}
+}
+
 static bool _is_known_type(const String &p_type) {
 	return p_type == "null" || p_type == "boolean" || p_type == "number" || p_type == "integer" ||
 			p_type == "string" || p_type == "array" || p_type == "object";
@@ -112,7 +126,7 @@ static bool _matches_type(const Variant &p_value, const String &p_type) {
 		return type == Variant::STRING || type == Variant::STRING_NAME;
 	}
 	if (p_type == "array") {
-		return type == Variant::ARRAY;
+		return _is_json_array(p_value);
 	}
 	if (p_type == "object") {
 		return type == Variant::DICTIONARY;
@@ -376,7 +390,7 @@ static bool _validate_value(const Variant &p_value, const Dictionary &p_schema, 
 		}
 	}
 
-	if (p_value.get_type() == Variant::ARRAY) {
+	if (_is_json_array(p_value)) {
 		const Array values = p_value;
 		if (p_schema.has("minItems") && values.size() < int64_t(p_schema["minItems"])) {
 			Dictionary details;

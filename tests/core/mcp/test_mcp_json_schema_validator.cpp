@@ -134,6 +134,22 @@ TEST_CASE("[MCP][JSONSchema] Nested types, bounds, enums, and array items are va
 	CHECK(error.instance_path == "/values/1");
 }
 
+TEST_CASE("[MCP][JSONSchema] JSON-serializable packed arrays satisfy array schemas") {
+	Dictionary item_schema;
+	item_schema["type"] = "string";
+	Dictionary schema;
+	schema["type"] = "array";
+	schema["items"] = item_schema;
+	schema["minItems"] = 1;
+
+	MCPJSONSchemaValidator::ValidationError error;
+	CHECK(MCPJSONSchemaValidator::validate(PackedStringArray{ "one", "two" }, schema, error));
+	CHECK_FALSE(MCPJSONSchemaValidator::validate(PackedStringArray(), schema, error));
+	CHECK(error.keyword == "minItems");
+	CHECK_FALSE(MCPJSONSchemaValidator::validate(PackedInt32Array{ 1, 2 }, schema, error));
+	CHECK(error.keyword == "type");
+}
+
 TEST_CASE("[MCP][JSONSchema] JSON Schema type unions are supported") {
 	Dictionary value;
 	value["type"] = Array{ "string", "number", "boolean" };

@@ -290,6 +290,24 @@ MCPToolRegistry::CallResult MCPToolRegistry::call_tool(const StringName &p_name,
 		return call_result;
 	}
 
-	call_result.result = result;
+	const Dictionary result_dictionary = result;
+	const bool is_error = result_dictionary.get("isError", false);
+	if (!is_error && entry->definition.has("outputSchema")) {
+		if (!result_dictionary.has("structuredContent")) {
+			call_result.status = CALL_INVALID_RESULT;
+			call_result.message = "Tool handler must return structuredContent for: " + String(p_name);
+			return call_result;
+		}
+
+		MCPJSONSchemaValidator::ValidationError validation_error;
+		const Dictionary output_schema = entry->definition["outputSchema"];
+		if (!MCPJSONSchemaValidator::validate(result_dictionary["structuredContent"], output_schema, validation_error)) {
+			call_result.status = CALL_INVALID_RESULT;
+			call_result.message = "Tool handler returned invalid structuredContent for '" + String(p_name) + "': " + validation_error.message;
+			return call_result;
+		}
+	}
+
+	call_result.result = result_dictionary;
 	return call_result;
 }

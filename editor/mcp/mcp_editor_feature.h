@@ -50,14 +50,21 @@ public:
 class MCPEditorFeatureSet {
 	LocalVector<MCPEditorFeature *> features;
 	int registered_count = 0;
+	bool registration_active = false;
+	bool shutdown_pending = false;
 
 public:
+	MCPEditorFeatureSet() = default;
+	MCPEditorFeatureSet(const MCPEditorFeatureSet &) = delete;
+	MCPEditorFeatureSet &operator=(const MCPEditorFeatureSet &) = delete;
+
 	Error add_feature(MCPEditorFeature *p_feature);
 	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr);
 	void unregister_tools();
 	void process();
 	void on_session_removed(const String &p_session_id);
 	void shutdown();
+	void clear();
 
 	int get_feature_count() const { return features.size(); }
 	int get_registered_count() const { return registered_count; }

@@ -86,7 +86,13 @@ class MCPBuiltinFeatures {
 	MCPTraceService *trace_service = nullptr;
 	bool initialized = false;
 
+	void _reset();
+
 public:
+	MCPBuiltinFeatures() = default;
+	MCPBuiltinFeatures(const MCPBuiltinFeatures &) = delete;
+	MCPBuiltinFeatures &operator=(const MCPBuiltinFeatures &) = delete;
+
 	Error initialize();
 	Error prepare_for_registration(String &r_error);
 	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr);

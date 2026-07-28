@@ -59,6 +59,18 @@
 #include "modules/gdscript/language_server/gdscript_language_protocol.h"
 #endif
 
+namespace {
+
+template <typename T>
+void delete_owned(T *&r_object) {
+	if (r_object) {
+		memdelete(r_object);
+		r_object = nullptr;
+	}
+}
+
+} // namespace
+
 Error MCPBuiltinFeatures::initialize() {
 	ERR_FAIL_COND_V(initialized, ERR_ALREADY_IN_USE);
 
@@ -93,28 +105,36 @@ Error MCPBuiltinFeatures::initialize() {
 	gdscript_provider = memnew(MCPGDScriptProvider(gdscript_session_manager));
 #endif
 
-	ERR_FAIL_COND_V(feature_set.add_feature(automation_provider) != OK, ERR_CANT_CREATE);
-	ERR_FAIL_COND_V(feature_set.add_feature(class_provider) != OK, ERR_CANT_CREATE);
-	ERR_FAIL_COND_V(feature_set.add_feature(debug_provider) != OK, ERR_CANT_CREATE);
-	ERR_FAIL_COND_V(feature_set.add_feature(runtime_provider) != OK, ERR_CANT_CREATE);
-	ERR_FAIL_COND_V(feature_set.add_feature(trace_service) != OK, ERR_CANT_CREATE);
-	ERR_FAIL_COND_V(feature_set.add_feature(harness_provider) != OK, ERR_CANT_CREATE);
-	ERR_FAIL_COND_V(feature_set.add_feature(editor_provider) != OK, ERR_CANT_CREATE);
-	ERR_FAIL_COND_V(feature_set.add_feature(editor_ui_provider) != OK, ERR_CANT_CREATE);
-	ERR_FAIL_COND_V(feature_set.add_feature(file_provider) != OK, ERR_CANT_CREATE);
-	ERR_FAIL_COND_V(feature_set.add_feature(scene_provider) != OK, ERR_CANT_CREATE);
-	ERR_FAIL_COND_V(feature_set.add_feature(node_provider) != OK, ERR_CANT_CREATE);
-	ERR_FAIL_COND_V(feature_set.add_feature(node_structure_provider) != OK, ERR_CANT_CREATE);
-	ERR_FAIL_COND_V(feature_set.add_feature(project_provider) != OK, ERR_CANT_CREATE);
-	ERR_FAIL_COND_V(feature_set.add_feature(autoload_provider) != OK, ERR_CANT_CREATE);
-	ERR_FAIL_COND_V(feature_set.add_feature(input_map_provider) != OK, ERR_CANT_CREATE);
+	LocalVector<MCPEditorFeature *> builtin_feature_order{
+		automation_provider,
+		class_provider,
+		debug_provider,
+		runtime_provider,
+		trace_service,
+		harness_provider,
+		editor_provider,
+		editor_ui_provider,
+		file_provider,
+		scene_provider,
+		node_provider,
+		node_structure_provider,
+		project_provider,
+		autoload_provider,
+		input_map_provider,
+	};
 #if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
-	ERR_FAIL_COND_V(feature_set.add_feature(script_provider) != OK, ERR_CANT_CREATE);
+	builtin_feature_order.push_back(script_provider);
 #endif
-	ERR_FAIL_COND_V(feature_set.add_feature(resource_provider) != OK, ERR_CANT_CREATE);
+	builtin_feature_order.push_back(resource_provider);
 #if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
-	ERR_FAIL_COND_V(feature_set.add_feature(gdscript_provider) != OK, ERR_CANT_CREATE);
+	builtin_feature_order.push_back(gdscript_provider);
 #endif
+	for (MCPEditorFeature *feature : builtin_feature_order) {
+		if (feature_set.add_feature(feature) != OK) {
+			_reset();
+			return ERR_CANT_CREATE;
+		}
+	}
 
 	initialized = true;
 	return OK;
@@ -181,38 +201,49 @@ void MCPBuiltinFeatures::clear_runtime_requests() {
 	}
 }
 
-MCPBuiltinFeatures::~MCPBuiltinFeatures() {
-	feature_set.shutdown();
+void MCPBuiltinFeatures::_reset() {
+	feature_set.clear();
 	clear_runtime_requests();
 	stop_debug_capture();
+	if (runtime_debug_service) {
+		runtime_debug_service->set_observation_plugin(nullptr);
+	}
+	if (runtime_input_debugger_plugin.is_valid()) {
+		runtime_input_debugger_plugin->set_scheduler(nullptr);
+	}
 	runtime_observation_debugger_plugin.unref();
 	runtime_input_debugger_plugin.unref();
 #if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
-	memdelete(gdscript_provider);
+	delete_owned(gdscript_provider);
 #endif
-	memdelete(resource_provider);
+	delete_owned(resource_provider);
 #if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
-	memdelete(script_provider);
+	delete_owned(script_provider);
 #endif
-	memdelete(input_map_provider);
-	memdelete(autoload_provider);
-	memdelete(project_provider);
-	memdelete(node_structure_provider);
-	memdelete(node_provider);
-	memdelete(scene_provider);
-	memdelete(file_provider);
-	memdelete(editor_ui_provider);
-	memdelete(editor_provider);
-	memdelete(harness_provider);
-	memdelete(trace_service);
-	memdelete(runtime_provider);
-	memdelete(runtime_debug_service);
-	memdelete(debug_provider);
-	memdelete(debug_capture);
-	memdelete(debug_event_store);
-	memdelete(class_provider);
-	memdelete(automation_provider);
+	delete_owned(input_map_provider);
+	delete_owned(autoload_provider);
+	delete_owned(project_provider);
+	delete_owned(node_structure_provider);
+	delete_owned(node_provider);
+	delete_owned(scene_provider);
+	delete_owned(file_provider);
+	delete_owned(editor_ui_provider);
+	delete_owned(editor_provider);
+	delete_owned(harness_provider);
+	delete_owned(trace_service);
+	delete_owned(runtime_provider);
+	delete_owned(runtime_debug_service);
+	delete_owned(debug_provider);
+	delete_owned(debug_capture);
+	delete_owned(debug_event_store);
+	delete_owned(class_provider);
+	delete_owned(automation_provider);
 #if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
 	gdscript_session_manager.unref();
 #endif
+	initialized = false;
+}
+
+MCPBuiltinFeatures::~MCPBuiltinFeatures() {
+	_reset();
 }

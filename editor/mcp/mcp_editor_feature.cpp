@@ -33,7 +33,7 @@
 
 Error MCPEditorFeatureSet::add_feature(MCPEditorFeature *p_feature) {
 	ERR_FAIL_NULL_V(p_feature, ERR_INVALID_PARAMETER);
-	ERR_FAIL_COND_V(registered_count != 0, ERR_ALREADY_IN_USE);
+	ERR_FAIL_COND_V(registration_active || shutdown_pending, ERR_ALREADY_IN_USE);
 	ERR_FAIL_COND_V(features.has(p_feature), ERR_ALREADY_EXISTS);
 	features.push_back(p_feature);
 	return OK;
@@ -41,7 +41,7 @@ Error MCPEditorFeatureSet::add_feature(MCPEditorFeature *p_feature) {
 
 Error MCPEditorFeatureSet::register_tools(MCPToolRegistry *p_registry, String *r_error) {
 	ERR_FAIL_NULL_V(p_registry, ERR_INVALID_PARAMETER);
-	ERR_FAIL_COND_V(registered_count != 0, ERR_ALREADY_IN_USE);
+	ERR_FAIL_COND_V(registration_active || shutdown_pending, ERR_ALREADY_IN_USE);
 
 	for (MCPEditorFeature *feature : features) {
 		const Error error = feature->register_tools(p_registry, r_error);
@@ -52,29 +52,48 @@ Error MCPEditorFeatureSet::register_tools(MCPToolRegistry *p_registry, String *r
 		}
 		registered_count++;
 	}
+	registration_active = true;
+	shutdown_pending = true;
 	return OK;
 }
 
 void MCPEditorFeatureSet::unregister_tools() {
+	registration_active = false;
 	while (registered_count > 0) {
 		features[--registered_count]->unregister_tools();
 	}
 }
 
 void MCPEditorFeatureSet::process() {
+	if (!registration_active || !shutdown_pending) {
+		return;
+	}
 	for (int i = 0; i < registered_count; i++) {
 		features[i]->process();
 	}
 }
 
 void MCPEditorFeatureSet::on_session_removed(const String &p_session_id) {
+	if (!registration_active || !shutdown_pending) {
+		return;
+	}
 	for (int i = registered_count - 1; i >= 0; i--) {
 		features[i]->on_session_removed(p_session_id);
 	}
 }
 
 void MCPEditorFeatureSet::shutdown() {
+	if (!shutdown_pending) {
+		return;
+	}
+	shutdown_pending = false;
 	for (int i = int(features.size()) - 1; i >= 0; i--) {
 		features[i]->shutdown();
 	}
+}
+
+void MCPEditorFeatureSet::clear() {
+	unregister_tools();
+	shutdown();
+	features.clear();
 }

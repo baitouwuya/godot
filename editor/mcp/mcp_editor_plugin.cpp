@@ -151,6 +151,10 @@ Error MCPEditorPlugin::_start_mcp(String &r_error) {
 
 void MCPEditorPlugin::_stop_mcp() {
 	project_heartbeat.stop();
+	if (host.is_running()) {
+		host.stop();
+	}
+	_unregister_tools();
 	builtin_features.shutdown();
 	if (runtime_observation_debugger_registered) {
 		remove_debugger_plugin(builtin_features.get_runtime_observation_debugger_plugin());
@@ -162,10 +166,6 @@ void MCPEditorPlugin::_stop_mcp() {
 		runtime_input_debugger_registered = false;
 	}
 	builtin_features.stop_debug_capture();
-	if (host.is_running()) {
-		host.stop();
-	}
-	_unregister_tools();
 	if (!discovery_directory.is_empty() && project_identity.is_valid()) {
 		MCPDiscovery::remove_record(discovery_directory, project_identity.project_id, project_identity.instance_id);
 	}

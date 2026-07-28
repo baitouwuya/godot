@@ -27,9 +27,8 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#include "editor/mcp/mcp_editor_feature.h"
-
 #include "core/mcp/mcp_tool_registry.h"
+#include "editor/mcp/mcp_editor_feature.h"
 #include "tests/test_macros.h"
 
 TEST_FORCE_LINK(test_mcp_editor_feature);
@@ -116,6 +115,8 @@ TEST_CASE("[MCP][EditorFeature] Feature set rolls back partial registration and 
 	CHECK(error == "Registration failed for failing");
 	CHECK(feature_set.get_registered_count() == 0);
 	CHECK(events == Vector<String>{ "register:first", "register:failing", "unregister:failing", "unregister:first" });
+	feature_set.shutdown();
+	CHECK(events == Vector<String>{ "register:first", "register:failing", "unregister:failing", "unregister:first" });
 
 	events.clear();
 	error = String();
@@ -123,7 +124,63 @@ TEST_CASE("[MCP][EditorFeature] Feature set rolls back partial registration and 
 	CHECK(feature_set.register_tools(&registry, &error) == OK);
 	CHECK(feature_set.get_registered_count() == 3);
 	feature_set.unregister_tools();
-	CHECK(events == Vector<String>{ "register:first", "register:failing", "register:last", "unregister:last", "unregister:failing", "unregister:first" });
+	feature_set.shutdown();
+	CHECK(events == Vector<String>{ "register:first", "register:failing", "register:last", "unregister:last", "unregister:failing", "unregister:first", "shutdown:last", "shutdown:failing", "shutdown:first" });
+}
+
+TEST_CASE("[MCP][EditorFeature] Feature set shutdown is idempotent per registration epoch") {
+	Vector<String> events;
+	RecordingFeature first("first", &events);
+	RecordingFeature second("second", &events);
+	MCPEditorFeatureSet feature_set;
+	MCPToolRegistry registry;
+
+	REQUIRE(feature_set.add_feature(&first) == OK);
+	REQUIRE(feature_set.add_feature(&second) == OK);
+	REQUIRE(feature_set.register_tools(&registry) == OK);
+	feature_set.unregister_tools();
+	feature_set.process();
+	feature_set.on_session_removed("closed");
+	ERR_PRINT_OFF;
+	CHECK(feature_set.register_tools(&registry) == ERR_ALREADY_IN_USE);
+	ERR_PRINT_ON;
+	feature_set.shutdown();
+	feature_set.shutdown();
+
+	CHECK(events == Vector<String>{ "register:first", "register:second", "unregister:second", "unregister:first", "shutdown:second", "shutdown:first" });
+
+	events.clear();
+	REQUIRE(feature_set.register_tools(&registry) == OK);
+	feature_set.shutdown();
+	feature_set.process();
+	feature_set.on_session_removed("closed");
+	feature_set.shutdown();
+	feature_set.unregister_tools();
+
+	CHECK(events == Vector<String>{ "register:first", "register:second", "shutdown:second", "shutdown:first", "unregister:second", "unregister:first" });
+}
+
+TEST_CASE("[MCP][EditorFeature] Feature set clear completes lifecycle without owning features") {
+	Vector<String> events;
+	RecordingFeature first("first", &events);
+	RecordingFeature second("second", &events);
+	MCPEditorFeatureSet feature_set;
+	MCPToolRegistry registry;
+
+	REQUIRE(feature_set.add_feature(&first) == OK);
+	REQUIRE(feature_set.add_feature(&second) == OK);
+	REQUIRE(feature_set.register_tools(&registry) == OK);
+	feature_set.clear();
+	feature_set.clear();
+
+	CHECK(feature_set.get_feature_count() == 0);
+	CHECK(feature_set.get_registered_count() == 0);
+	CHECK(events == Vector<String>{ "register:first", "register:second", "unregister:second", "unregister:first", "shutdown:second", "shutdown:first" });
+
+	REQUIRE(feature_set.add_feature(&first) == OK);
+	REQUIRE(feature_set.register_tools(&registry) == OK);
+	feature_set.clear();
+	CHECK(events == Vector<String>{ "register:first", "register:second", "unregister:second", "unregister:first", "shutdown:second", "shutdown:first", "register:first", "unregister:first", "shutdown:first" });
 }
 
 } // namespace TestMCPEditorFeature

@@ -29,26 +29,6 @@
 
 #include "mcp_editor_plugin.h"
 
-#include "providers/mcp_autoload_provider.h"
-#include "providers/mcp_automation_provider.h"
-#include "providers/mcp_class_provider.h"
-#include "providers/mcp_debug_capture.h"
-#include "providers/mcp_debug_event_store.h"
-#include "providers/mcp_debug_provider.h"
-#include "providers/mcp_editor_provider.h"
-#include "providers/mcp_editor_ui_provider.h"
-#include "providers/mcp_file_provider.h"
-#include "providers/mcp_harness_provider.h"
-#include "providers/mcp_input_map_provider.h"
-#include "providers/mcp_node_provider.h"
-#include "providers/mcp_node_structure_provider.h"
-#include "providers/mcp_project_provider.h"
-#include "providers/mcp_resource_provider.h"
-#include "providers/mcp_runtime_debug_service.h"
-#include "providers/mcp_runtime_provider.h"
-#include "providers/mcp_scene_provider.h"
-#include "providers/mcp_trace_service.h"
-
 #include "core/config/project_settings.h"
 #include "core/object/callable_mp.h"
 #include "core/os/os.h"
@@ -58,16 +38,6 @@
 #include "scene/gui/dialogs.h"
 #include "scene/main/scene_tree.h"
 #include "servers/display/display_server.h"
-
-#include "modules/modules_enabled.gen.h"
-
-#if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
-#include "providers/mcp_gdscript_provider.h"
-#include "providers/mcp_gdscript_session_manager.h"
-#include "providers/mcp_script_provider.h"
-
-#include "modules/gdscript/language_server/gdscript_language_protocol.h"
-#endif
 
 void MCPEditorPlugin::configure(bool p_requested, int p_port) {
 	requested = p_requested;
@@ -79,23 +49,19 @@ bool MCPEditorPlugin::_is_headless() const {
 }
 
 Error MCPEditorPlugin::_register_tools(String &r_error) {
-#if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
-	GDScriptLanguageProtocol *language_protocol = GDScriptLanguageProtocol::get_singleton();
-	if (!language_protocol || language_protocol->get_analysis_service().is_null()) {
-		r_error = "The built-in GDScript analysis service is not available.";
-		return ERR_UNCONFIGURED;
+	const Error prepare_error = builtin_features.prepare_for_registration(r_error);
+	if (prepare_error != OK) {
+		return prepare_error;
 	}
-	gdscript_session_manager->set_analysis_service(language_protocol->get_analysis_service());
-#endif
-	return feature_set.register_tools(&tool_registry, &r_error);
+	return builtin_features.register_tools(&tool_registry, &r_error);
 }
 
 void MCPEditorPlugin::_unregister_tools() {
-	feature_set.unregister_tools();
+	builtin_features.unregister_tools();
 }
 
 void MCPEditorPlugin::on_mcp_session_removed(const String &p_session_id) {
-	feature_set.on_session_removed(p_session_id);
+	builtin_features.on_session_removed(p_session_id);
 }
 
 Error MCPEditorPlugin::_publish_discovery(String &r_error) {
@@ -147,7 +113,7 @@ Error MCPEditorPlugin::_start_mcp(String &r_error) {
 		r_error = "Unable to start the MCP Streamable HTTP Host.";
 		return error;
 	}
-	harness_provider->set_trace_service(trace_service, host.get_project_metadata());
+	builtin_features.configure_host(host.get_project_metadata());
 
 	discovery_record.endpoint = host.get_endpoint();
 	error = _publish_discovery(r_error);
@@ -158,8 +124,8 @@ Error MCPEditorPlugin::_start_mcp(String &r_error) {
 		return error;
 	}
 
-	debug_event_store->clear();
-	error = debug_capture->start();
+	builtin_features.clear_debug_events();
+	error = builtin_features.start_debug_capture();
 	if (error != OK) {
 		MCPDiscovery::remove_record(discovery_directory, project_identity.project_id, project_identity.instance_id);
 		host.stop();
@@ -168,9 +134,9 @@ Error MCPEditorPlugin::_start_mcp(String &r_error) {
 		r_error = "Unable to start MCP debug event capture.";
 		return error;
 	}
-	add_debugger_plugin(runtime_input_debugger_plugin);
+	add_debugger_plugin(builtin_features.get_runtime_input_debugger_plugin());
 	runtime_input_debugger_registered = true;
-	add_debugger_plugin(runtime_observation_debugger_plugin);
+	add_debugger_plugin(builtin_features.get_runtime_observation_debugger_plugin());
 	runtime_observation_debugger_registered = true;
 
 	error = project_heartbeat.start(project_lease, discovery_directory, discovery_record);
@@ -185,17 +151,17 @@ Error MCPEditorPlugin::_start_mcp(String &r_error) {
 
 void MCPEditorPlugin::_stop_mcp() {
 	project_heartbeat.stop();
-	feature_set.shutdown();
+	builtin_features.shutdown();
 	if (runtime_observation_debugger_registered) {
-		remove_debugger_plugin(runtime_observation_debugger_plugin);
+		remove_debugger_plugin(builtin_features.get_runtime_observation_debugger_plugin());
 		runtime_observation_debugger_registered = false;
 	}
-	runtime_observation_debugger_plugin->clear_requests();
+	builtin_features.clear_runtime_requests();
 	if (runtime_input_debugger_registered) {
-		remove_debugger_plugin(runtime_input_debugger_plugin);
+		remove_debugger_plugin(builtin_features.get_runtime_input_debugger_plugin());
 		runtime_input_debugger_registered = false;
 	}
-	debug_capture->stop();
+	builtin_features.stop_debug_capture();
 	if (host.is_running()) {
 		host.stop();
 	}
@@ -297,7 +263,7 @@ void MCPEditorPlugin::_notification(int p_what) {
 				startup_state = STARTUP_RUNNING;
 			}
 			host.poll();
-			feature_set.process();
+			builtin_features.process();
 			String heartbeat_failure;
 			if (project_heartbeat.poll_failure(heartbeat_failure)) {
 				_exit_with_error("Godot MCP Host lost its project lease: " + heartbeat_failure);
@@ -312,95 +278,12 @@ void MCPEditorPlugin::_notification(int p_what) {
 
 MCPEditorPlugin::MCPEditorPlugin() {
 	singleton = this;
-#if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
-	Ref<MCPGDScriptSessionManager> session_manager;
-	session_manager.instantiate();
-	gdscript_session_manager = session_manager.ptr();
-#endif
-	automation_provider = memnew(MCPAutomationProvider);
-	class_provider = memnew(MCPClassProvider);
-	debug_event_store = memnew(MCPDebugEventStore);
-	debug_capture = memnew(MCPDebugCapture(debug_event_store));
-	debug_provider = memnew(MCPDebugProvider(debug_event_store));
-	runtime_debug_service = memnew(MCPRuntimeDebugService(debug_capture));
-	runtime_input_debugger_plugin.instantiate();
-	runtime_input_debugger_plugin->set_scheduler(runtime_debug_service->get_input_scheduler());
-	runtime_observation_debugger_plugin.instantiate();
-	runtime_debug_service->set_observation_plugin(runtime_observation_debugger_plugin.ptr());
-	runtime_provider = memnew(MCPRuntimeProvider(runtime_debug_service));
-	trace_service = memnew(MCPTraceService);
-	harness_provider = memnew(MCPHarnessProvider);
-	editor_provider = memnew(MCPEditorProvider);
-	editor_ui_provider = memnew(MCPEditorUIProvider);
-	file_provider = memnew(MCPFileProvider);
-	scene_provider = memnew(MCPSceneProvider);
-	node_provider = memnew(MCPNodeProvider);
-	node_structure_provider = memnew(MCPNodeStructureProvider);
-	project_provider = memnew(MCPProjectProvider);
-	autoload_provider = memnew(MCPAutoloadProvider);
-	input_map_provider = memnew(MCPInputMapProvider);
-#if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
-	script_provider = memnew(MCPScriptProvider(session_manager));
-#endif
-	resource_provider = memnew(MCPResourceProvider);
-#if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
-	gdscript_provider = memnew(MCPGDScriptProvider(session_manager));
-#endif
-	ERR_FAIL_COND(feature_set.add_feature(automation_provider) != OK);
-	ERR_FAIL_COND(feature_set.add_feature(class_provider) != OK);
-	ERR_FAIL_COND(feature_set.add_feature(debug_provider) != OK);
-	ERR_FAIL_COND(feature_set.add_feature(runtime_provider) != OK);
-	ERR_FAIL_COND(feature_set.add_feature(trace_service) != OK);
-	ERR_FAIL_COND(feature_set.add_feature(harness_provider) != OK);
-	ERR_FAIL_COND(feature_set.add_feature(editor_provider) != OK);
-	ERR_FAIL_COND(feature_set.add_feature(editor_ui_provider) != OK);
-	ERR_FAIL_COND(feature_set.add_feature(file_provider) != OK);
-	ERR_FAIL_COND(feature_set.add_feature(scene_provider) != OK);
-	ERR_FAIL_COND(feature_set.add_feature(node_provider) != OK);
-	ERR_FAIL_COND(feature_set.add_feature(node_structure_provider) != OK);
-	ERR_FAIL_COND(feature_set.add_feature(project_provider) != OK);
-	ERR_FAIL_COND(feature_set.add_feature(autoload_provider) != OK);
-	ERR_FAIL_COND(feature_set.add_feature(input_map_provider) != OK);
-#if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
-	ERR_FAIL_COND(feature_set.add_feature(script_provider) != OK);
-#endif
-	ERR_FAIL_COND(feature_set.add_feature(resource_provider) != OK);
-#if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
-	ERR_FAIL_COND(feature_set.add_feature(gdscript_provider) != OK);
-#endif
+	ERR_FAIL_COND(builtin_features.initialize() != OK);
 	set_process_internal(requested);
 }
 
 MCPEditorPlugin::~MCPEditorPlugin() {
 	_stop_mcp();
-#if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
-	memdelete(gdscript_provider);
-#endif
-	memdelete(resource_provider);
-#if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
-	memdelete(script_provider);
-#endif
-	memdelete(input_map_provider);
-	memdelete(autoload_provider);
-	memdelete(project_provider);
-	memdelete(node_structure_provider);
-	memdelete(node_provider);
-	memdelete(scene_provider);
-	memdelete(file_provider);
-	memdelete(editor_ui_provider);
-	memdelete(editor_provider);
-	memdelete(harness_provider);
-	memdelete(trace_service);
-	memdelete(runtime_provider);
-	memdelete(runtime_debug_service);
-	memdelete(debug_provider);
-	memdelete(debug_capture);
-	memdelete(debug_event_store);
-	memdelete(class_provider);
-	memdelete(automation_provider);
-#if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
-	gdscript_session_manager = nullptr;
-#endif
 	if (singleton == this) {
 		singleton = nullptr;
 	}

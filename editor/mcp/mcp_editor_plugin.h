@@ -29,41 +29,16 @@
 
 #pragma once
 
-#include "mcp_editor_feature.h"
+#include "mcp_builtin_features.h"
 #include "mcp_host.h"
 #include "mcp_http_health_probe.h"
 #include "mcp_project_heartbeat.h"
-#include "providers/mcp_runtime_input_debugger_plugin.h"
-#include "providers/mcp_runtime_observation_debugger_plugin.h"
 
 #include "core/mcp/mcp_discovery.h"
 #include "core/mcp/mcp_project_lease.h"
 #include "editor/plugins/editor_plugin.h"
 
 class ConfirmationDialog;
-class MCPAutoloadProvider;
-class MCPAutomationProvider;
-class MCPClassProvider;
-class MCPDebugCapture;
-class MCPDebugEventStore;
-class MCPDebugProvider;
-class MCPEditorProvider;
-class MCPEditorUIProvider;
-class MCPFileProvider;
-class MCPGDScriptProvider;
-class MCPGDScriptSessionManager;
-class MCPHarnessProvider;
-class MCPInputMapProvider;
-class MCPNodeProvider;
-class MCPNodeStructureProvider;
-class MCPProjectProvider;
-class MCPResourceProvider;
-class MCPRuntimeDebugService;
-class MCPRuntimeProvider;
-class MCPSceneProvider;
-class MCPScriptProvider;
-class MCPTraceService;
-
 class MCPEditorPlugin : public EditorPlugin, public MCPHostSessionObserver {
 	GDCLASS(MCPEditorPlugin, EditorPlugin);
 
@@ -81,7 +56,7 @@ class MCPEditorPlugin : public EditorPlugin, public MCPHostSessionObserver {
 
 	StartupState startup_state = STARTUP_PENDING;
 	MCPToolRegistry tool_registry;
-	MCPEditorFeatureSet feature_set;
+	MCPBuiltinFeatures builtin_features;
 	MCPHost host;
 	MCPProjectHeartbeat project_heartbeat;
 	MCPHTTPProjectLeaseHealthProbe health_probe;
@@ -93,32 +68,8 @@ class MCPEditorPlugin : public EditorPlugin, public MCPHostSessionObserver {
 	String last_start_error;
 	ConfirmationDialog *conflict_dialog = nullptr;
 	MCPDiscoveryRecord conflicting_owner;
-	MCPAutoloadProvider *autoload_provider = nullptr;
-	MCPAutomationProvider *automation_provider = nullptr;
-	MCPClassProvider *class_provider = nullptr;
-	MCPDebugEventStore *debug_event_store = nullptr;
-	MCPDebugCapture *debug_capture = nullptr;
-	MCPDebugProvider *debug_provider = nullptr;
-	MCPRuntimeDebugService *runtime_debug_service = nullptr;
-	MCPRuntimeProvider *runtime_provider = nullptr;
-	Ref<MCPRuntimeInputDebuggerPlugin> runtime_input_debugger_plugin;
 	bool runtime_input_debugger_registered = false;
-	Ref<MCPRuntimeObservationDebuggerPlugin> runtime_observation_debugger_plugin;
 	bool runtime_observation_debugger_registered = false;
-	MCPEditorProvider *editor_provider = nullptr;
-	MCPEditorUIProvider *editor_ui_provider = nullptr;
-	MCPFileProvider *file_provider = nullptr;
-	MCPSceneProvider *scene_provider = nullptr;
-	MCPNodeProvider *node_provider = nullptr;
-	MCPNodeStructureProvider *node_structure_provider = nullptr;
-	MCPProjectProvider *project_provider = nullptr;
-	MCPScriptProvider *script_provider = nullptr;
-	MCPResourceProvider *resource_provider = nullptr;
-	MCPGDScriptProvider *gdscript_provider = nullptr;
-	MCPGDScriptSessionManager *gdscript_session_manager = nullptr;
-	MCPHarnessProvider *harness_provider = nullptr;
-	MCPInputMapProvider *input_map_provider = nullptr;
-	MCPTraceService *trace_service = nullptr;
 
 	void _notification(int p_what);
 	Error _register_tools(String &r_error);

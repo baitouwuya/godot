@@ -35,7 +35,7 @@ void MCPRuntimeObservationDebuggerPlugin::_bind_methods() {
 
 bool MCPRuntimeObservationDebuggerPlugin::capture(const String &p_message, const Array &p_data, int p_session) {
 	if (p_message == "mcp_observation:response" || p_message == "mcp_condition:response" || p_message == "mcp_performance:response") {
-		response_store.handle_response(p_session, p_data);
+		request_broker.handle_response(p_session, p_data);
 	}
 	return true;
 }
@@ -45,17 +45,22 @@ bool MCPRuntimeObservationDebuggerPlugin::has_capture(const String &p_capture) c
 }
 
 bool MCPRuntimeObservationDebuggerPlugin::register_request(int p_session, const String &p_request_id, const String &p_operation) {
-	return response_store.register_request(p_session, p_request_id, p_operation);
+	return request_broker.register_request(p_session, p_request_id, p_operation);
 }
 
 bool MCPRuntimeObservationDebuggerPlugin::take_response(int p_session, const String &p_request_id, Response &r_response) {
-	return response_store.take_response(p_session, p_request_id, r_response);
+	return request_broker.take_response(p_session, p_request_id, r_response);
+}
+
+MCPRuntimeObservationDebuggerPlugin::WaitStatus MCPRuntimeObservationDebuggerPlugin::wait_for_response(ScriptEditorDebugger *p_debugger,
+		int p_session, const String &p_request_id, int p_timeout_msec, Response &r_response) {
+	return request_broker.wait_for_response(p_debugger, p_session, p_request_id, p_timeout_msec, r_response);
 }
 
 void MCPRuntimeObservationDebuggerPlugin::cancel_request(int p_session, const String &p_request_id) {
-	response_store.cancel_request(p_session, p_request_id);
+	request_broker.cancel_request(p_session, p_request_id);
 }
 
 void MCPRuntimeObservationDebuggerPlugin::clear_requests() {
-	response_store.clear();
+	request_broker.clear();
 }

@@ -57,10 +57,6 @@ bool MCPRuntimeInputScheduler::_resolve_debugger(int p_debugger_session, uint64_
 	return r_debugger && r_debugger->is_session_active();
 }
 
-String MCPRuntimeInputScheduler::_new_request_id() {
-	return "request-" + String::num_uint64(next_request_id++);
-}
-
 Error MCPRuntimeInputScheduler::_request(const String &p_mcp_session_id, ScriptEditorDebugger *p_debugger, const String &p_message, const String &p_operation,
 		const Array &p_arguments, Dictionary &r_data, String &r_error, int p_timeout_msec) {
 	r_data.clear();
@@ -69,49 +65,49 @@ Error MCPRuntimeInputScheduler::_request(const String &p_mcp_session_id, ScriptE
 		r_error = "The running project debugger is not connected.";
 		return ERR_CONNECTION_ERROR;
 	}
-	const String request_id = _new_request_id();
-	Response pending;
-	pending.mcp_session_id = p_mcp_session_id;
+	int debugger_session = -1;
 	if (EditorDebuggerNode *debugger_node = EditorDebuggerNode::get_singleton()) {
 		for (int i = 0; i < debugger_node->get_debugger_count(); i++) {
 			if (debugger_node->get_debugger(i) == p_debugger) {
-				pending.debugger_session = i;
+				debugger_session = i;
 				break;
 			}
 		}
 	}
-	if (pending.debugger_session < 0) {
+	if (debugger_session < 0) {
 		r_error = "The runtime debugger session could not be identified.";
 		return ERR_DOES_NOT_EXIST;
 	}
-	responses.insert(request_id, pending);
+	const String request_id = request_broker.create_request_id("input");
+	if (!request_broker.register_request(debugger_session, request_id, p_operation, p_mcp_session_id)) {
+		r_error = "The runtime debugger request limit is full.";
+		return ERR_BUSY;
+	}
 	Array arguments = p_arguments.duplicate();
 	arguments.push_front(request_id);
 	p_debugger->send_message("mcp_input:" + p_message, arguments);
 
-	const uint64_t deadline = OS::get_singleton()->get_ticks_usec() + uint64_t(p_timeout_msec) * 1000;
-	while (p_debugger->is_session_active() && OS::get_singleton()->get_ticks_usec() < deadline) {
-		p_debugger->poll_peer_messages(2000);
-		Response *response = responses.getptr(request_id);
-		if (response && response->received) {
-			const Response completed = *response;
-			responses.erase(request_id);
-			if (completed.operation != p_operation) {
-				r_error = "The running project returned a mismatched input response.";
-				return ERR_INVALID_DATA;
-			}
-			if (!completed.ok) {
-				r_error = completed.message.is_empty() ? completed.code : completed.message;
-				return ERR_CANT_RESOLVE;
-			}
-			r_data = completed.data;
-			return OK;
-		}
-		OS::get_singleton()->delay_usec(500);
+	MCPRuntimeRequestBroker::Response response;
+	const MCPRuntimeRequestBroker::WaitStatus wait_status = request_broker.wait_for_response(
+			p_debugger, debugger_session, request_id, p_timeout_msec, response);
+	if (wait_status == MCPRuntimeRequestBroker::WAIT_DISCONNECTED) {
+		r_error = "The running project disconnected before acknowledging runtime input.";
+		return ERR_CONNECTION_ERROR;
 	}
-	responses.erase(request_id);
-	r_error = "Timed out waiting for the running project to acknowledge runtime input.";
-	return ERR_TIMEOUT;
+	if (wait_status == MCPRuntimeRequestBroker::WAIT_TIMEOUT) {
+		r_error = "Timed out waiting for the running project to acknowledge runtime input.";
+		return ERR_TIMEOUT;
+	}
+	if (response.operation != p_operation) {
+		r_error = "The running project returned a mismatched input response.";
+		return ERR_INVALID_DATA;
+	}
+	if (!response.ok) {
+		r_error = response.message.is_empty() ? response.code : response.message;
+		return ERR_CANT_RESOLVE;
+	}
+	r_data = response.data;
+	return OK;
 }
 
 bool MCPRuntimeInputScheduler::_is_terminal(const SequenceRecord &p_record) {
@@ -139,15 +135,7 @@ bool MCPRuntimeInputScheduler::_prepare_sequence_capacity() {
 }
 
 void MCPRuntimeInputScheduler::_release_local_session(const String &p_mcp_session_id) {
-	Vector<String> response_ids;
-	for (const KeyValue<String, Response> &entry : responses) {
-		if (entry.value.mcp_session_id == p_mcp_session_id) {
-			response_ids.push_back(entry.key);
-		}
-	}
-	for (const String &response_id : response_ids) {
-		responses.erase(response_id);
-	}
+	request_broker.release_session(p_mcp_session_id);
 
 	for (int i = sequence_order.size() - 1; i >= 0; i--) {
 		const SequenceRecord *record = sequences.getptr(sequence_order[i]);
@@ -159,7 +147,7 @@ void MCPRuntimeInputScheduler::_release_local_session(const String &p_mcp_sessio
 }
 
 void MCPRuntimeInputScheduler::_clear_local_state() {
-	responses.clear();
+	request_broker.clear();
 	sequences.clear();
 	sequence_order.clear();
 }
@@ -358,20 +346,7 @@ void MCPRuntimeInputScheduler::process() {
 
 bool MCPRuntimeInputScheduler::handle_runtime_message(int p_debugger_session, const String &p_message, const Array &p_data) {
 	if (p_message == "mcp_input:response") {
-		if (p_data.size() != 6 || p_data[0].get_type() != Variant::STRING || p_data[1].get_type() != Variant::STRING ||
-				p_data[2].get_type() != Variant::BOOL || p_data[3].get_type() != Variant::STRING ||
-				p_data[4].get_type() != Variant::STRING || p_data[5].get_type() != Variant::DICTIONARY) {
-			return true;
-		}
-		Response *response = responses.getptr(p_data[0]);
-		if (response && response->debugger_session == p_debugger_session) {
-			response->received = true;
-			response->operation = p_data[1];
-			response->ok = p_data[2];
-			response->code = p_data[3];
-			response->message = p_data[4];
-			response->data = p_data[5];
-		}
+		request_broker.handle_response(p_debugger_session, p_data);
 		return true;
 	}
 	if (p_message == "mcp_input:sequence_state") {

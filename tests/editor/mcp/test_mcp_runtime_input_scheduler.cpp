@@ -46,9 +46,7 @@ struct MCPRuntimeInputSchedulerTestAccess {
 	}
 
 	static void add_response(MCPRuntimeInputScheduler &p_scheduler, const String &p_id, const String &p_session_id) {
-		MCPRuntimeInputScheduler::Response response;
-		response.mcp_session_id = p_session_id;
-		p_scheduler.responses[p_id] = response;
+		REQUIRE(p_scheduler.request_broker.register_request(0, p_id, "test", p_session_id));
 	}
 
 	static int max_retained_sequences() {
@@ -60,7 +58,7 @@ struct MCPRuntimeInputSchedulerTestAccess {
 	}
 
 	static int response_count(const MCPRuntimeInputScheduler &p_scheduler) {
-		return p_scheduler.responses.size();
+		return p_scheduler.request_broker.get_request_count();
 	}
 
 	static int sequence_order_count(const MCPRuntimeInputScheduler &p_scheduler) {
@@ -72,7 +70,7 @@ struct MCPRuntimeInputSchedulerTestAccess {
 	}
 
 	static bool has_response(const MCPRuntimeInputScheduler &p_scheduler, const String &p_id) {
-		return p_scheduler.responses.has(p_id);
+		return p_scheduler.request_broker.has_request(0, p_id);
 	}
 };
 

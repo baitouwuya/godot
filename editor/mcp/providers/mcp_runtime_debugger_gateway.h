@@ -47,8 +47,6 @@ public:
 private:
 	MCPDebugCapture *debug_capture = nullptr;
 	MCPRuntimeObservationDebuggerPlugin *response_plugin = nullptr;
-	mutable uint64_t next_request_id = 1;
-
 public:
 	explicit MCPRuntimeDebuggerGateway(MCPDebugCapture *p_debug_capture);
 

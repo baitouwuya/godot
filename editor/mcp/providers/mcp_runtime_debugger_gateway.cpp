@@ -34,7 +34,6 @@
 #include "mcp_runtime_observation_debugger_plugin.h"
 #include "mcp_tool_utils.h"
 
-#include "core/os/os.h"
 #include "editor/debugger/editor_debugger_node.h"
 #include "editor/debugger/script_editor_debugger.h"
 
@@ -131,34 +130,30 @@ Dictionary MCPRuntimeDebuggerGateway::request(const Dictionary &p_arguments, con
 	if (!response_plugin) {
 		return _error("RUNTIME_DEBUGGER_UNAVAILABLE", "The MCP runtime debugger response plugin is not active.");
 	}
-	const String request_id = vformat("%d-%d", OS::get_singleton()->get_process_id(), next_request_id++);
+	const String request_id = response_plugin->create_request_id("observation");
 	if (!response_plugin->register_request(session.debugger_session, request_id, p_operation)) {
 		return _error("RUNTIME_DEBUGGER_BUSY", "Unable to reserve a runtime debugger request.");
 	}
 	session.debugger->send_message(p_capture + ":" + p_operation, Array{ request_id, p_payload });
-	const uint64_t deadline = OS::get_singleton()->get_ticks_usec() + uint64_t(timeout_msec) * 1000;
 	MCPRuntimeObservationDebuggerPlugin::Response response;
-	// Debugger requests are bounded, short round trips. Long jobs keep asynchronous state in their domain service.
-	while (session.debugger->is_session_active() && OS::get_singleton()->get_ticks_usec() < deadline) {
-		session.debugger->poll_peer_messages(2000);
-		if (response_plugin->take_response(session.debugger_session, request_id, response)) {
-			if (!is_runtime_current(session.debugger_session, session.runtime_generation)) {
-				return _error("STALE_RUNTIME", "The running project restarted while resolving runtime targets.");
-			}
-			if (!response.ok) {
-				return MCPToolUtils::make_error_result(response.code.is_empty() ? "RUNTIME_DEBUGGER_REQUEST_FAILED" : response.code,
-						response.message.is_empty() ? "Runtime debugger request failed." : response.message, response.data);
-			}
-			Dictionary result = make_session_identity(session.debugger_session, session.runtime_generation);
-			result.merge(response.data, true);
-			return MCPToolUtils::make_success_result(result);
-		}
-		OS::get_singleton()->delay_usec(500);
+	const MCPRuntimeObservationDebuggerPlugin::WaitStatus wait_status = response_plugin->wait_for_response(
+			session.debugger, session.debugger_session, request_id, timeout_msec, response);
+	if (wait_status == MCPRuntimeRequestBroker::WAIT_TIMEOUT) {
+		return _error("RUNTIME_TIMEOUT", "Timed out waiting for the running project's debugger response.");
 	}
-	response_plugin->cancel_request(session.debugger_session, request_id);
-	return session.debugger->is_session_active()
-			? _error("RUNTIME_TIMEOUT", "Timed out waiting for the running project's debugger response.")
-			: _error("RUNTIME_NOT_RUNNING", "The running project stopped before returning the debugger response.");
+	if (wait_status == MCPRuntimeRequestBroker::WAIT_DISCONNECTED) {
+		return _error("RUNTIME_NOT_RUNNING", "The running project stopped before returning the debugger response.");
+	}
+	if (!is_runtime_current(session.debugger_session, session.runtime_generation)) {
+		return _error("STALE_RUNTIME", "The running project restarted while resolving runtime targets.");
+	}
+	if (!response.ok) {
+		return MCPToolUtils::make_error_result(response.code.is_empty() ? "RUNTIME_DEBUGGER_REQUEST_FAILED" : response.code,
+				response.message.is_empty() ? "Runtime debugger request failed." : response.message, response.data);
+	}
+	Dictionary result = make_session_identity(session.debugger_session, session.runtime_generation);
+	result.merge(response.data, true);
+	return MCPToolUtils::make_success_result(result);
 }
 
 Dictionary MCPRuntimeDebuggerGateway::make_session_identity(int p_debugger_session, uint64_t p_runtime_generation) const {

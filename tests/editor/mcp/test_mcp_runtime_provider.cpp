@@ -34,8 +34,8 @@
 #include "editor/mcp/providers/mcp_runtime_input.h"
 #include "editor/mcp/providers/mcp_runtime_input_sequence.h"
 #include "editor/mcp/providers/mcp_runtime_observation_debugger_plugin.h"
-#include "editor/mcp/providers/mcp_runtime_observation_response_store.h"
 #include "editor/mcp/providers/mcp_runtime_provider.h"
+#include "editor/mcp/providers/mcp_runtime_request_broker.h"
 #include "editor/mcp/providers/mcp_runtime_target_action.h"
 #include "scene/debugger/mcp_runtime_input_event.h"
 #include "scene/debugger/mcp_runtime_observation.h"
@@ -175,23 +175,43 @@ TEST_CASE("[MCP][Provider] Runtime observation selectors are strict and match co
 }
 
 TEST_CASE("[MCP][Provider] Runtime observation responses are correlated by debugger session and operation") {
-	MCPRuntimeObservationResponseStore store;
-	REQUIRE(store.register_request(1, "request-1", "query_nodes"));
-	CHECK_FALSE(store.register_request(1, "request-1", "query_nodes"));
+	MCPRuntimeRequestBroker broker;
+	REQUIRE(broker.register_request(1, "request-1", "query_nodes"));
+	CHECK_FALSE(broker.register_request(1, "request-1", "query_nodes"));
 
 	Dictionary data;
 	data["count"] = 1;
-	CHECK_FALSE(store.handle_response(1, Array{ "request-1", "get_interactables", true, String(), String(), data }));
-	MCPRuntimeObservationResponseStore::Response response;
-	CHECK_FALSE(store.take_response(1, "request-1", response));
-	CHECK_FALSE(store.handle_response(0, Array{ "request-1", "query_nodes", true, String(), String(), data }));
-	CHECK_FALSE(store.take_response(1, "request-1", response));
-	CHECK(store.handle_response(1, Array{ "request-1", "query_nodes", true, String(), String(), data }));
-	REQUIRE(store.take_response(1, "request-1", response));
+	CHECK_FALSE(broker.handle_response(1, Array{ "request-1", "get_interactables", true, String(), String(), data }));
+	MCPRuntimeRequestBroker::Response response;
+	CHECK_FALSE(broker.take_response(1, "request-1", response));
+	CHECK_FALSE(broker.handle_response(0, Array{ "request-1", "query_nodes", true, String(), String(), data }));
+	CHECK_FALSE(broker.take_response(1, "request-1", response));
+	CHECK(broker.handle_response(1, Array{ "request-1", "query_nodes", true, String(), String(), data }));
+	REQUIRE(broker.take_response(1, "request-1", response));
 	CHECK(response.ok);
 	CHECK(response.operation == "query_nodes");
 	CHECK(int(response.data["count"]) == 1);
 
+}
+
+TEST_CASE("[MCP][Provider] Runtime request broker bounds pending work and releases MCP sessions") {
+	MCPRuntimeRequestBroker broker;
+	for (int i = 0; i < MCPRuntimeRequestBroker::MAX_PENDING_REQUESTS; i++) {
+		const String session_id = i % 2 == 0 ? "session-a" : "session-b";
+		REQUIRE(broker.register_request(1, "request-" + itos(i), "query_nodes", session_id));
+	}
+	CHECK(broker.get_request_count() == MCPRuntimeRequestBroker::MAX_PENDING_REQUESTS);
+	CHECK_FALSE(broker.register_request(1, "overflow", "query_nodes", "session-a"));
+
+	broker.release_session("session-a");
+	CHECK(broker.get_request_count() == MCPRuntimeRequestBroker::MAX_PENDING_REQUESTS / 2);
+	CHECK_FALSE(broker.has_request(1, "request-0"));
+	CHECK(broker.has_request(1, "request-1"));
+	CHECK(broker.register_request(1, "replacement", "query_nodes", "session-b"));
+	CHECK(broker.get_request_count() == MCPRuntimeRequestBroker::MAX_PENDING_REQUESTS / 2 + 1);
+
+	broker.clear();
+	CHECK(broker.get_request_count() == 0);
 }
 
 TEST_CASE("[MCP][Provider] Runtime target actions compose bounded existing input sequences") {

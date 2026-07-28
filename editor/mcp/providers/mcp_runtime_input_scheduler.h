@@ -30,6 +30,7 @@
 #pragma once
 
 #include "mcp_runtime_input_sequence.h"
+#include "mcp_runtime_request_broker.h"
 
 #include "core/templates/hash_map.h"
 #include "core/templates/vector.h"
@@ -39,17 +40,6 @@ class ScriptEditorDebugger;
 struct MCPRuntimeInputSchedulerTestAccess;
 
 class MCPRuntimeInputScheduler {
-	struct Response {
-		bool received = false;
-		bool ok = false;
-		int debugger_session = -1;
-		String mcp_session_id;
-		String operation;
-		String code;
-		String message;
-		Dictionary data;
-	};
-
 	struct SequenceRecord {
 		String mcp_session_id;
 		int debugger_session = -1;
@@ -62,15 +52,13 @@ class MCPRuntimeInputScheduler {
 	static constexpr uint64_t HEARTBEAT_INTERVAL_USEC = 1000 * 1000;
 
 	MCPDebugCapture *debug_capture = nullptr;
-	HashMap<String, Response> responses;
+	MCPRuntimeRequestBroker request_broker;
 	HashMap<String, SequenceRecord> sequences;
 	Vector<String> sequence_order;
-	uint64_t next_request_id = 1;
 	uint64_t next_sequence_id = 1;
 	uint64_t last_heartbeat_usec = 0;
 
 	bool _resolve_debugger(int p_debugger_session, uint64_t p_runtime_generation, ScriptEditorDebugger *&r_debugger) const;
-	String _new_request_id();
 	Error _request(const String &p_mcp_session_id, ScriptEditorDebugger *p_debugger, const String &p_message, const String &p_operation, const Array &p_arguments,
 			Dictionary &r_data, String &r_error, int p_timeout_msec = RESPONSE_TIMEOUT_MSEC);
 	static bool _is_terminal(const SequenceRecord &p_record);

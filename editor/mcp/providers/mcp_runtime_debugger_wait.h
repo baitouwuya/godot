@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  mcp_runtime_request_broker.h                                          */
+/*  mcp_runtime_debugger_wait.h                                           */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,64 +30,64 @@
 
 #pragma once
 
-#include "mcp_runtime_debugger_wait.h"
+#include "core/typedefs.h"
 
-#include "core/string/ustring.h"
-#include "core/templates/hash_map.h"
-#include "core/variant/array.h"
-#include "core/variant/dictionary.h"
-
-class ScriptEditorDebugger;
-
-// Correlates short debugger round trips and exposes non-blocking response access.
-class MCPRuntimeRequestBroker {
+// Applies one polling policy to bounded editor-debugger waits.
+class MCPRuntimeDebuggerWait {
 public:
-	using WaitStatus = MCPRuntimeDebuggerWait::WaitStatus;
-	static constexpr WaitStatus WAIT_COMPLETED = MCPRuntimeDebuggerWait::WAIT_COMPLETED;
-	static constexpr WaitStatus WAIT_TIMEOUT = MCPRuntimeDebuggerWait::WAIT_TIMEOUT;
-	static constexpr WaitStatus WAIT_DISCONNECTED = MCPRuntimeDebuggerWait::WAIT_DISCONNECTED;
-	static constexpr WaitStatus WAIT_STALE = MCPRuntimeDebuggerWait::WAIT_STALE;
-
-	struct Response {
-		String operation;
-		bool ok = false;
-		String code;
-		String message;
-		Dictionary data;
+	enum WaitStatus {
+		WAIT_COMPLETED,
+		WAIT_TIMEOUT,
+		WAIT_DISCONNECTED,
+		WAIT_STALE,
 	};
 
-	static constexpr int MAX_PENDING_REQUESTS = 1024;
+	static uint64_t deadline_from_timeout_msec(int p_timeout_msec);
+
+	template <typename TDebugger, typename TCompletionPredicate, typename TStalePredicate>
+	static WaitStatus wait_until(TDebugger *p_debugger, uint64_t p_deadline_usec,
+			const TCompletionPredicate &p_is_completed, const TStalePredicate &p_is_stale) {
+		if (!p_debugger || !p_debugger->is_session_active()) {
+			return WAIT_DISCONNECTED;
+		}
+
+		while (true) {
+			if (p_is_stale()) {
+				return WAIT_STALE;
+			}
+			if (p_is_completed()) {
+				return WAIT_COMPLETED;
+			}
+			if (_get_ticks_usec() >= p_deadline_usec) {
+				return WAIT_TIMEOUT;
+			}
+
+			p_debugger->poll_peer_messages(POLL_BUDGET_USEC);
+			if (!p_debugger->is_session_active()) {
+				return WAIT_DISCONNECTED;
+			}
+			if (p_is_stale()) {
+				return WAIT_STALE;
+			}
+			if (p_is_completed()) {
+				return WAIT_COMPLETED;
+			}
+			if (_get_ticks_usec() >= p_deadline_usec) {
+				return WAIT_TIMEOUT;
+			}
+			_delay_between_polls();
+		}
+	}
+
+	template <typename TDebugger, typename TCompletionPredicate>
+	static WaitStatus wait_until(TDebugger *p_debugger, uint64_t p_deadline_usec,
+			const TCompletionPredicate &p_is_completed) {
+		return wait_until(p_debugger, p_deadline_usec, p_is_completed, []() { return false; });
+	}
 
 private:
-	struct RequestKey {
-		int debugger_session = -1;
-		String request_id;
+	static constexpr uint64_t POLL_BUDGET_USEC = 2000;
 
-		static uint32_t hash(const RequestKey &p_key);
-		bool operator==(const RequestKey &p_other) const;
-	};
-
-	struct PendingRequest {
-		String operation;
-		String mcp_session_id;
-	};
-
-	HashMap<RequestKey, PendingRequest, RequestKey> pending_requests;
-	HashMap<RequestKey, Response, RequestKey> responses;
-	uint64_t next_request_id = 1;
-
-public:
-	String create_request_id(const String &p_prefix);
-	bool register_request(int p_debugger_session, const String &p_request_id, const String &p_operation,
-			const String &p_mcp_session_id = String());
-	bool handle_response(int p_debugger_session, const Array &p_data);
-	bool take_response(int p_debugger_session, const String &p_request_id, Response &r_response);
-	WaitStatus wait_for_response(ScriptEditorDebugger *p_debugger, int p_debugger_session, const String &p_request_id,
-			int p_timeout_msec, Response &r_response);
-	void cancel_request(int p_debugger_session, const String &p_request_id);
-	void release_session(const String &p_mcp_session_id);
-	void clear();
-
-	bool has_request(int p_debugger_session, const String &p_request_id) const;
-	int get_request_count() const { return pending_requests.size(); }
+	static uint64_t _get_ticks_usec();
+	static void _delay_between_polls();
 };

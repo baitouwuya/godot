@@ -109,19 +109,13 @@ MCPRuntimeRequestBroker::WaitStatus MCPRuntimeRequestBroker::wait_for_response(S
 		cancel_request(p_debugger_session, p_request_id);
 		return WAIT_DISCONNECTED;
 	}
-	const uint64_t deadline = OS::get_singleton()->get_ticks_usec() + uint64_t(MAX(p_timeout_msec, 0)) * 1000;
-	while (p_debugger->is_session_active()) {
-		if (take_response(p_debugger_session, p_request_id, r_response)) {
-			return WAIT_COMPLETED;
-		}
-		if (OS::get_singleton()->get_ticks_usec() >= deadline) {
-			break;
-		}
-		p_debugger->poll_peer_messages(2000);
-		OS::get_singleton()->delay_usec(500);
+	const uint64_t deadline = MCPRuntimeDebuggerWait::deadline_from_timeout_msec(p_timeout_msec);
+	const WaitStatus status = MCPRuntimeDebuggerWait::wait_until(p_debugger, deadline, [&]() {
+		return take_response(p_debugger_session, p_request_id, r_response);
+	});
+	if (status != WAIT_COMPLETED) {
+		cancel_request(p_debugger_session, p_request_id);
 	}
-	const WaitStatus status = p_debugger->is_session_active() ? WAIT_TIMEOUT : WAIT_DISCONNECTED;
-	cancel_request(p_debugger_session, p_request_id);
 	return status;
 }
 

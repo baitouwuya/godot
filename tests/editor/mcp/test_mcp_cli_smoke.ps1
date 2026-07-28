@@ -29,6 +29,34 @@ function Assert-Condition {
 	}
 }
 
+function Read-ToolManifest {
+	param(
+		[Parameter(Mandatory = $true)]
+		[string]$Path
+	)
+
+	Assert-Condition (Test-Path -LiteralPath $Path -PathType Leaf) "Tool manifest does not exist: $Path"
+	try {
+		$manifest = Get-Content -LiteralPath $Path -Raw -Encoding utf8 | ConvertFrom-Json -ErrorAction Stop
+	} catch {
+		throw "Tool manifest is not valid JSON: $Path. $_"
+	}
+
+	$schemaVersion = $manifest.PSObject.Properties["schemaVersion"]
+	Assert-Condition ($null -ne $schemaVersion -and [int]$schemaVersion.Value -eq 1) "Tool manifest schemaVersion must be 1."
+	$tools = $manifest.PSObject.Properties["tools"]
+	Assert-Condition ($null -ne $tools) "Tool manifest must contain a tools array."
+
+	$toolNames = @($tools.Value | ForEach-Object { [string]$_ })
+	Assert-Condition ($toolNames.Count -gt 0) "Tool manifest must contain at least one tool."
+	$seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+	foreach ($toolName in $toolNames) {
+		Assert-Condition (-not [string]::IsNullOrWhiteSpace($toolName)) "Tool manifest contains an empty tool name."
+		Assert-Condition ($seen.Add($toolName)) "Tool manifest contains duplicate tool name '$toolName'."
+	}
+	return $toolNames
+}
+
 function Get-NonEmptyLines {
 	param([AllowEmptyString()][string]$Text)
 
@@ -476,6 +504,8 @@ if ($script:BinaryPath.EndsWith(".console.exe", [System.StringComparison]::Ordin
 $script:TimeoutSeconds = $TimeoutSeconds
 $script:TemporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("godot-mcp-smoke-" + [Guid]::NewGuid().ToString("N"))
 $script:Hosts = [System.Collections.Generic.List[object]]::new()
+$toolManifestPath = Join-Path $PSScriptRoot "data/mcp_tool_manifest.json"
+$expectedTools = @(Read-ToolManifest -Path $toolManifestPath)
 
 [void](New-Item -ItemType Directory -Path $script:TemporaryRoot -Force)
 $projectA = Join-Path $script:TemporaryRoot "project-a"
@@ -584,117 +614,9 @@ try {
 	Assert-Condition ($responsesById.ContainsKey("5")) "stdio class/get_documentation response is missing."
 	Assert-Condition ($responsesById.ContainsKey("6")) "stdio editor/ui/get_actions response is missing."
 
-	$expectedTools = @(
-		"godot.automation.batch",
-		"godot.class.search",
-		"godot.class.get_documentation",
-		"godot.debug.get_logs",
-		"godot.debug.get_errors",
-		"godot.debug.get_stack",
-		"godot.debug.get_latest_log",
-		"godot.runtime.get_state",
-		"godot.runtime.play",
-		"godot.runtime.stop",
-		"godot.runtime.pause",
-		"godot.runtime.resume",
-		"godot.runtime.next_frame",
-		"godot.runtime.debug.break",
-		"godot.runtime.debug.continue",
-		"godot.runtime.debug.step_into",
-		"godot.runtime.debug.step_over",
-		"godot.runtime.debug.step_out",
-		"godot.runtime.get_tree",
-		"godot.runtime.node.get_properties",
-		"godot.runtime.node.set_property",
-		"godot.runtime.input.send",
-		"godot.runtime.input.sequence",
-		"godot.runtime.input.sequence_status",
-		"godot.runtime.input.sequence_cancel",
-		"godot.runtime.input.release_all",
-		"godot.runtime.get_screenshot",
-		"godot.runtime.get_viewport_summary",
-		"godot.runtime.query_nodes",
-		"godot.runtime.get_interactables",
-		"godot.runtime.get_node_snapshot",
-		"godot.runtime.click_target",
-		"godot.runtime.double_click_target",
-		"godot.runtime.hover_target",
-		"godot.runtime.focus_target",
-		"godot.runtime.drag_target_to_target",
-		"godot.runtime.type_text",
-		"godot.runtime.scroll_view",
-		"godot.runtime.wait.start",
-		"godot.runtime.wait.status",
-		"godot.runtime.wait.cancel",
-		"godot.runtime.performance.start",
-		"godot.runtime.performance.status",
-		"godot.runtime.performance.stop",
-		"godot.runtime.harness.start",
-		"godot.runtime.harness.status",
-		"godot.runtime.harness.cancel",
-		"godot.runtime.harness.get_report",
-		"godot.editor.get_state",
-		"godot.editor.undo",
-		"godot.editor.redo",
-		"godot.editor.ui.get_actions",
-		"godot.editor.ui.perform",
-		"godot.project.get_settings",
-		"godot.project.get_setting",
-		"godot.project.set_setting",
-		"godot.project.erase_setting",
-		"godot.project.save",
-		"godot.autoload.get_all",
-		"godot.autoload.add",
-		"godot.autoload.remove",
-		"godot.input.get_actions",
-		"godot.input.set_action",
-		"godot.input.remove_action",
-		"godot.file.create",
-		"godot.resource.get_properties",
-		"godot.resource.set_property",
-		"godot.resource.save",
-		"godot.resource.import_options",
-		"godot.resource.import",
-		"godot.scene.open",
-		"godot.scene.get_tree",
-		"godot.scene.get_selection",
-		"godot.scene.save",
-		"godot.node.get_properties",
-		"godot.node.create",
-		"godot.node.set_property",
-		"godot.node.attach_script",
-		"godot.node.get_groups",
-		"godot.node.add_to_group",
-		"godot.node.remove_from_group",
-		"godot.node.get_signal_connections",
-		"godot.node.connect_signal",
-		"godot.node.disconnect_signal",
-		"godot.node.delete",
-		"godot.node.rename",
-		"godot.node.reparent",
-		"godot.node.move",
-		"godot.node.duplicate",
-		"godot.node.instantiate_scene",
-		"godot.script.create",
-		"godot.script.open",
-		"godot.script.get",
-		"godot.script.usages",
-		"godot.script.edit",
-		"godot.script.save",
-		"godot.gdscript.diagnostics",
-		"godot.gdscript.symbols",
-		"godot.gdscript.completion",
-		"godot.gdscript.hover",
-		"godot.gdscript.definition",
-		"godot.gdscript.declaration",
-		"godot.gdscript.references",
-		"godot.gdscript.signature_help",
-		"godot.gdscript.rename",
-		"godot.gdscript.apply_workspace_edit"
-	) | Sort-Object
-	$actualTools = @($responsesById["2"].result.tools | ForEach-Object { [string]$_.name } | Sort-Object)
-	Assert-Condition ($actualTools.Count -eq 106) "tools/list returned $($actualTools.Count) tools instead of 106."
-	Assert-Condition (($actualTools -join "`n") -ceq ($expectedTools -join "`n")) "tools/list did not expose the expected 106-tool surface."
+	$actualTools = @($responsesById["2"].result.tools | ForEach-Object { [string]$_.name })
+	Assert-Condition ($actualTools.Count -eq $expectedTools.Count) "tools/list returned $($actualTools.Count) tools instead of $($expectedTools.Count)."
+	Assert-Condition (($actualTools -join "`n") -ceq ($expectedTools -join "`n")) "tools/list did not expose the ordered tool surface declared by $toolManifestPath."
 	foreach ($tool in @($responsesById["2"].result.tools)) {
 		Assert-Condition ($null -ne $tool.outputSchema) "Tool $($tool.name) is missing outputSchema."
 		Assert-Condition ([string]$tool.outputSchema.type -ceq "object") "Tool $($tool.name) outputSchema is not an object schema."

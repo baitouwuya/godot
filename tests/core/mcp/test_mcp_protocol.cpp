@@ -185,6 +185,9 @@ TEST_CASE("[MCP][Protocol] Lists and invokes tools without injecting the JSON-RP
 	session_context["sessionId"] = "session-1";
 	const Dictionary call_response = protocol.dispatch(make_request("tools/call", "rpc-id", call_params), session_context).response;
 	const Dictionary call_result = call_response.get("result", Dictionary());
+	const Array content = call_result.get("content", Array());
+	REQUIRE(content.size() == 1);
+	CHECK(Dictionary(content[0]).get("text", String()) == "{\"structuredContentAvailable\":true}");
 	const Dictionary structured_content = call_result.get("structuredContent", Dictionary());
 	const Dictionary observed_arguments = structured_content.get("arguments", Dictionary());
 	const Dictionary observed_context = structured_content.get("context", Dictionary());
@@ -199,6 +202,28 @@ TEST_CASE("[MCP][Protocol] Lists and invokes tools without injecting the JSON-RP
 	CHECK_EQ(provider->call_count, 1);
 
 	CHECK_EQ(registry.unregister_tools_for_owner(provider), 1);
+	memdelete(provider);
+}
+
+TEST_CASE("[MCP][Protocol] Keeps complete text tool results for legacy clients") {
+	MCPToolRegistry registry;
+	ToolProvider *provider = memnew(ToolProvider);
+	Dictionary definition;
+	definition["name"] = "echo";
+	REQUIRE(registry.register_tool(definition, callable_mp(provider, &ToolProvider::echo), provider) == OK);
+
+	MCPProtocol protocol(&registry);
+	finish_initialization(protocol, MCPProtocol::PROTOCOL_VERSION_2025_03_26);
+	Dictionary call_params;
+	call_params["name"] = "echo";
+	const Dictionary response = protocol.dispatch(make_request("tools/call", 1, call_params)).response;
+	const Dictionary result = response.get("result", Dictionary());
+	const Array content = result.get("content", Array());
+	REQUIRE(content.size() == 1);
+	CHECK(Dictionary(content[0]).get("text", String()) == "echo");
+	CHECK(result.has("structuredContent"));
+
+	registry.unregister_tools_for_owner(provider);
 	memdelete(provider);
 }
 

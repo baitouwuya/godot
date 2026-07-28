@@ -32,6 +32,23 @@
 
 #include "core/io/json.h"
 
+namespace {
+
+static void _compact_structured_tool_content(Dictionary &r_result) {
+	if (r_result.get("isError", false) || !r_result.has("structuredContent")) {
+		return;
+	}
+
+	Dictionary text_content;
+	text_content["type"] = "text";
+	text_content["text"] = "{\"structuredContentAvailable\":true}";
+	Array content;
+	content.push_back(text_content);
+	r_result["content"] = content;
+}
+
+} // namespace
+
 MCPProtocol::MCPProtocol(MCPToolRegistry *p_tool_registry) {
 	tool_registry = p_tool_registry;
 }
@@ -196,6 +213,9 @@ Variant MCPProtocol::_handle_tools_call(const Dictionary &p_params, const Varian
 	}
 
 	Dictionary result = call_result.result.duplicate(true);
+	if (protocol_version != PROTOCOL_VERSION_2025_03_26) {
+		_compact_structured_tool_content(result);
+	}
 	if (!_attach_project_metadata(result)) {
 		return _make_error(p_id, INTERNAL_ERROR, "Tool result _meta must be an object.");
 	}

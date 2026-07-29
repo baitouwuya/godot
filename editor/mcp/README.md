@@ -193,11 +193,27 @@ Held inputs are tracked inside the running project by MCP session and sequence o
 
 ## Smoke Test
 
-The end-to-end PowerShell smoke test requires PowerShell 7.2 or newer and an editor binary built with MCP support:
+The cross-platform Python smoke test is the baseline for the embedded MCP CLI and Host. It requires Python 3.9 or newer and an editor binary built with MCP support:
+
+```bash
+python3 tests/editor/mcp/test_mcp_cli_smoke.py \
+  --binary bin/godot.macos.editor.dev.arm64
+```
+
+On Windows, the same test can be run with the console editor binary:
+
+```powershell
+py -3 tests/editor/mcp/test_mcp_cli_smoke.py `
+  --binary bin/godot.windows.editor.dev.x86_64.console.exe
+```
+
+The Python test creates two temporary projects and verifies explicit-path errors, CLI/editor conflicts, ordinary editor behavior, public discovery fields, independent multi-project routing, same-project Host exclusion, JSON-only stdio stdout, the complete ordered 106-tool MCP surface, native settings and script/class operations, structural Node edits with undo/redo and explicit scene save, runtime play/state/stop, runtime warnings and errors, and project isolation. Temporary editor plugins request clean Host shutdown; forced termination is used only as a timeout fallback.
+
+The Windows PowerShell smoke test remains available for Windows-specific extension coverage. It requires PowerShell 7.2 or newer:
 
 ```powershell
 pwsh -File tests/editor/mcp/test_mcp_cli_smoke.ps1 `
   -Binary bin/godot.windows.editor.dev.x86_64.console.exe
 ```
 
-Optional parameters are `-TimeoutSeconds <5-300>` and `-KeepTemporaryProjects`. The test creates two temporary projects and verifies explicit-path errors, CLI/editor conflicts, ordinary editor behavior, public discovery fields, independent multi-project routing, same-project Host exclusion, JSON-only stdio stdout, the complete 106-tool MCP surface, native class search/documentation, editor UI discovery, runtime tool discovery, compressed debug output and errors, cross-session dirty ScriptEditor revision/diagnostic/save/usage behavior, structural Node edits with `NodePath` rewrites, persistent node group and signal changes, and explicit scene save. Temporary editor plugins request clean Host shutdown; forced termination is used only as a timeout fallback.
+Optional parameters are `-TimeoutSeconds <5-300>` and `-KeepTemporaryProjects`. In addition to the baseline protocol checks, this test covers Windows-oriented editor extensions such as dirty ScriptEditor state, complex NodePath and structural rewrites, debug compression, persistent node groups/signals, and the broader runtime/editor workflow.

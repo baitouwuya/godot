@@ -61,6 +61,16 @@ static String _error_code(const MCPToolRegistry::CallResult &p_result) {
 	return Dictionary(content.get("error", Dictionary())).get("code", String());
 }
 
+static Dictionary _definition_for(const Array &p_definitions, const StringName &p_name) {
+	for (const Variant &definition_value : p_definitions) {
+		const Dictionary definition = definition_value;
+		if (StringName(definition.get("name", StringName())) == p_name) {
+			return definition;
+		}
+	}
+	return Dictionary();
+}
+
 TEST_CASE("[MCP][Provider] Runtime tools register in a stable order") {
 	MCPRuntimeDebugService service(nullptr);
 	MCPRuntimeProvider provider(&service);
@@ -82,31 +92,31 @@ TEST_CASE("[MCP][Provider] Runtime tools register in a stable order") {
 	CHECK(names[9] == "godot.runtime.debug.step_over");
 	CHECK(names[10] == "godot.runtime.debug.step_out");
 	CHECK(names[11] == "godot.runtime.get_tree");
-	CHECK(names[12] == "godot.runtime.get_screenshot");
-	CHECK(names[13] == "godot.runtime.get_viewport_summary");
-	CHECK(names[14] == "godot.runtime.query_nodes");
-	CHECK(names[15] == "godot.runtime.get_interactables");
-	CHECK(names[16] == "godot.runtime.get_node_snapshot");
-	CHECK(names[17] == "godot.runtime.click_target");
-	CHECK(names[18] == "godot.runtime.double_click_target");
-	CHECK(names[19] == "godot.runtime.hover_target");
-	CHECK(names[20] == "godot.runtime.focus_target");
-	CHECK(names[21] == "godot.runtime.drag_target_to_target");
-	CHECK(names[22] == "godot.runtime.type_text");
-	CHECK(names[23] == "godot.runtime.scroll_view");
-	CHECK(names[24] == "godot.runtime.wait.start");
-	CHECK(names[25] == "godot.runtime.wait.status");
-	CHECK(names[26] == "godot.runtime.wait.cancel");
-	CHECK(names[27] == "godot.runtime.performance.start");
-	CHECK(names[28] == "godot.runtime.performance.status");
-	CHECK(names[29] == "godot.runtime.performance.stop");
-	CHECK(names[30] == "godot.runtime.node.get_properties");
-	CHECK(names[31] == "godot.runtime.node.set_property");
-	CHECK(names[32] == "godot.runtime.input.send");
-	CHECK(names[33] == "godot.runtime.input.sequence");
-	CHECK(names[34] == "godot.runtime.input.sequence_status");
-	CHECK(names[35] == "godot.runtime.input.sequence_cancel");
-	CHECK(names[36] == "godot.runtime.input.release_all");
+	CHECK(names[12] == "godot.runtime.node.get_properties");
+	CHECK(names[13] == "godot.runtime.node.set_property");
+	CHECK(names[14] == "godot.runtime.input.send");
+	CHECK(names[15] == "godot.runtime.input.sequence");
+	CHECK(names[16] == "godot.runtime.input.sequence_status");
+	CHECK(names[17] == "godot.runtime.input.sequence_cancel");
+	CHECK(names[18] == "godot.runtime.input.release_all");
+	CHECK(names[19] == "godot.runtime.get_screenshot");
+	CHECK(names[20] == "godot.runtime.get_viewport_summary");
+	CHECK(names[21] == "godot.runtime.query_nodes");
+	CHECK(names[22] == "godot.runtime.get_interactables");
+	CHECK(names[23] == "godot.runtime.get_node_snapshot");
+	CHECK(names[24] == "godot.runtime.click_target");
+	CHECK(names[25] == "godot.runtime.double_click_target");
+	CHECK(names[26] == "godot.runtime.hover_target");
+	CHECK(names[27] == "godot.runtime.focus_target");
+	CHECK(names[28] == "godot.runtime.drag_target_to_target");
+	CHECK(names[29] == "godot.runtime.type_text");
+	CHECK(names[30] == "godot.runtime.scroll_view");
+	CHECK(names[31] == "godot.runtime.wait.start");
+	CHECK(names[32] == "godot.runtime.wait.status");
+	CHECK(names[33] == "godot.runtime.wait.cancel");
+	CHECK(names[34] == "godot.runtime.performance.start");
+	CHECK(names[35] == "godot.runtime.performance.status");
+	CHECK(names[36] == "godot.runtime.performance.stop");
 
 	const Array definitions = registry.get_tool_definitions();
 	REQUIRE(definitions.size() == 37);
@@ -123,13 +133,13 @@ TEST_CASE("[MCP][Provider] Runtime tools register in a stable order") {
 	const Dictionary state_properties = state_output.get("properties", Dictionary());
 	CHECK(state_properties.has("processId"));
 	CHECK(state_properties.has("sessions"));
-	const Dictionary target_output = Dictionary(definitions[17]).get("outputSchema", Dictionary());
+	const Dictionary target_output = _definition_for(definitions, "godot.runtime.click_target").get("outputSchema", Dictionary());
 	CHECK(bool(target_output.get("additionalProperties", false)));
 	CHECK(Dictionary(target_output.get("properties", Dictionary())).has("action"));
-	const Dictionary wait_output = Dictionary(definitions[24]).get("outputSchema", Dictionary());
+	const Dictionary wait_output = _definition_for(definitions, "godot.runtime.wait.start").get("outputSchema", Dictionary());
 	CHECK_FALSE(bool(wait_output.get("additionalProperties", true)));
 	CHECK(Dictionary(wait_output.get("properties", Dictionary())).has("evaluationCount"));
-	const Dictionary properties_output = Dictionary(definitions[30]).get("outputSchema", Dictionary());
+	const Dictionary properties_output = _definition_for(definitions, "godot.runtime.node.get_properties").get("outputSchema", Dictionary());
 	CHECK(bool(properties_output.get("additionalProperties", false)));
 	CHECK(Dictionary(properties_output.get("properties", Dictionary())).has("propertyLayout"));
 

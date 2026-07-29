@@ -115,19 +115,17 @@ Error MCPBuiltinFeatures::initialize() {
 		harness_provider,
 		editor_provider,
 		editor_ui_provider,
-		file_provider,
-		scene_provider,
-		node_provider,
-		node_structure_provider,
 		project_provider,
 		autoload_provider,
 		input_map_provider,
+		file_provider,
+		resource_provider,
+		scene_provider,
+		node_provider,
+		node_structure_provider,
 	};
 #if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
 	builtin_feature_order.push_back(script_provider);
-#endif
-	builtin_feature_order.push_back(resource_provider);
-#if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
 	builtin_feature_order.push_back(gdscript_provider);
 #endif
 	for (MCPEditorFeature *feature : builtin_feature_order) {

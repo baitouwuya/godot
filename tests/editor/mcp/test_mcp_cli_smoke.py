@@ -14,9 +14,11 @@ from mcp_smoke_test_utils import (
     HostProcess,
     ProcessRunner,
     SmokeFailure,
+    describe_command_result,
     invoke_stdio,
     load_tool_manifest,
     parse_discovery,
+    request,
     require,
     tool_call,
     wait_until,
@@ -194,8 +196,13 @@ def run_smoke(binary: str, timeout: int, keep_temporary_projects: bool) -> None:
         require("cannot be combined" in mode_conflict.stderr.lower(), "CLI/editor conflict diagnostic is missing.")
 
         print("[2/9] Checking ordinary editor startup remains MCP-free")
-        ordinary = runner.invoke(["--editor", "--headless", "--path", str(project_a), "--quit"])
-        require(ordinary.returncode == 0, f"ordinary headless editor startup failed: {ordinary.stderr}")
+        ordinary = runner.invoke(
+            ["--editor", "--headless", "--path", str(project_a), "--quit-after", "30"]
+        )
+        require(
+            ordinary.returncode == 0,
+            f"ordinary headless editor startup failed: {describe_command_result(ordinary)}",
+        )
         require("MCP Host started" not in f"{ordinary.stdout}\n{ordinary.stderr}", "ordinary editor startup enabled MCP.")
         ordinary_discovery = runner.invoke(["--verbose", "--mcp-discover", "--path", str(project_a)])
         require(ordinary_discovery.returncode != 0, "ordinary editor startup unexpectedly published MCP discovery.")
@@ -232,7 +239,7 @@ def run_smoke(binary: str, timeout: int, keep_temporary_projects: bool) -> None:
 
         print("[6/9] Checking stdio JSON, 106-tool manifest, settings, classes, and scripts")
         surface_requests = [
-            {"id": 2, "method": "tools/list", "params": {}},
+            request(2, "tools/list", {}),
             tool_call(3, "godot.script.create", {"path": "res://mcp_smoke_created.gd", "text": INITIAL_SCRIPT_TEXT}),
             tool_call(4, "godot.script.get", {"path": "res://mcp_smoke_created.gd"}),
             tool_call(5, "godot.project.get_setting", {"name": "application/config/name"}),
@@ -243,7 +250,20 @@ def run_smoke(binary: str, timeout: int, keep_temporary_projects: bool) -> None:
         tools_list = surface[2]["result"]["tools"]
         require(isinstance(tools_list, list), "tools/list did not return a tools array.")
         actual_tools = [tool.get("name") for tool in tools_list]
-        require(actual_tools == expected_tools, "tools/list did not match the ordered 106-tool manifest.")
+        first_mismatch = next(
+            (index for index, pair in enumerate(zip(actual_tools, expected_tools)) if pair[0] != pair[1]),
+            min(len(actual_tools), len(expected_tools)),
+        )
+        require(
+            actual_tools == expected_tools,
+            "tools/list did not match the ordered 106-tool manifest: "
+            f"actualCount={len(actual_tools)}, expectedCount={len(expected_tools)}, "
+            f"firstMismatch={first_mismatch}, "
+            f"actual={actual_tools[first_mismatch:first_mismatch + 3]!r}, "
+            f"expected={expected_tools[first_mismatch:first_mismatch + 3]!r}, "
+            f"missing={sorted(set(expected_tools) - set(actual_tools))!r}, "
+            f"unexpected={sorted(set(actual_tools) - set(expected_tools))!r}",
+        )
         for tool in tools_list:
             require(isinstance(tool.get("outputSchema"), dict), f"Tool {tool.get('name')} is missing outputSchema.")
             require(tool["outputSchema"].get("type") == "object", f"Tool {tool.get('name')} outputSchema is not an object schema.")

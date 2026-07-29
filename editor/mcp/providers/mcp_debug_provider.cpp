@@ -81,10 +81,10 @@ Error MCPDebugProvider::register_tools(MCPToolRegistry *p_registry, String *r_er
 				MCPDebugToolUtils::query_schema(false), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPDebugProvider::get_logs), MCPDebugToolUtils::query_output_schema(false) },
 		{ "godot.debug.get_errors", "Read compressed structured warnings and errors.",
 				MCPDebugToolUtils::query_schema(true), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPDebugProvider::get_errors), MCPDebugToolUtils::query_output_schema(true) },
-		{ "godot.debug.get_latest_log", "Read the latest configured project log as a bounded raw tail or compressed summary.",
-				MCPDebugToolUtils::latest_log_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPDebugProvider::get_latest_log), MCPDebugToolUtils::latest_log_output_schema() },
 		{ "godot.debug.get_stack", "Read a full error stack or the latest paused running-project stack.",
 				MCPDebugToolUtils::stack_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPDebugProvider::get_stack), MCPDebugToolUtils::stack_output_schema() },
+		{ "godot.debug.get_latest_log", "Read the latest configured project log as a bounded raw tail or compressed summary.",
+				MCPDebugToolUtils::latest_log_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPDebugProvider::get_latest_log), MCPDebugToolUtils::latest_log_output_schema() },
 	};
 	const Error error = MCPToolUtils::register_tools(p_registry, this, tools, r_error);
 	if (error != OK) {

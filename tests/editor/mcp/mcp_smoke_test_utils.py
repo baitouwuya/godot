@@ -30,6 +30,13 @@ class CommandResult:
     arguments: Sequence[str]
 
 
+def describe_command_result(result: CommandResult) -> str:
+    return (
+        f"command={list(result.arguments)!r}, returncode={result.returncode}, "
+        f"stdout={result.stdout!r}, stderr={result.stderr!r}"
+    )
+
+
 def _creation_flags() -> int:
     return subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
@@ -261,17 +268,30 @@ def parse_jsonrpc_responses(
     result: CommandResult,
     expected_ids: Iterable[int],
     label: str,
+    request_descriptions: Optional[Sequence[str]] = None,
 ) -> Dict[int, Dict[str, Any]]:
-    require(result.returncode == 0, f"{label} failed with {result.returncode}: {result.stderr}")
+    command_result = describe_command_result(result)
+    require(result.returncode == 0, f"{label} failed: {command_result}")
     expected = set(expected_ids)
     lines = non_empty_lines(result.stdout)
-    require(len(lines) == len(expected), f"{label} produced {len(lines)} responses instead of {len(expected)}: {result.stdout!r}")
+    require(
+        len(lines) == len(expected),
+        f"{label} produced {len(lines)} responses instead of {len(expected)}: {command_result}",
+    )
     responses: Dict[int, Dict[str, Any]] = {}
-    for line in lines:
+    for response_index, line in enumerate(lines):
+        request_description = (
+            request_descriptions[response_index]
+            if request_descriptions is not None and response_index < len(request_descriptions)
+            else "unknown request"
+        )
         try:
             response = json.loads(line)
         except json.JSONDecodeError as error:
-            raise SmokeFailure(f"{label} stdout contains a non-JSON line: {line!r}") from error
+            raise SmokeFailure(
+                f"{label} stdout response {response_index + 1} for {request_description} "
+                f"is not JSON: {line!r}; {command_result}"
+            ) from error
         require(isinstance(response, dict), f"{label} emitted a non-object JSON-RPC response.")
         require(response.get("jsonrpc") == "2.0", f"{label} emitted a response with an invalid jsonrpc field.")
         response_id = response.get("id")
@@ -284,7 +304,11 @@ def parse_jsonrpc_responses(
             normalized_id = int(response_id)
         else:
             normalized_id = None
-        require(normalized_id is not None, f"{label} emitted a response without an integer id: {response!r}")
+        require(
+            normalized_id is not None,
+            f"{label} response {response_index + 1} for {request_description} has no integer id: "
+            f"{response!r}; {command_result}",
+        )
         require(normalized_id not in responses, f"{label} emitted duplicate response id {normalized_id}.")
         responses[normalized_id] = response
     require(set(responses) == expected, f"{label} response ids differ: {sorted(responses)} != {sorted(expected)}")
@@ -309,15 +333,21 @@ def invoke_stdio(
     )
     initialized = notification("notifications/initialized", {})
     expected_ids = [1]
+    request_descriptions = ["initialize (id=1)"]
     for item in requests:
         request_id = item.get("id")
         require(type(request_id) is int and request_id != 1, f"{label} contains an invalid or reserved request id.")
         expected_ids.append(request_id)
+        method = item.get("method", "<missing method>")
+        params = item.get("params")
+        tool_name = params.get("name") if isinstance(params, dict) else None
+        suffix = f", tool={tool_name}" if isinstance(tool_name, str) else ""
+        request_descriptions.append(f"{method} (id={request_id}{suffix})")
     result = runner.invoke(
         ["--verbose", "--mcp-stdio", "--path", str(project_path)],
         [json_line(initialize), json_line(initialized), *(json_line(item) for item in requests)],
     )
-    return parse_jsonrpc_responses(result, expected_ids, label)
+    return parse_jsonrpc_responses(result, expected_ids, label, request_descriptions)
 
 
 def wait_until(deadline_seconds: int, operation: Any, description: str, interval: float = 0.2) -> Any:

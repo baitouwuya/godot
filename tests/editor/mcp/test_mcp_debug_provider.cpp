@@ -89,8 +89,8 @@ TEST_CASE("[MCP][Provider] Debug tools register in order with strict schemas") {
 	REQUIRE(names.size() == 4);
 	CHECK(names[0] == "godot.debug.get_logs");
 	CHECK(names[1] == "godot.debug.get_errors");
-	CHECK(names[2] == "godot.debug.get_latest_log");
-	CHECK(names[3] == "godot.debug.get_stack");
+	CHECK(names[2] == "godot.debug.get_stack");
+	CHECK(names[3] == "godot.debug.get_latest_log");
 
 	const Array definitions = registry.get_tool_definitions();
 	REQUIRE(definitions.size() == 4);
@@ -105,14 +105,14 @@ TEST_CASE("[MCP][Provider] Debug tools register in order with strict schemas") {
 	CHECK_FALSE(bool(logs_output.get("additionalProperties", true)));
 	const Dictionary errors_output = Dictionary(definitions[1]).get("outputSchema", Dictionary());
 	CHECK(Dictionary(errors_output.get("properties", Dictionary())).has("errors"));
-	const Dictionary latest_output = Dictionary(definitions[2]).get("outputSchema", Dictionary());
+	const Dictionary latest_output = Dictionary(definitions[3]).get("outputSchema", Dictionary());
 	CHECK(PackedStringArray(latest_output.get("required", PackedStringArray())).has("shownLines"));
 	CHECK(bool(latest_output.get("additionalProperties", false)));
-	const Dictionary stack_input = Dictionary(definitions[3]).get("inputSchema", Dictionary());
+	const Dictionary stack_input = Dictionary(definitions[2]).get("inputSchema", Dictionary());
 	CHECK(Array(stack_input.get("oneOf", Array())).size() == 2);
 	const Dictionary stack_error_id = Dictionary(stack_input.get("properties", Dictionary())).get("errorId", Dictionary());
 	CHECK(int(stack_error_id.get("minLength", 0)) == 1);
-	const Dictionary stack_output = Dictionary(definitions[3]).get("outputSchema", Dictionary());
+	const Dictionary stack_output = Dictionary(definitions[2]).get("outputSchema", Dictionary());
 	CHECK(PackedStringArray(stack_output.get("required", PackedStringArray())).has("frames"));
 	CHECK_FALSE(bool(stack_output.get("additionalProperties", true)));
 

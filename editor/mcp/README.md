@@ -4,6 +4,8 @@ Godot exposes MCP as an opt-in editor Host plus two terminal CLI transport adapt
 
 Every advertised tool includes an object `outputSchema` and the standard MCP `readOnlyHint`, `destructiveHint`, `idempotentHint`, and `openWorldHint` annotations. Godot tools always declare `openWorldHint=false`; Providers classify state-changing and potentially destructive operations explicitly through the shared tool-definition factory.
 
+The implementation and extension boundaries are documented in [ARCHITECTURE.md](ARCHITECTURE.md). Contributors adding a Feature, Provider, service, or public tool should follow [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Start a Host
 
 Start one editor Host for a project with an explicit project path:
@@ -194,6 +196,14 @@ Held inputs are tracked inside the running project by MCP session and sequence o
 ## Smoke Test
 
 The cross-platform Python smoke test is the baseline for the embedded MCP CLI and Host. It requires Python 3.9 or newer and an editor binary built with MCP support:
+
+Run the fast architecture and compatibility checks before building:
+
+```bash
+python3 misc/scripts/validate_mcp_dependencies.py --root .
+python3 misc/scripts/validate_mcp_build_surfaces.py --root .
+python3 misc/scripts/validate_mcp_tool_manifest.py --root .
+```
 
 ```bash
 python3 tests/editor/mcp/test_mcp_cli_smoke.py \

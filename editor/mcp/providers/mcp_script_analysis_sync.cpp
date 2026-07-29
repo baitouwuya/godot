@@ -30,7 +30,7 @@
 
 #include "mcp_script_analysis_sync.h"
 
-#include "mcp_script_buffer.h"
+#include "mcp_script_snapshot_reader.h"
 #include "mcp_tool_utils.h"
 
 Error MCPScriptAnalysisSync::sync_snapshot(const Ref<MCPGDScriptSessionManager> &p_session_manager, const String &p_session_id, const Dictionary &p_snapshot, Array *r_diagnostics, String *r_error) {
@@ -75,7 +75,7 @@ Error MCPScriptAnalysisSync::sync_authoritative_path(const Ref<MCPGDScriptSessio
 	if (r_diagnostics) {
 		r_diagnostics->clear();
 	}
-	const Error read_error = MCPScriptBuffer::read_authoritative_snapshot_for_root(p_path, p_project_root, r_snapshot, r_error);
+	const Error read_error = MCPScriptSnapshotReader::read_for_root(p_path, p_project_root, r_snapshot, r_error);
 	if (read_error != OK) {
 		return read_error;
 	}
@@ -84,7 +84,7 @@ Error MCPScriptAnalysisSync::sync_authoritative_path(const Ref<MCPGDScriptSessio
 
 Error MCPScriptAnalysisSync::sync_open_buffers(const Ref<MCPGDScriptSessionManager> &p_session_manager, const String &p_session_id, String *r_error) {
 	Array snapshots;
-	const Error read_error = MCPScriptBuffer::read_open_snapshots(snapshots, r_error);
+	const Error read_error = MCPScriptSnapshotReader::read_open(snapshots, r_error);
 	if (read_error != OK) {
 		return read_error;
 	}

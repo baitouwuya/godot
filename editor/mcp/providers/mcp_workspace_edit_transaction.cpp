@@ -31,6 +31,7 @@
 
 #include "mcp_script_analysis_sync.h"
 #include "mcp_script_buffer.h"
+#include "mcp_script_path_resolver.h"
 #include "mcp_workspace_edit_planner.h"
 
 #include "modules/gdscript/language_server/gdscript_workspace.h"
@@ -83,7 +84,7 @@ static Error _normalize_expectations(const Array &p_expectations, HashMap<String
 		String absolute_path;
 		bool built_in = false;
 		String path_error;
-		if (MCPScriptBuffer::resolve_script_path(path_value, resource_path, absolute_path, built_in, &path_error) != OK) {
+		if (MCPScriptPathResolver::resolve_script(path_value, resource_path, absolute_path, built_in, &path_error) != OK) {
 			return _fail("INVALID_ARGUMENTS", path_error, r_error_code, r_error);
 		}
 		if (r_expectations.has(resource_path)) {
@@ -143,7 +144,7 @@ Error MCPWorkspaceEditTransaction::apply(const Dictionary &p_edit, const Array &
 		String absolute_path;
 		bool built_in = false;
 		String path_error;
-		if (resolved_path.is_empty() || MCPScriptBuffer::resolve_script_path(resolved_path, resource_path, absolute_path, built_in, &path_error) != OK) {
+		if (resolved_path.is_empty() || MCPScriptPathResolver::resolve_script(resolved_path, resource_path, absolute_path, built_in, &path_error) != OK) {
 			return _fail("INVALID_WORKSPACE_EDIT", path_error.is_empty() ? "WorkspaceEdit contains an unsupported URI: " + uri : path_error, r_error_code, r_error);
 		}
 		const Dictionary *expectation = expectations.getptr(resource_path);

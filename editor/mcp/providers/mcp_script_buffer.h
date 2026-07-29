@@ -35,6 +35,7 @@
 #include "core/variant/variant.h"
 
 class CodeEdit;
+class MCPScriptEditorGateway;
 class Script;
 class ScriptEditorBase;
 class TextEditorBase;
@@ -63,12 +64,12 @@ public:
 	Error save(String *r_error = nullptr);
 
 private:
+	friend class MCPScriptEditorGateway;
+
 	String path;
 	String scene_path;
 	bool built_in = false;
 	ScriptEditorBase *editor = nullptr;
 	TextEditorBase *text_editor = nullptr;
 	CodeEdit *code_edit = nullptr;
-
-	static Error _from_editor(const String &p_path, ScriptEditorBase *p_editor, MCPScriptBuffer &r_buffer, String *r_error);
 };

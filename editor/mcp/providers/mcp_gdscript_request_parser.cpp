@@ -31,7 +31,7 @@
 #include "mcp_gdscript_request_parser.h"
 
 #include "mcp_gdscript_tool_utils.h"
-#include "mcp_script_buffer.h"
+#include "mcp_script_path_resolver.h"
 
 #include "modules/gdscript/language_server/gdscript_workspace.h"
 
@@ -85,7 +85,7 @@ Error MCPGDScriptRequestParser::parse_document_path(const Dictionary &p_argument
 
 	String absolute_path;
 	bool built_in = false;
-	const Error path_error = MCPScriptBuffer::resolve_script_path_for_root(raw_path, project_root, r_path, absolute_path, built_in, r_error);
+	const Error path_error = MCPScriptPathResolver::resolve_script_for_root(raw_path, project_root, r_path, absolute_path, built_in, r_error);
 	if (path_error != OK) {
 		r_path = String();
 	}

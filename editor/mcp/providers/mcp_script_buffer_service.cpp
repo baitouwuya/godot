@@ -32,6 +32,7 @@
 
 #include "mcp_scene_utils.h"
 #include "mcp_script_buffer.h"
+#include "mcp_script_path_resolver.h"
 
 #include "core/io/dir_access.h"
 #include "core/io/file_access.h"
@@ -75,9 +76,9 @@ MCPScriptBufferService::OperationResult MCPScriptBufferService::create_external(
 	String path_error;
 	Error path_result = OK;
 	if (project_root.is_empty()) {
-		path_result = MCPScriptBuffer::normalize_path(p_path, r_resource_path, absolute_path, &path_error);
+		path_result = MCPScriptPathResolver::normalize_external(p_path, r_resource_path, absolute_path, &path_error);
 	} else {
-		path_result = MCPScriptBuffer::normalize_path_for_root(p_path, project_root, r_resource_path, absolute_path, &path_error);
+		path_result = MCPScriptPathResolver::normalize_external_for_root(p_path, project_root, r_resource_path, absolute_path, &path_error);
 	}
 	if (path_result != OK) {
 		return _failure(path_result, "INVALID_PATH", path_error);

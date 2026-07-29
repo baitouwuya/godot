@@ -31,6 +31,8 @@
 #include "core/io/dir_access.h"
 #include "core/io/file_access.h"
 #include "editor/mcp/providers/mcp_script_buffer.h"
+#include "editor/mcp/providers/mcp_script_path_resolver.h"
+#include "editor/mcp/providers/mcp_script_snapshot_reader.h"
 #include "scene/gui/code_edit.h"
 #include "tests/test_macros.h"
 
@@ -76,17 +78,25 @@ TEST_CASE("[MCP][Provider] Script paths are limited to external gd files") {
 	String resource_path;
 	String absolute_path;
 	String error;
-	REQUIRE(MCPScriptBuffer::normalize_path_for_root(
+	REQUIRE(MCPScriptPathResolver::normalize_external_for_root(
 					"res://scripts/example.gd", project_root, resource_path, absolute_path, &error) == OK);
 	CHECK(resource_path == "res://scripts/example.gd");
 	CHECK(absolute_path == project_root.path_join("scripts/example.gd").simplify_path());
 	CHECK(error.is_empty());
 
-	CHECK(MCPScriptBuffer::normalize_path_for_root(
+	String facade_resource_path;
+	String facade_absolute_path;
+	REQUIRE(MCPScriptBuffer::normalize_path_for_root(
+					"res://scripts/example.gd", project_root, facade_resource_path, facade_absolute_path, &error) == OK);
+	CHECK(facade_resource_path == resource_path);
+	CHECK(facade_absolute_path == absolute_path);
+	CHECK(error.is_empty());
+
+	CHECK(MCPScriptPathResolver::normalize_external_for_root(
 				  "res://scripts/example.txt", project_root, resource_path, absolute_path, &error) == ERR_INVALID_PARAMETER);
 	CHECK(resource_path.is_empty());
 	CHECK(absolute_path.is_empty());
-	CHECK(MCPScriptBuffer::normalize_path_for_root(
+	CHECK(MCPScriptPathResolver::normalize_external_for_root(
 				  "res://../escape.gd", project_root, resource_path, absolute_path, &error) != OK);
 	CHECK(resource_path.is_empty());
 	CHECK(absolute_path.is_empty());
@@ -104,19 +114,19 @@ TEST_CASE("[MCP][Provider] Script paths accept project built-in GDScript subreso
 	String absolute_path;
 	String error;
 	bool built_in = false;
-	REQUIRE(MCPScriptBuffer::resolve_script_path_for_root(
-				"res://main.tscn::GDScript_actor", project_root, resource_path, absolute_path, built_in, &error) == OK);
+	REQUIRE(MCPScriptPathResolver::resolve_script_for_root(
+					"res://main.tscn::GDScript_actor", project_root, resource_path, absolute_path, built_in, &error) == OK);
 	CHECK(built_in);
 	CHECK(resource_path == "res://main.tscn::GDScript_actor");
 	CHECK(absolute_path == project_root.path_join("main.tscn").simplify_path());
 	CHECK(error.is_empty());
 
-	CHECK(MCPScriptBuffer::resolve_script_path_for_root(
-			  "res://main.tscn::", project_root, resource_path, absolute_path, built_in, &error) == ERR_INVALID_PARAMETER);
-	CHECK(MCPScriptBuffer::resolve_script_path_for_root(
-			  "res://main.tscn::nested/id", project_root, resource_path, absolute_path, built_in, &error) == ERR_INVALID_PARAMETER);
-	CHECK(MCPScriptBuffer::resolve_script_path_for_root(
-			  "res://../outside.tscn::GDScript_actor", project_root, resource_path, absolute_path, built_in, &error) != OK);
+	CHECK(MCPScriptPathResolver::resolve_script_for_root(
+				  "res://main.tscn::", project_root, resource_path, absolute_path, built_in, &error) == ERR_INVALID_PARAMETER);
+	CHECK(MCPScriptPathResolver::resolve_script_for_root(
+				  "res://main.tscn::nested/id", project_root, resource_path, absolute_path, built_in, &error) == ERR_INVALID_PARAMETER);
+	CHECK(MCPScriptPathResolver::resolve_script_for_root(
+				  "res://../outside.tscn::GDScript_actor", project_root, resource_path, absolute_path, built_in, &error) != OK);
 }
 
 TEST_CASE("[MCP][Provider] Authoritative script paths accept project absolutes and reject escape links") {
@@ -137,28 +147,34 @@ TEST_CASE("[MCP][Provider] Authoritative script paths accept project absolutes a
 	String resource_path;
 	String absolute_path;
 	String error;
-	REQUIRE(MCPScriptBuffer::resolve_path_for_root(
-				script_path, project_root, resource_path, absolute_path, &error) == OK);
+	REQUIRE(MCPScriptPathResolver::resolve_external_for_root(
+					script_path, project_root, resource_path, absolute_path, &error) == OK);
 	CHECK(resource_path == "res://scripts/authoritative.gd");
 	CHECK(absolute_path == script_path.simplify_path());
-	CHECK(MCPScriptBuffer::resolve_path_for_root(
-				outside_path, project_root, resource_path, absolute_path, &error) != OK);
-	CHECK(MCPScriptBuffer::resolve_path_for_root(
-				"res://../outside.gd", project_root, resource_path, absolute_path, &error) != OK);
+	CHECK(MCPScriptPathResolver::resolve_external_for_root(
+				  outside_path, project_root, resource_path, absolute_path, &error) != OK);
+	CHECK(MCPScriptPathResolver::resolve_external_for_root(
+				  "res://../outside.gd", project_root, resource_path, absolute_path, &error) != OK);
 
 	Dictionary snapshot;
-	REQUIRE(MCPScriptBuffer::read_authoritative_snapshot_for_root(
-				script_path, project_root, snapshot, &error) == OK);
+	REQUIRE(MCPScriptSnapshotReader::read_for_root(
+					script_path, project_root, snapshot, &error) == OK);
 	CHECK(snapshot.get("path", String()) == "res://scripts/authoritative.gd");
 	CHECK(snapshot.get("text", String()) == source);
 	CHECK(snapshot.get("sha256", String()) == source.sha256_text());
 	CHECK(snapshot.get("sourceState", String()) == "disk");
 	CHECK_FALSE(bool(snapshot.get("unsaved", true)));
 
+	Dictionary facade_snapshot;
+	REQUIRE(MCPScriptBuffer::read_authoritative_snapshot_for_root(
+					script_path, project_root, facade_snapshot, &error) == OK);
+	CHECK(facade_snapshot == snapshot);
+	CHECK(error.is_empty());
+
 	const String link_path = project_root.path_join("scripts/external_link");
 	if (temporary_directory->create_link(root.path_join("outside"), link_path) == OK) {
-		CHECK(MCPScriptBuffer::resolve_path_for_root(
-					"res://scripts/external_link/outside.gd", project_root, resource_path, absolute_path, &error) != OK);
+		CHECK(MCPScriptPathResolver::resolve_external_for_root(
+					  "res://scripts/external_link/outside.gd", project_root, resource_path, absolute_path, &error) != OK);
 		CHECK(DirAccess::remove_absolute(link_path) == OK);
 	}
 }

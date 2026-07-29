@@ -140,6 +140,16 @@ def structured_result(responses: Mapping[int, Mapping[str, Any]], request_id: in
     return content
 
 
+def tool_error_code(responses: Mapping[int, Mapping[str, Any]], request_id: int, label: str) -> str:
+    result = tool_result(responses, request_id, label)
+    require(bool(result.get("isError")), f"{label} unexpectedly succeeded: {result}")
+    error = result.get("structuredContent", {}).get("error", {})
+    require(isinstance(error, dict), f"{label} did not return a structured error.")
+    code = error.get("code")
+    require(isinstance(code, str) and code, f"{label} did not return an error code.")
+    return code
+
+
 def text_sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
@@ -289,6 +299,150 @@ def run_smoke(binary: str, timeout: int, keep_temporary_projects: bool) -> None:
         require(bool(docs_error.get("isError")), "class/get_documentation unexpectedly succeeded for an undocumented script class.")
         error = docs_error.get("structuredContent", {}).get("error", {})
         require(error.get("code") == "USE_SCRIPT_DOCUMENTATION_TOOL", "class documentation returned the wrong guidance code.")
+
+        rename_prep = invoke_stdio(
+            runner,
+            project_a,
+            discovery_a["protocolVersion"],
+            [
+                tool_call(8, "godot.script.get", {"path": "res://mcp_smoke_created.gd"}),
+                tool_call(
+                    9,
+                    "godot.gdscript.rename",
+                    {
+                        "path": "res://mcp_smoke_created.gd",
+                        "line": 4,
+                        "character": 5,
+                        "newName": "renamed_value",
+                    },
+                ),
+            ],
+            "stdio workspace edit preparation",
+        )
+        rename_snapshot = structured_result(rename_prep, 8, "script/get before workspace edit")
+        rename_result = structured_result(rename_prep, 9, "gdscript/rename")
+        require(bool(rename_result.get("changed")), "gdscript/rename returned an empty WorkspaceEdit.")
+        workspace_edit = rename_result.get("edit")
+        require(isinstance(workspace_edit, dict), "gdscript/rename did not return a WorkspaceEdit object.")
+        unchanged_sha = rename_snapshot.get("sha256")
+        require(isinstance(unchanged_sha, str) and unchanged_sha, "script/get returned no SHA-256 before workspace edit.")
+
+        negative_apply = invoke_stdio(
+            runner,
+            project_a,
+            discovery_a["protocolVersion"],
+            [
+                tool_call(
+                    10,
+                    "godot.gdscript.apply_workspace_edit",
+                    {
+                        "edit": workspace_edit,
+                        "documents": [
+                            {
+                                "path": "res://node_script.gd",
+                                "expected_sha256": text_sha256((project_a / "node_script.gd").read_text(encoding="utf-8")),
+                            }
+                        ],
+                    },
+                ),
+                tool_call(
+                    11,
+                    "godot.gdscript.apply_workspace_edit",
+                    {
+                        "edit": workspace_edit,
+                        "documents": [
+                            {"path": "res://mcp_smoke_created.gd", "expected_sha256": unchanged_sha},
+                            {
+                                "path": "res://node_script.gd",
+                                "expected_sha256": text_sha256((project_a / "node_script.gd").read_text(encoding="utf-8")),
+                            },
+                        ],
+                    },
+                ),
+                tool_call(
+                    12,
+                    "godot.gdscript.apply_workspace_edit",
+                    {
+                        "edit": workspace_edit,
+                        "documents": [
+                            {"path": "res://mcp_smoke_created.gd", "expected_sha256": unchanged_sha},
+                            {"path": "res://mcp_smoke_created.gd", "expected_sha256": unchanged_sha},
+                        ],
+                    },
+                ),
+                tool_call(
+                    13,
+                    "godot.gdscript.apply_workspace_edit",
+                    {
+                        "edit": workspace_edit,
+                        "documents": [{"path": "res://mcp_smoke_created.gd", "expected_sha256": "0" * 64}],
+                    },
+                ),
+                tool_call(14, "godot.script.get", {"path": "res://mcp_smoke_created.gd"}),
+            ],
+            "stdio workspace edit preflight failures",
+        )
+        require(tool_error_code(negative_apply, 10, "workspace edit missing expectation") == "MISSING_EXPECTATION", "missing expectation returned the wrong error code.")
+        require(tool_error_code(negative_apply, 11, "workspace edit unused expectation") == "UNUSED_EXPECTATION", "unused expectation returned the wrong error code.")
+        require(tool_error_code(negative_apply, 12, "workspace edit duplicate expectation") == "INVALID_ARGUMENTS", "duplicate expectation returned the wrong error code.")
+        require(tool_error_code(negative_apply, 13, "workspace edit stale revision") == "stale_revision", "stale expectation returned the wrong error code.")
+        after_preflight = structured_result(negative_apply, 14, "script/get after workspace edit preflight")
+        require(after_preflight.get("sha256") == unchanged_sha, "workspace edit preflight failure changed the ScriptEditor buffer.")
+
+        apply_flow = invoke_stdio(
+            runner,
+            project_a,
+            discovery_a["protocolVersion"],
+            [
+                tool_call(
+                    15,
+                    "godot.gdscript.apply_workspace_edit",
+                    {
+                        "edit": workspace_edit,
+                        "documents": [{"path": "res://mcp_smoke_created.gd", "expected_sha256": unchanged_sha}],
+                    },
+                )
+            ],
+            "stdio workspace edit apply",
+        )
+        apply_result = structured_result(apply_flow, 15, "gdscript/apply_workspace_edit")
+        require(bool(apply_result.get("applied")) and not bool(apply_result.get("saved")), "workspace edit did not remain unsaved.")
+        require(apply_result.get("documentCount") == 1, "workspace edit changed an unexpected number of documents.")
+        applied_documents = apply_result.get("documents")
+        require(isinstance(applied_documents, list) and len(applied_documents) == 1, "workspace edit returned invalid document results.")
+        applied_sha = applied_documents[0].get("sha256")
+        require(isinstance(applied_sha, str) and applied_sha != unchanged_sha, "workspace edit did not change the authoritative SHA-256.")
+        require((project_a / "mcp_smoke_created.gd").read_text(encoding="utf-8") == INITIAL_SCRIPT_TEXT, "workspace edit saved the script implicitly.")
+
+        restore_flow = invoke_stdio(
+            runner,
+            project_a,
+            discovery_a["protocolVersion"],
+            [
+                tool_call(16, "godot.script.get", {"path": "res://mcp_smoke_created.gd"}),
+                tool_call(
+                    17,
+                    "godot.script.edit",
+                    {
+                        "path": "res://mcp_smoke_created.gd",
+                        "text": INITIAL_SCRIPT_TEXT,
+                        "expected_sha256": applied_sha,
+                    },
+                ),
+                tool_call(18, "godot.script.save", {"path": "res://mcp_smoke_created.gd"}),
+            ],
+            "stdio workspace edit restore",
+        )
+        renamed_document = structured_result(restore_flow, 16, "script/get after workspace edit")
+        properties = renamed_document.get("properties")
+        require(
+            isinstance(properties, list)
+            and any(isinstance(item, dict) and item.get("text") == "var renamed_value: int = 7" for item in properties),
+            "workspace edit was not authoritative in ScriptEditor.",
+        )
+        structured_result(restore_flow, 17, "script/edit workspace restore")
+        saved_restore = structured_result(restore_flow, 18, "script/save workspace restore")
+        require(saved_restore.get("sha256") == text_sha256(INITIAL_SCRIPT_TEXT), "workspace edit restore saved unexpected source.")
 
         print("[7/9] Checking node create, undo/redo, and explicit scene save")
         wait_for_file(host_a, ".mcp-smoke-scene-ready", timeout)

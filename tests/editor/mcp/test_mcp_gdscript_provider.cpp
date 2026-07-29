@@ -151,6 +151,32 @@ TEST_CASE("[MCP][Provider] GDScript request parser adapts document selectors to 
 	CHECK(references.position.character == 5);
 	CHECK(references.context.includeDeclaration);
 
+	arguments["limit"] = 25;
+	MCPGDScriptRequestParser::CompletionRequest completion;
+	CHECK(parser.parse_completion(arguments, completion, &error) == OK);
+	CHECK(completion.path == path);
+	CHECK(completion.params.position.line == 3);
+	CHECK(completion.params.position.character == 5);
+	CHECK(completion.limit == 25);
+
+	arguments["newName"] = "renamed_value";
+	MCPGDScriptRequestParser::RenameRequest rename;
+	CHECK(parser.parse_rename(arguments, rename, &error) == OK);
+	CHECK(rename.path == path);
+	CHECK(rename.params.position.line == 3);
+	CHECK(rename.new_name == "renamed_value");
+	arguments["newName"] = "";
+	CHECK(parser.parse_rename(arguments, rename, &error) == ERR_INVALID_PARAMETER);
+	CHECK(error == "newName must not be empty.");
+
+	MCPGDScriptRequestParser::WorkspaceEditRequest workspace_edit;
+	Dictionary workspace_edit_arguments;
+	workspace_edit_arguments["edit"] = Dictionary{ { "changes", Dictionary() } };
+	workspace_edit_arguments["documents"] = Array();
+	CHECK(parser.parse_workspace_edit(workspace_edit_arguments, workspace_edit, &error) == OK);
+	CHECK(workspace_edit.edit.has("changes"));
+	CHECK(workspace_edit.documents.is_empty());
+
 	arguments["uri"] = "file:///request_parser.gd";
 	CHECK(parser.parse_document_path(arguments, path, &error) == ERR_INVALID_PARAMETER);
 	CHECK(error == "Exactly one of path or uri is required.");
@@ -199,13 +225,14 @@ TEST_CASE("[MCP][Provider] GDScript semantic tools use injected analysis session
 	service.instantiate();
 	service->configure(temporary_directory->get_current_dir(), workspace);
 	Ref<GDScriptAnalysisSession> session = service->create_session();
+	Ref<MCPGDScriptSessionManager> session_manager = memnew(MCPGDScriptSessionManager(service, session));
 
 	MCPToolRegistry registry;
-	MCPGDScriptProvider *provider = memnew(MCPGDScriptProvider(service, session));
+	MCPGDScriptProvider *provider = memnew(MCPGDScriptProvider(session_manager));
 	REQUIRE(provider->register_tools(&registry) == OK);
 	CHECK(provider->register_tools(&registry) == ERR_ALREADY_IN_USE);
-	CHECK(provider->get_analysis_service() == service);
-	CHECK(provider->get_analysis_session() == session);
+	CHECK(session_manager->get_analysis_service() == service);
+	CHECK(session_manager->get_fallback_session() == session);
 
 	const PackedStringArray names = registry.get_tool_names();
 	REQUIRE(names.size() == 10);
@@ -330,6 +357,11 @@ TEST_CASE("[MCP][Provider] GDScript semantic tools use injected analysis session
 	CHECK(selector_error.get("keyword", String()) == "oneOf");
 	CHECK(int(selector_error.get("matchedSchemas", -1)) == 0);
 
+	Dictionary malformed_context;
+	malformed_context["session"] = Dictionary{ { "sessionId", 7 } };
+	const Dictionary malformed_session_result = provider->diagnostics(missing_script, malformed_context);
+	CHECK(_error_code(malformed_session_result) == "INVALID_ARGUMENTS");
+
 	provider->unregister_tools();
 	CHECK(registry.get_tool_names().is_empty());
 	memdelete(provider);
@@ -352,12 +384,11 @@ TEST_CASE("[MCP][Provider] GDScript semantic tools isolate MCP sessions") {
 	service.instantiate();
 	service->configure("res://", workspace);
 	Ref<GDScriptAnalysisSession> fallback_session = service->create_session();
+	Ref<MCPGDScriptSessionManager> session_manager = memnew(MCPGDScriptSessionManager(service, fallback_session));
 
 	MCPToolRegistry registry;
-	MCPGDScriptProvider *provider = memnew(MCPGDScriptProvider(service, fallback_session));
+	MCPGDScriptProvider *provider = memnew(MCPGDScriptProvider(session_manager));
 	REQUIRE(provider->register_tools(&registry) == OK);
-	MCPGDScriptSessionManager *session_manager = provider->get_session_manager();
-	REQUIRE(session_manager);
 	CHECK(session_manager->get_session_count() == 0);
 
 	const String first_context_id = "mcp-client-first";
@@ -388,10 +419,10 @@ TEST_CASE("[MCP][Provider] GDScript semantic tools isolate MCP sessions") {
 
 	const uint64_t first_analysis_id = first_session->get_session_id();
 	const uint64_t second_analysis_id = second_session->get_session_id();
-	CHECK(provider->release_session(first_context_id));
+	CHECK(session_manager->release_session(first_context_id));
 	CHECK(service->get_session(first_analysis_id).is_null());
 	CHECK(session_manager->get_session_count() == 1);
-	provider->clear_sessions();
+	session_manager->clear();
 	CHECK(service->get_session(second_analysis_id).is_null());
 	CHECK(session_manager->get_session_count() == 0);
 	CHECK(service->get_session(fallback_session->get_session_id()) == fallback_session);
@@ -425,11 +456,10 @@ TEST_CASE("[MCP][Provider] GDScript queries synchronize project authority into e
 	Ref<GDScriptAnalysisService> service;
 	service.instantiate();
 	service->configure(project_root, workspace);
-	MCPGDScriptProvider *provider = memnew(MCPGDScriptProvider(service));
+	Ref<MCPGDScriptSessionManager> session_manager = memnew(MCPGDScriptSessionManager(service));
+	MCPGDScriptProvider *provider = memnew(MCPGDScriptProvider(session_manager));
 	MCPToolRegistry registry;
 	REQUIRE(provider->register_tools(&registry) == OK);
-	MCPGDScriptSessionManager *session_manager = provider->get_session_manager();
-	REQUIRE(session_manager);
 
 	const String first_id = "authoritative-first";
 	const String second_id = "authoritative-second";
@@ -483,7 +513,7 @@ TEST_CASE("[MCP][Provider] GDScript queries synchronize project authority into e
 		CHECK(DirAccess::remove_absolute(link_path) == OK);
 	}
 
-	provider->clear_sessions();
+	session_manager->clear();
 	provider->unregister_tools();
 	memdelete(provider);
 }

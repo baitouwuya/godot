@@ -204,6 +204,44 @@ MCPToolCallContext make_tool_call_context(const Dictionary &p_context) {
 	return context;
 }
 
+Error parse_session_id(const Dictionary &p_context, String &r_session_id, String *r_error) {
+	r_session_id = String();
+	if (r_error) {
+		*r_error = String();
+	}
+
+	const Variant session_value = p_context.get("session", Variant());
+	if (session_value.get_type() == Variant::NIL) {
+		return OK;
+	}
+	if (session_value.get_type() != Variant::DICTIONARY) {
+		if (r_error) {
+			*r_error = "MCP tool context session must be an object.";
+		}
+		return ERR_INVALID_PARAMETER;
+	}
+
+	const Dictionary session_context = session_value;
+	const Variant session_id_value = session_context.get("sessionId", Variant());
+	if (session_id_value.get_type() == Variant::STRING || session_id_value.get_type() == Variant::STRING_NAME) {
+		r_session_id = session_id_value;
+		if (!r_session_id.is_empty()) {
+			return OK;
+		}
+		if (r_error) {
+			*r_error = "MCP session.sessionId must not be empty.";
+		}
+		return ERR_INVALID_PARAMETER;
+	}
+	if (!session_context.is_empty()) {
+		if (r_error) {
+			*r_error = "MCP session.sessionId must be a non-empty string.";
+		}
+		return ERR_INVALID_PARAMETER;
+	}
+	return OK;
+}
+
 bool has_only_arguments(const Dictionary &p_arguments, const PackedStringArray &p_allowed_names, String &r_unknown_name) {
 	r_unknown_name = String();
 	for (const KeyValue<Variant, Variant> &entry : p_arguments) {

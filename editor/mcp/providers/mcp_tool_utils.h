@@ -66,6 +66,7 @@ Dictionary make_property_description(const PropertyInfo &p_property);
 Dictionary make_success_result(const Dictionary &p_structured_content);
 Dictionary make_error_result(const String &p_code, const String &p_message, const Dictionary &p_details = Dictionary());
 MCPToolCallContext make_tool_call_context(const Dictionary &p_context);
+Error parse_session_id(const Dictionary &p_context, String &r_session_id, String *r_error = nullptr);
 bool has_only_arguments(const Dictionary &p_arguments, const PackedStringArray &p_allowed_names, String &r_unknown_name);
 bool try_get_json_integer(const Variant &p_value, int64_t p_minimum, int64_t p_maximum, int64_t &r_value);
 

@@ -40,6 +40,7 @@
 
 #include "core/mcp/mcp_tool_registry.h"
 #include "core/object/callable_mp.h"
+
 #include "modules/gdscript/language_server/gdscript_analysis_session.h"
 #include "modules/gdscript/language_server/gdscript_extend_parser.h"
 
@@ -79,7 +80,10 @@ bool MCPScriptProvider::_resolve_analysis_context(const Dictionary &p_context, S
 		r_error = "A GDScript analysis session manager is required.";
 		return false;
 	}
-	return session_manager->resolve_context(p_context, r_session_id, r_session, &r_error) == OK;
+	if (MCPToolUtils::parse_session_id(p_context, r_session_id, &r_error) != OK) {
+		return false;
+	}
+	return session_manager->resolve_session(r_session_id, r_session, &r_error) == OK;
 }
 
 Error MCPScriptProvider::register_tools(MCPToolRegistry *p_registry, String *r_error) {
@@ -96,18 +100,18 @@ Error MCPScriptProvider::register_tools(MCPToolRegistry *p_registry, String *r_e
 	}
 
 	const LocalVector<MCPToolUtils::ToolDescriptor> tools{
-			{ "godot.script.create", "Create and open an external GDScript.",
-					MCPScriptToolUtils::create_schema(), MCPToolUtils::TOOL_ADDITIVE, callable_mp(this, &MCPScriptProvider::create), MCPScriptToolUtils::create_output_schema() },
-			{ "godot.script.open", "Open an external or built-in GDScript in the Script editor.",
-					MCPScriptToolUtils::selector_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPScriptProvider::open), MCPScriptToolUtils::open_output_schema() },
-			{ "godot.script.get", "Read a GDScript as documentation, a member, or full source.",
-					MCPScriptToolUtils::get_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPScriptProvider::get), MCPScriptToolUtils::get_output_schema() },
-			{ "godot.script.usages", "Find semantic LSP usages of a named GDScript member.",
-					MCPScriptToolUtils::usages_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPScriptProvider::usages), MCPScriptToolUtils::usages_output_schema() },
-			{ "godot.script.edit", "Replace a Script editor buffer with optimistic concurrency.",
-					MCPScriptToolUtils::edit_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPScriptProvider::edit), MCPScriptToolUtils::edit_output_schema() },
-			{ "godot.script.save", "Explicitly save an authoritative Script editor buffer.",
-					MCPScriptToolUtils::selector_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPScriptProvider::save), MCPScriptToolUtils::save_output_schema() },
+		{ "godot.script.create", "Create and open an external GDScript.",
+				MCPScriptToolUtils::create_schema(), MCPToolUtils::TOOL_ADDITIVE, callable_mp(this, &MCPScriptProvider::create), MCPScriptToolUtils::create_output_schema() },
+		{ "godot.script.open", "Open an external or built-in GDScript in the Script editor.",
+				MCPScriptToolUtils::selector_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPScriptProvider::open), MCPScriptToolUtils::open_output_schema() },
+		{ "godot.script.get", "Read a GDScript as documentation, a member, or full source.",
+				MCPScriptToolUtils::get_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPScriptProvider::get), MCPScriptToolUtils::get_output_schema() },
+		{ "godot.script.usages", "Find semantic LSP usages of a named GDScript member.",
+				MCPScriptToolUtils::usages_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPScriptProvider::usages), MCPScriptToolUtils::usages_output_schema() },
+		{ "godot.script.edit", "Replace a Script editor buffer with optimistic concurrency.",
+				MCPScriptToolUtils::edit_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPScriptProvider::edit), MCPScriptToolUtils::edit_output_schema() },
+		{ "godot.script.save", "Explicitly save an authoritative Script editor buffer.",
+				MCPScriptToolUtils::selector_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPScriptProvider::save), MCPScriptToolUtils::save_output_schema() },
 	};
 	const Error err = MCPToolUtils::register_tools(p_registry, this, tools, r_error);
 	if (err != OK) {
@@ -212,7 +216,7 @@ Dictionary MCPScriptProvider::get(const Dictionary &p_arguments, const Dictionar
 	const Error render_error = MCPScriptDocument::render(*parser, view, include_comments, member, document, &document_error);
 	if (render_error != OK) {
 		const String error_code = render_error == ERR_DOES_NOT_EXIST ? "MEMBER_NOT_FOUND" : render_error == ERR_ALREADY_EXISTS ? "MEMBER_AMBIGUOUS"
-																													 : "INVALID_ARGUMENTS";
+																															   : "INVALID_ARGUMENTS";
 		return MCPToolUtils::make_error_result(error_code, document_error);
 	}
 	result.erase("text");

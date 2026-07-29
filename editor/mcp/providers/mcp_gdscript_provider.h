@@ -31,40 +31,21 @@
 #pragma once
 
 #include "../mcp_editor_feature.h"
-#include "mcp_gdscript_session_manager.h"
+#include "mcp_gdscript_semantic_service.h"
 
 #include "core/object/object.h"
 #include "core/variant/dictionary.h"
 
-#include "modules/gdscript/language_server/gdscript_workspace.h"
-
+class MCPGDScriptRequestParser;
 class MCPToolRegistry;
 
 class MCPGDScriptProvider : public Object, public MCPEditorFeature {
 public:
-	MCPGDScriptProvider(const Ref<GDScriptAnalysisService> &p_service = Ref<GDScriptAnalysisService>(), const Ref<GDScriptAnalysisSession> &p_fallback_session = Ref<GDScriptAnalysisSession>());
-	explicit MCPGDScriptProvider(const Ref<MCPGDScriptSessionManager> &p_session_manager);
+	explicit MCPGDScriptProvider(const Ref<MCPGDScriptSessionManager> &p_session_manager = Ref<MCPGDScriptSessionManager>());
 	~MCPGDScriptProvider();
 
 	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr) override;
 	void unregister_tools() override;
-	void on_session_removed(const String &p_session_id) override;
-	void shutdown() override;
-
-	void set_analysis_service(const Ref<GDScriptAnalysisService> &p_service);
-	void set_analysis_session(const Ref<GDScriptAnalysisSession> &p_session);
-	void set_session_manager(const Ref<MCPGDScriptSessionManager> &p_session_manager);
-	Ref<GDScriptAnalysisService> get_analysis_service() const { return session_manager.is_valid() ? session_manager->get_analysis_service() : Ref<GDScriptAnalysisService>(); }
-	Ref<GDScriptAnalysisSession> get_analysis_session() const { return session_manager.is_valid() ? session_manager->get_fallback_session() : Ref<GDScriptAnalysisSession>(); }
-	MCPGDScriptSessionManager *get_session_manager() { return session_manager.ptr(); }
-	const MCPGDScriptSessionManager *get_session_manager() const { return session_manager.ptr(); }
-	const Ref<MCPGDScriptSessionManager> &get_session_manager_ref() const { return session_manager; }
-	bool release_session(const String &p_session_id) { return session_manager.is_valid() && session_manager->release_session(p_session_id); }
-	void clear_sessions() {
-		if (session_manager.is_valid()) {
-			session_manager->clear();
-		}
-	}
 
 	Dictionary diagnostics(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary symbols(const Dictionary &p_arguments, const Dictionary &p_context);
@@ -79,19 +60,11 @@ public:
 
 private:
 	MCPToolRegistry *tool_registry = nullptr;
-	Ref<MCPGDScriptSessionManager> session_manager;
+	MCPGDScriptSemanticService semantic_service;
 
-	Ref<GDScriptWorkspace> _get_workspace() const;
-	String _get_project_root() const;
-	bool _is_ready(String &r_error) const;
-	bool _validate_ready(String &r_error, Dictionary &r_error_result) const;
-	bool _resolve_session(const Dictionary &p_context, String &r_session_id, Ref<GDScriptAnalysisSession> &r_session, String &r_error);
-	bool _prepare_document(const Dictionary &p_context, const String &p_path, bool p_sync_open_buffers, Ref<GDScriptAnalysisSession> &r_session, Array *r_diagnostics, Dictionary &r_error_result);
-	bool _parse_path(const Dictionary &p_arguments, String &r_path, String &r_error) const;
-	bool _parse_position(const Dictionary &p_arguments, String &r_path, LSP::TextDocumentPositionParams &r_params, String &r_error) const;
-	bool _parse_reference_position(const Dictionary &p_arguments, String &r_path, LSP::ReferenceParams &r_params, String &r_error) const;
-
+	MCPGDScriptRequestParser _request_parser() const;
+	bool _validate_ready(Dictionary &r_error_result) const;
+	bool _parse_session_id(const Dictionary &p_context, String &r_session_id, Dictionary &r_error_result) const;
+	Dictionary _tool_result(const MCPGDScriptSemanticService::OperationResult &p_result) const;
 	Dictionary _invalid_arguments(const String &p_message) const;
-	Dictionary _unavailable(const String &p_message) const;
-	Dictionary _script_not_found(const String &p_path) const;
 };

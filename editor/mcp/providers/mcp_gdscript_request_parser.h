@@ -41,11 +41,31 @@ class GDScriptWorkspace;
 
 class MCPGDScriptRequestParser {
 public:
+	struct CompletionRequest {
+		String path;
+		LSP::CompletionParams params;
+		int limit = 0;
+	};
+
+	struct RenameRequest {
+		String path;
+		LSP::TextDocumentPositionParams params;
+		String new_name;
+	};
+
+	struct WorkspaceEditRequest {
+		Dictionary edit;
+		Array documents;
+	};
+
 	MCPGDScriptRequestParser(const Ref<GDScriptWorkspace> &p_workspace, const String &p_project_root);
 
 	Error parse_document_path(const Dictionary &p_arguments, String &r_path, String *r_error = nullptr) const;
 	Error parse_position(const Dictionary &p_arguments, String &r_path, LSP::TextDocumentPositionParams &r_params, String *r_error = nullptr) const;
 	Error parse_reference_position(const Dictionary &p_arguments, String &r_path, LSP::ReferenceParams &r_params, String *r_error = nullptr) const;
+	Error parse_completion(const Dictionary &p_arguments, CompletionRequest &r_request, String *r_error = nullptr) const;
+	Error parse_rename(const Dictionary &p_arguments, RenameRequest &r_request, String *r_error = nullptr) const;
+	Error parse_workspace_edit(const Dictionary &p_arguments, WorkspaceEditRequest &r_request, String *r_error = nullptr) const;
 
 private:
 	Ref<GDScriptWorkspace> workspace;

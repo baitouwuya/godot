@@ -158,6 +158,33 @@ TEST_CASE("[MCP][Provider] GDScript session manager releases closed editor docum
 	CHECK(second_session->get_parse_result(closed_path) != nullptr);
 }
 
+TEST_CASE("[MCP][Provider] GDScript session manager owns MCP lifecycle cleanup") {
+	Ref<GDScriptWorkspace> workspace;
+	workspace.instantiate();
+	Ref<GDScriptAnalysisService> service;
+	service.instantiate();
+	service->configure("res://", workspace);
+	Ref<MCPGDScriptSessionManager> manager = memnew(MCPGDScriptSessionManager(service));
+
+	Ref<GDScriptAnalysisSession> first_session = manager->get_or_create_session("lifecycle-first");
+	Ref<GDScriptAnalysisSession> second_session = manager->get_or_create_session("lifecycle-second");
+	REQUIRE(first_session.is_valid());
+	REQUIRE(second_session.is_valid());
+	const uint64_t first_analysis_id = first_session->get_session_id();
+	const uint64_t second_analysis_id = second_session->get_session_id();
+
+	manager->on_session_removed("lifecycle-first");
+	CHECK(manager->get_session_count() == 1);
+	CHECK(service->get_session(first_analysis_id).is_null());
+	CHECK(service->get_session(second_analysis_id) == second_session);
+
+	manager->shutdown();
+	CHECK(manager->get_session_count() == 0);
+	CHECK(service->get_session(second_analysis_id).is_null());
+	manager->shutdown();
+	CHECK(manager->get_session_count() == 0);
+}
+
 } // namespace TestMCPGDScriptSessionManager
 
 #endif // MODULE_GDSCRIPT_ENABLED && !GDSCRIPT_NO_LSP

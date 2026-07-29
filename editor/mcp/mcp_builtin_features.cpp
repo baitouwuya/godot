@@ -125,6 +125,7 @@ Error MCPBuiltinFeatures::initialize() {
 		node_structure_provider,
 	};
 #if defined(MODULE_GDSCRIPT_ENABLED) && !defined(GDSCRIPT_NO_LSP)
+	builtin_feature_order.push_back(gdscript_session_manager.ptr());
 	builtin_feature_order.push_back(script_provider);
 	builtin_feature_order.push_back(gdscript_provider);
 #endif

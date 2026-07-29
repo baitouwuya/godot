@@ -74,30 +74,14 @@ Ref<GDScriptAnalysisSession> MCPGDScriptSessionManager::get_session(const String
 	return session ? *session : Ref<GDScriptAnalysisSession>();
 }
 
-Error MCPGDScriptSessionManager::resolve_context(const Dictionary &p_context, String &r_session_id, Ref<GDScriptAnalysisSession> &r_session, String *r_error) {
-	r_session_id = String();
+Error MCPGDScriptSessionManager::resolve_session(const String &p_session_id, Ref<GDScriptAnalysisSession> &r_session, String *r_error) {
 	r_session.unref();
 	if (r_error) {
 		*r_error = String();
 	}
-
-	const Variant session_value = p_context.get("session", Variant());
-	if (session_value.get_type() == Variant::DICTIONARY) {
-		const Dictionary session_context = session_value;
-		const Variant session_id_value = session_context.get("sessionId", Variant());
-		if (session_id_value.get_type() == Variant::STRING || session_id_value.get_type() == Variant::STRING_NAME) {
-			r_session_id = session_id_value;
-			if (r_session_id.is_empty()) {
-				return _session_manager_fail("MCP session.sessionId must not be empty.", r_error, ERR_INVALID_PARAMETER);
-			}
-			r_session = get_or_create_session(r_session_id);
-			return r_session.is_valid() ? OK : _session_manager_fail("The MCP GDScript analysis session could not be created.", r_error, ERR_UNCONFIGURED);
-		}
-		if (!session_context.is_empty()) {
-			return _session_manager_fail("MCP session.sessionId must be a non-empty string.", r_error, ERR_INVALID_PARAMETER);
-		}
-	} else if (session_value.get_type() != Variant::NIL) {
-		return _session_manager_fail("MCP tool context session must be an object.", r_error, ERR_INVALID_PARAMETER);
+	if (!p_session_id.is_empty()) {
+		r_session = get_or_create_session(p_session_id);
+		return r_session.is_valid() ? OK : _session_manager_fail("The MCP GDScript analysis session could not be created.", r_error, ERR_UNCONFIGURED);
 	}
 
 	r_session = fallback_session;
@@ -200,4 +184,12 @@ void MCPGDScriptSessionManager::clear() {
 	while (!sessions.is_empty()) {
 		release_session(sessions.begin()->key);
 	}
+}
+
+void MCPGDScriptSessionManager::on_session_removed(const String &p_session_id) {
+	release_session(p_session_id);
+}
+
+void MCPGDScriptSessionManager::shutdown() {
+	clear();
 }

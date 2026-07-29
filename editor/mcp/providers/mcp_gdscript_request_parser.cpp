@@ -151,3 +151,49 @@ Error MCPGDScriptRequestParser::parse_reference_position(const Dictionary &p_arg
 	r_params.context.includeDeclaration = include_declaration;
 	return OK;
 }
+
+Error MCPGDScriptRequestParser::parse_completion(const Dictionary &p_arguments, CompletionRequest &r_request, String *r_error) const {
+	r_request = CompletionRequest();
+	LSP::TextDocumentPositionParams position;
+	const Error position_error = parse_position(p_arguments, r_request.path, position, r_error);
+	if (position_error != OK) {
+		return position_error;
+	}
+
+	String argument_error;
+	if (!MCPGDScriptToolUtils::get_completion_limit(p_arguments, r_request.limit, argument_error)) {
+		return _fail(argument_error, r_error);
+	}
+	r_request.params.textDocument = position.textDocument;
+	r_request.params.position = position.position;
+	return OK;
+}
+
+Error MCPGDScriptRequestParser::parse_rename(const Dictionary &p_arguments, RenameRequest &r_request, String *r_error) const {
+	r_request = RenameRequest();
+	const Error position_error = parse_position(p_arguments, r_request.path, r_request.params, r_error);
+	if (position_error != OK) {
+		return position_error;
+	}
+
+	String argument_error;
+	if (!MCPGDScriptToolUtils::get_string_argument(p_arguments, "newName", r_request.new_name, argument_error)) {
+		return _fail(argument_error, r_error);
+	}
+	if (r_request.new_name.is_empty()) {
+		return _fail("newName must not be empty.", r_error);
+	}
+	return OK;
+}
+
+Error MCPGDScriptRequestParser::parse_workspace_edit(const Dictionary &p_arguments, WorkspaceEditRequest &r_request, String *r_error) const {
+	r_request = WorkspaceEditRequest();
+	const Variant edit_value = p_arguments.get("edit", Variant());
+	const Variant documents_value = p_arguments.get("documents", Variant());
+	if (edit_value.get_type() != Variant::DICTIONARY || documents_value.get_type() != Variant::ARRAY) {
+		return _fail("edit must be a WorkspaceEdit object and documents must be an array.", r_error);
+	}
+	r_request.edit = edit_value;
+	r_request.documents = documents_value;
+	return OK;
+}

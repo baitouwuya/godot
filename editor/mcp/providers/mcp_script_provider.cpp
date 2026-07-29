@@ -59,6 +59,11 @@ static Dictionary _service_error(const MCPScriptBufferService::OperationResult &
 	return MCPToolUtils::make_error_result(p_result.error_code, p_result.message, p_details);
 }
 
+static Dictionary _analysis_context_error(Error p_error, const String &p_message) {
+	const bool invalid_arguments = p_error == ERR_INVALID_PARAMETER || p_error == ERR_PARAMETER_RANGE_ERROR;
+	return MCPToolUtils::make_error_result(invalid_arguments ? "INVALID_ARGUMENTS" : "ANALYSIS_UNAVAILABLE", p_message);
+}
+
 static void _set_error(String *r_error, const String &p_message) {
 	if (r_error) {
 		*r_error = p_message;
@@ -75,15 +80,16 @@ MCPScriptProvider::~MCPScriptProvider() {
 	unregister_tools();
 }
 
-bool MCPScriptProvider::_resolve_analysis_context(const Dictionary &p_context, String &r_session_id, Ref<GDScriptAnalysisSession> &r_session, String &r_error) {
+Error MCPScriptProvider::_resolve_analysis_context(const Dictionary &p_context, String &r_session_id, Ref<GDScriptAnalysisSession> &r_session, String &r_error) {
+	const Error parse_error = MCPToolUtils::parse_session_id(p_context, r_session_id, &r_error);
+	if (parse_error != OK) {
+		return parse_error;
+	}
 	if (session_manager.is_null()) {
 		r_error = "A GDScript analysis session manager is required.";
-		return false;
+		return ERR_UNCONFIGURED;
 	}
-	if (MCPToolUtils::parse_session_id(p_context, r_session_id, &r_error) != OK) {
-		return false;
-	}
-	return session_manager->resolve_session(r_session_id, r_session, &r_error) == OK;
+	return session_manager->resolve_session(r_session_id, r_session, &r_error);
 }
 
 Error MCPScriptProvider::register_tools(MCPToolRegistry *p_registry, String *r_error) {
@@ -152,8 +158,9 @@ Dictionary MCPScriptProvider::create(const Dictionary &p_arguments, const Dictio
 	String session_id;
 	Ref<GDScriptAnalysisSession> session;
 	String analysis_error;
-	if (!_resolve_analysis_context(p_context, session_id, session, analysis_error)) {
-		return MCPToolUtils::make_error_result("ANALYSIS_UNAVAILABLE", analysis_error);
+	const Error analysis_context_error = _resolve_analysis_context(p_context, session_id, session, analysis_error);
+	if (analysis_context_error != OK) {
+		return _analysis_context_error(analysis_context_error, analysis_error);
 	}
 	MCPGDScriptTransientParserCleanup cleanup(session);
 
@@ -193,8 +200,9 @@ Dictionary MCPScriptProvider::get(const Dictionary &p_arguments, const Dictionar
 	String session_id;
 	Ref<GDScriptAnalysisSession> session;
 	String analysis_error;
-	if (!_resolve_analysis_context(p_context, session_id, session, analysis_error)) {
-		return MCPToolUtils::make_error_result("ANALYSIS_UNAVAILABLE", analysis_error);
+	const Error analysis_context_error = _resolve_analysis_context(p_context, session_id, session, analysis_error);
+	if (analysis_context_error != OK) {
+		return _analysis_context_error(analysis_context_error, analysis_error);
 	}
 	MCPGDScriptTransientParserCleanup cleanup(session);
 
@@ -241,8 +249,9 @@ Dictionary MCPScriptProvider::usages(const Dictionary &p_arguments, const Dictio
 	String session_id;
 	Ref<GDScriptAnalysisSession> session;
 	String analysis_error;
-	if (!_resolve_analysis_context(p_context, session_id, session, analysis_error)) {
-		return MCPToolUtils::make_error_result("ANALYSIS_UNAVAILABLE", analysis_error);
+	const Error analysis_context_error = _resolve_analysis_context(p_context, session_id, session, analysis_error);
+	if (analysis_context_error != OK) {
+		return _analysis_context_error(analysis_context_error, analysis_error);
 	}
 	MCPGDScriptTransientParserCleanup cleanup(session);
 
@@ -292,8 +301,9 @@ Dictionary MCPScriptProvider::edit(const Dictionary &p_arguments, const Dictiona
 	String session_id;
 	Ref<GDScriptAnalysisSession> session;
 	String analysis_error;
-	if (!_resolve_analysis_context(p_context, session_id, session, analysis_error)) {
-		return MCPToolUtils::make_error_result("ANALYSIS_UNAVAILABLE", analysis_error);
+	const Error analysis_context_error = _resolve_analysis_context(p_context, session_id, session, analysis_error);
+	if (analysis_context_error != OK) {
+		return _analysis_context_error(analysis_context_error, analysis_error);
 	}
 	MCPGDScriptTransientParserCleanup cleanup(session);
 
@@ -332,8 +342,9 @@ Dictionary MCPScriptProvider::save(const Dictionary &p_arguments, const Dictiona
 	String session_id;
 	Ref<GDScriptAnalysisSession> session;
 	String analysis_error;
-	if (!_resolve_analysis_context(p_context, session_id, session, analysis_error)) {
-		return MCPToolUtils::make_error_result("ANALYSIS_UNAVAILABLE", analysis_error);
+	const Error analysis_context_error = _resolve_analysis_context(p_context, session_id, session, analysis_error);
+	if (analysis_context_error != OK) {
+		return _analysis_context_error(analysis_context_error, analysis_error);
 	}
 	MCPGDScriptTransientParserCleanup cleanup(session);
 

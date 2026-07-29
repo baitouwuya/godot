@@ -114,6 +114,15 @@ TEST_CASE("[MCP][Provider] GDScript semantic service composes authoritative anal
 	CHECK(missing.error == ERR_FILE_NOT_FOUND);
 	CHECK(missing.error_code == "SCRIPT_NOT_FOUND");
 	CHECK(missing.details.get("path", String()) == "res://scripts/missing.gd");
+
+	const String transient_path = project_root.path_join("scripts/transient.gd");
+	REQUIRE(_write_text(transient_path, "var transient_value: int = 1\n") == OK);
+	REQUIRE(first_session->get_parse_result(transient_path));
+	REQUIRE(first_session->get_document(transient_path));
+	CHECK(first_session->get_document(transient_path)->source_state == GDScriptAnalysisSession::SOURCE_STATE_DISK);
+	const MCPGDScriptSemanticService::OperationResult cleanup_failure = semantic_service.diagnostics("semantic-first", "res://scripts/still_missing.gd");
+	CHECK(cleanup_failure.error == ERR_FILE_NOT_FOUND);
+	CHECK_FALSE(first_session->get_document(transient_path));
 }
 
 TEST_CASE("[MCP][Provider] GDScript semantic service reports missing dependencies") {

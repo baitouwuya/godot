@@ -203,6 +203,10 @@ TEST_CASE("[MCP][Provider] Script tools register with optimistic edit requiremen
 	member_arguments["member"] = invalid_member;
 	CHECK(_error_code(registry.call_tool("godot.script.usages", member_arguments, context).result) == "INVALID_ARGUMENTS");
 
+	Dictionary malformed_context;
+	malformed_context["session"] = Dictionary{ { "sessionId", 7 } };
+	CHECK(_error_code(provider->get(member_arguments, malformed_context)) == "INVALID_ARGUMENTS");
+
 	provider->unregister_tools();
 	CHECK(registry.get_tool_names().is_empty());
 	memdelete(provider);

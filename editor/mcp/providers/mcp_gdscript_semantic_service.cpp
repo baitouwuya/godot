@@ -115,6 +115,7 @@ bool MCPGDScriptSemanticService::_prepare_document(const String &p_session_id, c
 		r_failure = _failure(session_error, "ANALYSIS_UNAVAILABLE", error);
 		return false;
 	}
+	r_document.set_session(session);
 	if (p_sync_policy == SYNC_OPEN_BUFFERS_AND_TARGET) {
 		const Error open_buffers_error = MCPScriptAnalysisSync::sync_open_buffers(session_manager, p_session_id, &error);
 		if (open_buffers_error != OK) {
@@ -140,7 +141,6 @@ bool MCPGDScriptSemanticService::_prepare_document(const String &p_session_id, c
 	}
 
 	r_document.workspace = get_workspace();
-	r_document.session = session;
 	r_document.path = snapshot.get("path", p_path);
 	return true;
 }
@@ -152,7 +152,6 @@ MCPGDScriptSemanticService::OperationResult MCPGDScriptSemanticService::diagnost
 	if (!_prepare_document(p_session_id, p_path, SYNC_TARGET_ONLY, document, &diagnostics, failure)) {
 		return failure;
 	}
-	MCPGDScriptTransientParserCleanup cleanup(document.session);
 	const MCPGDScriptResultBuilder result_builder(document.workspace, document.session, document.path);
 	return _success(result_builder.diagnostics(diagnostics));
 }
@@ -163,7 +162,6 @@ MCPGDScriptSemanticService::OperationResult MCPGDScriptSemanticService::symbols(
 	if (!_prepare_document(p_session_id, p_path, SYNC_TARGET_ONLY, document, nullptr, failure)) {
 		return failure;
 	}
-	MCPGDScriptTransientParserCleanup cleanup(document.session);
 	if (!document.session->get_parse_result(document.path)) {
 		return _script_not_found(document.path);
 	}
@@ -177,7 +175,6 @@ MCPGDScriptSemanticService::OperationResult MCPGDScriptSemanticService::completi
 	if (!_prepare_document(p_session_id, p_path, SYNC_OPEN_BUFFERS_AND_TARGET, document, nullptr, failure)) {
 		return failure;
 	}
-	MCPGDScriptTransientParserCleanup cleanup(document.session);
 	if (!document.session->get_parse_result(document.path)) {
 		return _script_not_found(document.path);
 	}
@@ -193,7 +190,6 @@ MCPGDScriptSemanticService::OperationResult MCPGDScriptSemanticService::hover(co
 	if (!_prepare_document(p_session_id, p_path, SYNC_OPEN_BUFFERS_AND_TARGET, document, nullptr, failure)) {
 		return failure;
 	}
-	MCPGDScriptTransientParserCleanup cleanup(document.session);
 	if (!document.session->get_parse_result(document.path)) {
 		return _script_not_found(document.path);
 	}
@@ -208,7 +204,6 @@ MCPGDScriptSemanticService::OperationResult MCPGDScriptSemanticService::definiti
 	if (!_prepare_document(p_session_id, p_path, SYNC_OPEN_BUFFERS_AND_TARGET, document, nullptr, failure)) {
 		return failure;
 	}
-	MCPGDScriptTransientParserCleanup cleanup(document.session);
 	if (!document.session->get_parse_result(document.path)) {
 		return _script_not_found(document.path);
 	}
@@ -223,7 +218,6 @@ MCPGDScriptSemanticService::OperationResult MCPGDScriptSemanticService::declarat
 	if (!_prepare_document(p_session_id, p_path, SYNC_OPEN_BUFFERS_AND_TARGET, document, nullptr, failure)) {
 		return failure;
 	}
-	MCPGDScriptTransientParserCleanup cleanup(document.session);
 	if (!document.session->get_parse_result(document.path)) {
 		return _script_not_found(document.path);
 	}
@@ -238,7 +232,6 @@ MCPGDScriptSemanticService::OperationResult MCPGDScriptSemanticService::referenc
 	if (!_prepare_document(p_session_id, p_path, SYNC_OPEN_BUFFERS_AND_TARGET, document, nullptr, failure)) {
 		return failure;
 	}
-	MCPGDScriptTransientParserCleanup cleanup(document.session);
 	if (!document.session->get_parse_result(document.path)) {
 		return _script_not_found(document.path);
 	}
@@ -268,7 +261,6 @@ MCPGDScriptSemanticService::OperationResult MCPGDScriptSemanticService::signatur
 	if (!_prepare_document(p_session_id, p_path, SYNC_OPEN_BUFFERS_AND_TARGET, document, nullptr, failure)) {
 		return failure;
 	}
-	MCPGDScriptTransientParserCleanup cleanup(document.session);
 	if (!document.session->get_parse_result(document.path)) {
 		return _script_not_found(document.path);
 	}
@@ -284,7 +276,6 @@ MCPGDScriptSemanticService::OperationResult MCPGDScriptSemanticService::rename(c
 	if (!_prepare_document(p_session_id, p_path, SYNC_OPEN_BUFFERS_AND_TARGET, document, nullptr, failure)) {
 		return failure;
 	}
-	MCPGDScriptTransientParserCleanup cleanup(document.session);
 	if (!document.session->get_parse_result(document.path)) {
 		return _script_not_found(document.path);
 	}

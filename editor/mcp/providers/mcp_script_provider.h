@@ -64,5 +64,5 @@ private:
 	Ref<MCPGDScriptSessionManager> session_manager;
 	MCPScriptBufferService buffer_service;
 
-	bool _resolve_analysis_context(const Dictionary &p_context, String &r_session_id, Ref<GDScriptAnalysisSession> &r_session, String &r_error);
+	Error _resolve_analysis_context(const Dictionary &p_context, String &r_session_id, Ref<GDScriptAnalysisSession> &r_session, String &r_error);
 };

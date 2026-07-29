@@ -78,6 +78,12 @@ private:
 		Ref<GDScriptWorkspace> workspace;
 		Ref<GDScriptAnalysisSession> session;
 		String path;
+		MCPGDScriptTransientParserCleanup cleanup;
+
+		void set_session(const Ref<GDScriptAnalysisSession> &p_session) {
+			session = p_session;
+			cleanup.reset(p_session);
+		}
 	};
 
 	Ref<MCPGDScriptSessionManager> session_manager;

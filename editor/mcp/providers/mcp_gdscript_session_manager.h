@@ -42,8 +42,10 @@ class MCPGDScriptTransientParserCleanup {
 	Ref<GDScriptAnalysisSession> session;
 
 public:
+	MCPGDScriptTransientParserCleanup() = default;
 	explicit MCPGDScriptTransientParserCleanup(const Ref<GDScriptAnalysisSession> &p_session) :
 			session(p_session) {}
+	void reset(const Ref<GDScriptAnalysisSession> &p_session) { session = p_session; }
 	~MCPGDScriptTransientParserCleanup() {
 		if (session.is_valid()) {
 			session->clear_transient_parsers();

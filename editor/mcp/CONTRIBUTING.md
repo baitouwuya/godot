@@ -34,6 +34,8 @@ Avoid abstractions that merely rename calls. Extract when the new component owns
 
 ## Required Checks
 
-Run the static boundary, build-surface, and manifest validators before compiling. Build the narrowest affected surface, run focused tests, then run the complete `[MCP]*` suite. Any Host, transport, lifecycle, tool-surface, editor transaction, or runtime change also requires the Python CLI smoke test.
+Run the static boundary, build-surface, manifest, and SCons config validators before compiling. Build the narrowest affected surface, run focused tests, then run the complete `[MCP]*` suite. Any Host, transport, lifecycle, tool-surface, editor transaction, or runtime change also requires the Python CLI smoke test.
 
 Use separate worktrees or serialized builds for different SCU configurations. Preserve unrelated worktree changes and commit each architecture concern separately.
+
+The required CI gate is split between fast static architecture checks and the existing Linux and Windows build matrices. Keep the explicit `mcp=yes` Editor smokes, `mcp=yes` SCU Editor, `mcp=no` non-SCU Editor, and `mcp=yes` debug-template entries when changing build profiles or optional source surfaces.

@@ -34,7 +34,7 @@ jobs:
           - name: Editor w/ Mono (target=editor)
             cache-name: linux-editor-mono
             target: editor
-            scons-flags: module_mono_enabled=yes compiledb=yes
+            scons-flags: module_mono_enabled=yes compiledb=yes mcp=yes
             bin: ./bin/godot.linuxbsd.editor.x86_64.mono
             build-mono: true
             doc-test: true
@@ -45,8 +45,9 @@ jobs:
             # Validate godot-cpp compatibility on one arbitrary editor build.
             godot-cpp: true
             clangd-tidy: true
+            mcp-smoke: true
 
-          - name: Editor with doubles and GCC sanitizers (target=editor, dev_build=yes, scu_build=yes, precision=double, use_asan=yes, use_ubsan=yes, linker=mold)
+          - name: Editor with MCP and doubles, GCC sanitizers (target=editor, dev_build=yes, scu_build=yes, precision=double, use_asan=yes, use_ubsan=yes, linker=mold)
             cache-name: linux-editor-double-sanitizers
             target: editor
             # Debug symbols disabled as they're huge on this build and we hit the 14 GB limit for runners.
@@ -58,11 +59,12 @@ jobs:
               use_asan=yes
               use_ubsan=yes
               linker=mold
+              mcp=yes
             bin: ./bin/godot.linuxbsd.editor.dev.double.x86_64.san
             proj-test: true
             free-space: true
 
-          - name: Editor with clang sanitizers (target=editor, dev_build=yes, use_asan=yes, use_ubsan=yes, use_llvm=yes, linker=lld)
+          - name: Editor without MCP, with clang sanitizers (target=editor, dev_build=yes, use_asan=yes, use_ubsan=yes, use_llvm=yes, linker=lld)
             cache-name: linux-editor-llvm-sanitizers
             target: editor
             scons-flags: >-
@@ -71,6 +73,7 @@ jobs:
               use_ubsan=yes
               use_llvm=yes
               linker=lld
+              mcp=no
             bin: ./bin/godot.linuxbsd.editor.dev.x86_64.llvm.san
             # Test our oldest supported SCons/Python versions on one arbitrary editor build.
             legacy-scons: true
@@ -94,10 +97,10 @@ jobs:
             bin: ./bin/godot.linuxbsd.template_release.x86_64.mono
             artifact: true
 
-          - name: Template w/ Mono, debug (target=template_debug)
+          - name: Template w/ Mono and MCP runtime, debug (target=template_debug)
             cache-name: linux-template-mono-debug
             target: template_debug
-            scons-flags: module_mono_enabled=yes
+            scons-flags: module_mono_enabled=yes mcp=yes
             bin: ./bin/godot.linuxbsd.template_debug.x86_64.mono
             artifact: true
 
@@ -155,6 +158,11 @@ jobs:
           # Sync with Ensure*Version in SConstruct.
           python-version: 3.9
           scons-version: 4.4
+
+      - name: Embedded MCP SCons config smoke test
+        if: matrix.mcp-smoke
+        run: |
+          python3 misc/scripts/test_mcp_scons_config.py --platform linuxbsd
 
       - name: Force remove preinstalled .NET SDKs
         if: matrix.build-mono
@@ -239,6 +247,11 @@ jobs:
           ${{ matrix.bin }} --version
           ${{ matrix.bin }} --help
           ${{ matrix.bin }} --headless --test --force-colors
+
+      - name: Embedded MCP Host and stdio smoke test
+        if: matrix.mcp-smoke
+        run: |
+          python3 tests/editor/mcp/test_mcp_cli_smoke.py --binary ${{ matrix.bin }}
 
       - name: .NET source generators tests
         if: matrix.build-mono

@@ -39,6 +39,16 @@ jobs:
           skip_initial_fetch: true
           files_yaml_from_source_file: .github/changed_files.yml
 
+      - name: Embedded MCP architecture checks
+        run: |
+          python3 misc/scripts/validate_mcp_dependencies.py --root .
+          python3 misc/scripts/validate_mcp_build_surfaces.py --root .
+          python3 misc/scripts/validate_mcp_tool_manifest.py --root .
+          python3 -m unittest \
+            tests.misc.test_validate_mcp_dependencies \
+            tests.misc.test_validate_mcp_build_surfaces \
+            tests.misc.test_validate_mcp_tool_manifest
+
       - name: Style checks via prek
         uses: j178/prek-action@v2
         env:

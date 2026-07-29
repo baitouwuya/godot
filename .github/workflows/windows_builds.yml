@@ -29,8 +29,10 @@ jobs:
               windows_subsystem=console
               vsproj=yes
               vsproj_gen_only=no
+              mcp=yes
             bin: ./bin/godot.windows.editor.x86_64.exe
             compiler: msvc
+            mcp-smoke: true
 
           - name: Editor w/ clang-cl (target=editor, use_llvm=yes)
             cache-name: windows-editor-clang
@@ -139,3 +141,8 @@ jobs:
           ${{ matrix.bin }} --version
           ${{ matrix.bin }} --help
           ${{ matrix.bin }} --test --force-colors
+
+      - name: Embedded MCP Host and stdio smoke test
+        if: matrix.mcp-smoke
+        run: |
+          python tests/editor/mcp/test_mcp_cli_smoke.py --binary ${{ matrix.bin }}

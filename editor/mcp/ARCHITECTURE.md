@@ -81,6 +81,7 @@ Architecture changes are complete only when the relevant layers pass:
 python3 misc/scripts/validate_mcp_dependencies.py --root .
 python3 misc/scripts/validate_mcp_build_surfaces.py --root .
 python3 misc/scripts/validate_mcp_tool_manifest.py --root .
+python3 misc/scripts/test_mcp_scons_config.py
 python3 -m unittest \
   tests.misc.test_validate_mcp_dependencies \
   tests.misc.test_validate_mcp_build_surfaces \
@@ -91,3 +92,5 @@ python3 tests/editor/mcp/test_mcp_cli_smoke.py \
 ```
 
 Build checks must also cover MCP enabled and disabled, Editor and debug-template surfaces, profile/command-line precedence, and SCU enabled and disabled. Do not run different SCU configurations concurrently in one worktree because they share generated `.scu` files.
+
+GitHub Actions runs the static architecture validators and their unit tests before platform builds. The Linux matrix explicitly compiles an MCP-enabled Editor and runs the SCons config plus real Host + stdio smoke tests, compiles an MCP-enabled SCU Editor, compiles an MCP-disabled non-SCU Editor, and compiles the MCP runtime bridge into a debug template. An existing Windows Editor job also runs the cross-platform Host + stdio smoke. The config smoke exercises profile and command-line precedence, release-template rejection, and disabled GDScript source selection without adding duplicate CI builds.

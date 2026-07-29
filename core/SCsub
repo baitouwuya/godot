@@ -224,7 +224,7 @@ SConscript("os/SCsub")
 SConscript("math/SCsub")
 SConscript("crypto/SCsub")
 SConscript("io/SCsub")
-if env.editor_build and env["mcp"]:
+if env.mcp_editor_enabled:
     SConscript("mcp/SCsub")
 SConscript("debugger/SCsub")
 SConscript("input/SCsub")

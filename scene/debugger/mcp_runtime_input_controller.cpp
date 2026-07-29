@@ -36,7 +36,7 @@
 
 namespace {
 
-bool _has_only(const Dictionary &p_dictionary, const PackedStringArray &p_allowed, String &r_error) {
+bool _has_only_sequence_properties(const Dictionary &p_dictionary, const PackedStringArray &p_allowed, String &r_error) {
 	for (const Variant &key_value : p_dictionary.keys()) {
 		if ((key_value.get_type() != Variant::STRING && key_value.get_type() != Variant::STRING_NAME) || !p_allowed.has(String(key_value))) {
 			r_error = "Unknown sequence step property: " + String(key_value);
@@ -208,7 +208,7 @@ Error MCPRuntimeInputController::_decode_steps(const Array &p_payloads, Vector<S
 			}
 			r_bytes += step.event.encoded_bytes;
 		} else if (kind == "wait_ms" || kind == "wait_frames") {
-			if (!_has_only(payload, PackedStringArray{ "kind", "amount" }, r_error) ||
+			if (!_has_only_sequence_properties(payload, PackedStringArray{ "kind", "amount" }, r_error) ||
 					!_read_positive_integer(payload.get("amount", Variant()), kind == "wait_ms" ? 600000 : 36000, step.amount)) {
 				if (r_error.is_empty()) {
 					r_error = vformat("steps[%d].amount is outside its allowed range.", i);

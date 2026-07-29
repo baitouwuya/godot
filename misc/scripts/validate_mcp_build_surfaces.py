@@ -16,6 +16,7 @@ BUILD_FILES = (
     "editor/SCsub",
     "main/SCsub",
     "scene/debugger/SCsub",
+    "scu_builders.py",
     "tests/SCsub",
 )
 
@@ -124,6 +125,20 @@ def _has_mcp_option(module: ast.Module) -> bool:
     return False
 
 
+def _has_profile_aware_option_loading(module: ast.Module) -> bool:
+    for candidate in ast.walk(module):
+        if not isinstance(candidate, ast.Assign) or len(candidate.targets) != 1:
+            continue
+        if not _is_name(candidate.targets[0], "opts") or not isinstance(candidate.value, ast.Call):
+            continue
+        call = candidate.value
+        if _call_name(call) != "Variables" or len(call.args) < 2:
+            continue
+        if _is_name(call.args[0], "customs") and _is_name(call.args[1], "ARGUMENTS"):
+            return True
+    return False
+
+
 def _has_mcp_mode_resolution(module: ast.Module) -> bool:
     for candidate in ast.walk(module):
         if not isinstance(candidate, ast.Assign) or len(candidate.targets) != 1:
@@ -136,6 +151,33 @@ def _has_mcp_mode_resolution(module: ast.Module) -> bool:
             and _contains_constant(value.test, "auto")
             and _contains_constant(value.orelse, "yes")
         ):
+            return True
+    return False
+
+
+def _has_mcp_surface_resolution(module: ast.Module) -> bool:
+    editor_enabled = False
+    runtime_enabled = False
+    for candidate in ast.walk(module):
+        if not isinstance(candidate, ast.Assign) or len(candidate.targets) != 1:
+            continue
+        target = candidate.targets[0]
+        if _is_attribute(target, "env", "mcp_editor_enabled"):
+            editor_enabled = _contains(
+                candidate.value, lambda node: _is_attribute(node, "env", "editor_build")
+            ) and _contains(candidate.value, lambda node: _is_subscript(node, "env", "mcp"))
+        if _is_attribute(target, "env", "mcp_runtime_enabled"):
+            runtime_enabled = _contains(
+                candidate.value, lambda node: _is_attribute(node, "env", "debug_features")
+            ) and _contains(candidate.value, lambda node: _is_subscript(node, "env", "mcp"))
+    return editor_enabled and runtime_enabled
+
+
+def _has_scu_mcp_runtime_mode(module: ast.Module) -> bool:
+    for candidate in ast.walk(module):
+        if not isinstance(candidate, ast.Call) or _call_name(candidate) != "generate_scu_files":
+            continue
+        if any(_contains(argument, lambda node: _is_attribute(node, "env", "mcp_runtime_enabled")) for argument in candidate.args):
             return True
     return False
 
@@ -186,28 +228,113 @@ def _has_source_filter(
 
 
 def _has_test_gate(module: ast.Module) -> bool:
-    prefixes = None
-    has_enabled_assignment = False
-    guarded_uses = 0
+    editor_prefixes = None
+    runtime_sources = None
+    has_editor_enabled_assignment = False
+    has_runtime_enabled_assignment = False
+    has_enabled_filter = False
+    has_mcp_selection = False
+    has_scu_aggregation = False
+    has_enabled_predicate = False
     for candidate in ast.walk(module):
         if isinstance(candidate, ast.Assign) and len(candidate.targets) == 1 and _is_name(
-            candidate.targets[0], "MCP_TEST_PREFIXES"
+            candidate.targets[0], "MCP_EDITOR_TEST_PREFIXES"
         ):
             if isinstance(candidate.value, (ast.List, ast.Tuple)):
-                prefixes = tuple(item.value for item in candidate.value.elts if isinstance(item, ast.Constant))
+                editor_prefixes = tuple(item.value for item in candidate.value.elts if isinstance(item, ast.Constant))
+        if isinstance(candidate, ast.Assign) and len(candidate.targets) == 1 and _is_name(
+            candidate.targets[0], "MCP_RUNTIME_TEST_SOURCES"
+        ):
+            if isinstance(candidate.value, (ast.List, ast.Tuple)):
+                runtime_sources = tuple(item.value for item in candidate.value.elts if isinstance(item, ast.Constant))
         if isinstance(candidate, ast.Assign) and len(candidate.targets) == 1 and _is_name(
             candidate.targets[0], "editor_mcp_enabled"
         ):
-            has_enabled_assignment = _contains(
-                candidate.value, lambda node: _is_attribute(node, "env", "editor_build")
-            ) and _contains(candidate.value, lambda node: _is_subscript(node, "env", "mcp"))
-        if isinstance(candidate, ast.If) and _contains(candidate.test, lambda node: _is_name(node, "editor_mcp_enabled")):
-            guarded_uses += 1
+            has_editor_enabled_assignment = _contains(
+                candidate.value, lambda node: _is_attribute(node, "env", "mcp_editor_enabled")
+            )
+        if isinstance(candidate, ast.Assign) and len(candidate.targets) == 1 and _is_name(
+            candidate.targets[0], "runtime_mcp_enabled"
+        ):
+            has_runtime_enabled_assignment = _contains(
+                candidate.value, lambda node: _is_attribute(node, "env", "mcp_runtime_enabled")
+            )
+        if isinstance(candidate, ast.Assign) and len(candidate.targets) == 1 and _is_name(
+            candidate.targets[0], "force_link_sources"
+        ):
+            has_enabled_filter |= isinstance(candidate.value, ast.ListComp) and _contains_call(
+                (candidate.value,), "is_enabled_test_source"
+            )
+        if isinstance(candidate, ast.Assign) and len(candidate.targets) == 1 and _is_name(
+            candidate.targets[0], "mcp_test_sources"
+        ):
+            has_mcp_selection = isinstance(candidate.value, ast.ListComp) and _contains_call(
+                (candidate.value,), "is_mcp_test_source"
+            )
+        if isinstance(candidate, ast.FunctionDef) and candidate.name == "is_enabled_test_source":
+            has_enabled_predicate = (
+                _contains(candidate, lambda node: _is_name(node, "editor_mcp_enabled"))
+                and _contains(candidate, lambda node: _is_name(node, "runtime_mcp_enabled"))
+                and _contains_call((candidate,), "is_editor_mcp_test_source")
+                and _contains_call((candidate,), "is_runtime_mcp_test_source")
+            )
+        if isinstance(candidate, ast.If) and _contains(candidate.test, lambda node: _is_subscript(node, "env", "scu_build")):
+            for call in (node for node in ast.walk(ast.Module(body=candidate.body, type_ignores=[])) if isinstance(node, ast.Call)):
+                if _call_name(call) == "add_source_files" and len(call.args) >= 2 and _contains(
+                    call.args[1], lambda node: _is_name(node, "mcp_test_sources")
+                ):
+                    has_scu_aggregation = True
     return (
-        prefixes == ("core/mcp/", "editor/mcp/", "main/test_mcp_")
-        and has_enabled_assignment
-        and guarded_uses >= 2
+        editor_prefixes == ("core/mcp/", "editor/mcp/", "main/test_mcp_")
+        and runtime_sources
+        == (
+            "editor/mcp/test_mcp_runtime_condition_scheduler.cpp",
+            "editor/mcp/test_mcp_runtime_input_controller.cpp",
+            "editor/mcp/test_mcp_runtime_performance_sampler.cpp",
+        )
+        and has_editor_enabled_assignment
+        and has_runtime_enabled_assignment
+        and has_enabled_filter
+        and has_mcp_selection
+        and has_scu_aggregation
+        and has_enabled_predicate
     )
+
+
+def _has_scu_runtime_filter(module: ast.Module) -> bool:
+    has_exclusion_parameter = False
+    has_runtime_mode = False
+    has_scene_debugger_filter = False
+    for candidate in ast.walk(module):
+        if isinstance(candidate, ast.FunctionDef) and candidate.name == "find_files_in_folder":
+            has_exclusion_parameter = any(argument.arg == "excluded_file_prefixes" for argument in candidate.args.args)
+            has_exclusion_parameter &= _contains_call((candidate,), "startswith") and _contains(
+                candidate, lambda node: _is_name(node, "excluded_file_prefixes")
+            )
+        if isinstance(candidate, ast.FunctionDef) and candidate.name == "generate_scu_files":
+            has_runtime_mode = any(argument.arg == "mcp_runtime_enabled" for argument in candidate.args.args)
+            for call in (node for node in ast.walk(candidate) if isinstance(node, ast.Call)):
+                if _call_name(call) != "process_folder":
+                    continue
+                if (
+                    _contains_constant(call, "scene/debugger")
+                    and _contains_constant(call, "mcp_runtime_")
+                    and _contains(call, lambda node: _is_name(node, "mcp_runtime_enabled"))
+                ):
+                    has_scene_debugger_filter = True
+    return has_exclusion_parameter and has_runtime_mode and has_scene_debugger_filter
+
+
+def _has_scu_test_coverage(module: ast.Module) -> bool:
+    for candidate in ast.walk(module):
+        if not isinstance(candidate, ast.FunctionDef) or candidate.name != "generate_scu_files":
+            continue
+        for call in (node for node in ast.walk(candidate) if isinstance(node, ast.Call)):
+            if _call_name(call) == "process_folder" and _contains_constant(call, "tests") and _contains_constant(
+                call, "/core/debugger"
+            ):
+                return True
+    return False
 
 
 def _parse_build_files(repository_root: Path) -> tuple[dict[str, ast.Module], list[BuildSurfaceViolation]]:
@@ -233,9 +360,19 @@ def validate_mcp_build_surfaces(repository_root: Path) -> list[BuildSurfaceViola
         requirements = (
             ("mcp-option", _has_mcp_option(sconstruct), "mcp must remain an auto|no|yes option with auto as its default"),
             (
+                "mcp-option-precedence",
+                _has_profile_aware_option_loading(sconstruct),
+                "custom.py and profiles must load through Variables with explicit command-line arguments taking precedence",
+            ),
+            (
                 "mcp-mode-resolution",
                 _has_mcp_mode_resolution(sconstruct),
                 "mcp=auto must resolve from the effective editor target after profile loading",
+            ),
+            (
+                "mcp-surface-resolution",
+                _has_mcp_surface_resolution(sconstruct),
+                "editor and runtime MCP build surfaces must derive from the resolved target and MCP mode",
             ),
             (
                 "release-rejection",
@@ -243,6 +380,11 @@ def validate_mcp_build_surfaces(repository_root: Path) -> list[BuildSurfaceViola
                 "release templates must reject an enabled MCP build",
             ),
             ("mcp-define", _has_mcp_define(sconstruct), "enabled MCP builds must define MCP_ENABLED"),
+            (
+                "scu-runtime-mode",
+                _has_scu_mcp_runtime_mode(sconstruct),
+                "SCU generation must receive the resolved MCP runtime build surface",
+            ),
         )
         for gate, valid, reason in requirements:
             if not valid:
@@ -253,10 +395,7 @@ def validate_mcp_build_surfaces(repository_root: Path) -> list[BuildSurfaceViola
         core,
         "SConscript",
         "mcp/SCsub",
-        (
-            lambda node: _is_attribute(node, "env", "editor_build"),
-            lambda node: _is_subscript(node, "env", "mcp"),
-        ),
+        (lambda node: _is_attribute(node, "env", "mcp_editor_enabled"),),
     ):
         violations.append(
             BuildSurfaceViolation("core/SCsub", "core-editor-only", "core/mcp must compile only in MCP-enabled editor builds")
@@ -267,10 +406,7 @@ def validate_mcp_build_surfaces(repository_root: Path) -> list[BuildSurfaceViola
         editor,
         "SConscript",
         "mcp/SCsub",
-        (
-            lambda node: _is_attribute(node, "env", "editor_build"),
-            lambda node: _is_subscript(node, "env", "mcp"),
-        ),
+        (lambda node: _is_attribute(node, "env", "mcp_editor_enabled"),),
     ):
         violations.append(
             BuildSurfaceViolation("editor/SCsub", "editor-host-gate", "editor/mcp must compile only in MCP-enabled editor builds")
@@ -279,10 +415,7 @@ def validate_mcp_build_surfaces(repository_root: Path) -> list[BuildSurfaceViola
     main = modules.get("main/SCsub")
     if main and not _has_source_filter(
         main,
-        (
-            lambda node: _is_attribute(node, "env_main", "editor_build"),
-            lambda node: _is_subscript(node, "env_main", "mcp"),
-        ),
+        (lambda node: _is_attribute(node, "env_main", "mcp_editor_enabled"),),
         "mcp_",
     ):
         violations.append(
@@ -292,7 +425,10 @@ def validate_mcp_build_surfaces(repository_root: Path) -> list[BuildSurfaceViola
     debugger = modules.get("scene/debugger/SCsub")
     if debugger and not _has_source_filter(
         debugger,
-        (lambda node: _is_subscript(node, "env", "mcp"),),
+        (
+            lambda node: _is_attribute(node, "env", "mcp_runtime_enabled"),
+            lambda node: _is_subscript(node, "env", "scu_build"),
+        ),
         "mcp_runtime_",
     ):
         violations.append(
@@ -300,6 +436,24 @@ def validate_mcp_build_surfaces(repository_root: Path) -> list[BuildSurfaceViola
                 "scene/debugger/SCsub",
                 "runtime-source-gate",
                 "scene/debugger/mcp_runtime_* must be excluded when MCP is disabled",
+            )
+        )
+
+    scu = modules.get("scu_builders.py")
+    if scu and not _has_scu_runtime_filter(scu):
+        violations.append(
+            BuildSurfaceViolation(
+                "scu_builders.py",
+                "scu-runtime-source-gate",
+                "SCU generation must exclude scene/debugger/mcp_runtime_* when the runtime surface is disabled",
+            )
+        )
+    if scu and not _has_scu_test_coverage(scu):
+        violations.append(
+            BuildSurfaceViolation(
+                "scu_builders.py",
+                "scu-test-coverage",
+                "SCU test aggregation must include tests/core/debugger so force-linked tests have definitions",
             )
         )
 

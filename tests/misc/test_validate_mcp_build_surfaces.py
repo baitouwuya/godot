@@ -65,7 +65,7 @@ class MCPBuildSurfaceTest(unittest.TestCase):
         self.assertIn("release-rejection", [violation.gate for violation in violations])
 
     def test_core_mcp_requires_both_editor_and_mcp_guards(self) -> None:
-        self.replace('core/SCsub', 'if env.editor_build and env["mcp"]:', 'if env.editor_build:')
+        self.replace('core/SCsub', 'if env.mcp_editor_enabled:', 'if env["mcp"]:')
 
         violations = VALIDATOR.validate_mcp_build_surfaces(self.root)
 
@@ -84,13 +84,93 @@ class MCPBuildSurfaceTest(unittest.TestCase):
     def test_editor_mcp_tests_follow_the_product_surface(self) -> None:
         self.replace(
             'tests/SCsub',
-            'editor_mcp_enabled = env.editor_build and env["mcp"]',
+            'editor_mcp_enabled = env.mcp_editor_enabled',
             'editor_mcp_enabled = env["mcp"]',
         )
 
         violations = VALIDATOR.validate_mcp_build_surfaces(self.root)
 
         self.assertIn("test-source-gate", [violation.gate for violation in violations])
+
+    def test_mcp_profile_loading_preserves_command_line_precedence(self) -> None:
+        self.replace('SConstruct', 'Variables(customs, ARGUMENTS)', 'Variables(customs, {})')
+
+        violations = VALIDATOR.validate_mcp_build_surfaces(self.root)
+
+        self.assertIn("mcp-option-precedence", [violation.gate for violation in violations])
+
+    def test_mcp_surfaces_are_resolved_separately(self) -> None:
+        self.replace(
+            'SConstruct',
+            'env.mcp_runtime_enabled = env.debug_features and env["mcp"]',
+            'env.mcp_runtime_enabled = env["mcp"]',
+        )
+
+        violations = VALIDATOR.validate_mcp_build_surfaces(self.root)
+
+        self.assertIn("mcp-surface-resolution", [violation.gate for violation in violations])
+
+    def test_runtime_test_allowlist_is_part_of_the_build_contract(self) -> None:
+        self.replace(
+            'tests/SCsub',
+            '"editor/mcp/test_mcp_runtime_performance_sampler.cpp",',
+            '"editor/mcp/test_mcp_runtime_removed.cpp",',
+        )
+
+        violations = VALIDATOR.validate_mcp_build_surfaces(self.root)
+
+        self.assertIn("test-source-gate", [violation.gate for violation in violations])
+
+    def test_scu_tests_use_the_selected_mcp_sources(self) -> None:
+        self.replace(
+            'tests/SCsub',
+            'mcp_test_sources = [source for source in force_link_sources if is_mcp_test_source(source)]',
+            'mcp_test_sources = []',
+        )
+
+        violations = VALIDATOR.validate_mcp_build_surfaces(self.root)
+
+        self.assertIn("test-source-gate", [violation.gate for violation in violations])
+
+    def test_scu_runtime_generation_receives_the_runtime_surface(self) -> None:
+        self.replace(
+            'SConstruct',
+            'scu_builders.generate_scu_files(max_includes_per_scu, env.mcp_runtime_enabled)',
+            'scu_builders.generate_scu_files(max_includes_per_scu)',
+        )
+
+        violations = VALIDATOR.validate_mcp_build_surfaces(self.root)
+
+        self.assertIn("scu-runtime-mode", [violation.gate for violation in violations])
+
+    def test_scu_generator_excludes_runtime_sources_when_disabled(self) -> None:
+        self.replace(
+            'scu_builders.py',
+            'excluded_file_prefixes=() if mcp_runtime_enabled else ("mcp_runtime_",)',
+            'excluded_file_prefixes=()',
+        )
+
+        violations = VALIDATOR.validate_mcp_build_surfaces(self.root)
+
+        self.assertIn("scu-runtime-source-gate", [violation.gate for violation in violations])
+
+    def test_scu_tests_include_core_debugger_sources(self) -> None:
+        self.replace('scu_builders.py', '"/core/debugger",', '"/core/input",')
+
+        violations = VALIDATOR.validate_mcp_build_surfaces(self.root)
+
+        self.assertIn("scu-test-coverage", [violation.gate for violation in violations])
+
+    def test_scene_debugger_preserves_scu_aggregation(self) -> None:
+        self.replace(
+            'scene/debugger/SCsub',
+            'if env.mcp_runtime_enabled or env["scu_build"]:',
+            'if env.mcp_runtime_enabled:',
+        )
+
+        violations = VALIDATOR.validate_mcp_build_surfaces(self.root)
+
+        self.assertIn("runtime-source-gate", [violation.gate for violation in violations])
 
 
 if __name__ == "__main__":

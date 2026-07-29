@@ -7,18 +7,47 @@ import test_builders
 
 Import("env")
 
-MCP_TEST_PREFIXES = ("core/mcp/", "editor/mcp/", "main/test_mcp_")
+MCP_EDITOR_TEST_PREFIXES = ("core/mcp/", "editor/mcp/", "main/test_mcp_")
+MCP_RUNTIME_TEST_SOURCES = (
+    "editor/mcp/test_mcp_runtime_condition_scheduler.cpp",
+    "editor/mcp/test_mcp_runtime_input_controller.cpp",
+    "editor/mcp/test_mcp_runtime_performance_sampler.cpp",
+)
+
+
+def normalize_test_source(source):
+    return source.replace("\\", "/")
+
+
+def is_runtime_mcp_test_source(source):
+    return normalize_test_source(source) in MCP_RUNTIME_TEST_SOURCES
+
+
+def is_editor_mcp_test_source(source):
+    normalized = normalize_test_source(source)
+    return normalized.startswith(MCP_EDITOR_TEST_PREFIXES) and normalized not in MCP_RUNTIME_TEST_SOURCES
 
 
 def is_mcp_test_source(source):
-    return source.replace("\\", "/").startswith(MCP_TEST_PREFIXES)
+    return is_editor_mcp_test_source(source) or is_runtime_mcp_test_source(source)
 
 
 # Sources with tests must be explicitly linked first.
 force_link_sources = glob.glob("*/**/*.cpp", recursive=True)
-editor_mcp_enabled = env.editor_build and env["mcp"]
-if not editor_mcp_enabled:
-    force_link_sources = [source for source in force_link_sources if not is_mcp_test_source(source)]
+editor_mcp_enabled = env.mcp_editor_enabled
+runtime_mcp_enabled = env.mcp_runtime_enabled
+
+
+def is_enabled_test_source(source):
+    if is_runtime_mcp_test_source(source):
+        return runtime_mcp_enabled
+    if is_editor_mcp_test_source(source):
+        return editor_mcp_enabled
+    return True
+
+
+force_link_sources = [source for source in force_link_sources if is_enabled_test_source(source)]
+mcp_test_sources = [source for source in force_link_sources if is_mcp_test_source(source)]
 force_link_header = env.CommandNoCache(
     "force_link.gen.h", env.Value(force_link_sources), env.Run(test_builders.force_link_builder)
 )
@@ -28,8 +57,7 @@ tests_obj = []
 if env["scu_build"]:
     # HACK: SCU setup doesn't support recursive/dynamic setup, so we must manually pass the files.
     env.add_source_files(tests_obj, glob.glob(".scu/*.cpp"))
-    if editor_mcp_enabled:
-        env.add_source_files(tests_obj, [source for source in force_link_sources if is_mcp_test_source(source)])
+    env.add_source_files(tests_obj, mcp_test_sources)
 else:
     env.add_source_files(tests_obj, glob.glob("*.cpp") + force_link_sources)
 

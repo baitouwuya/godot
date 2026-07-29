@@ -9,7 +9,7 @@ env.main_sources = []
 
 env_main = env.Clone()
 
-if env_main.editor_build and env_main["mcp"]:
+if env_main.mcp_editor_enabled:
     env_main.add_source_files(env.main_sources, "*.cpp")
 else:
     main_sources = [source for source in env_main.Glob("*.cpp") if not source.name.startswith("mcp_")]

@@ -543,12 +543,17 @@ env.editor_build = env["target"] == "editor"
 env.dev_build = env["dev_build"]
 env.debug_features = env["target"] in ["editor", "template_debug"]
 
+# Resolve auto only after custom.py and profiles have populated the effective target.
+# SCons Variables gives explicit command-line arguments precedence over those files.
 mcp_mode = env["mcp"]
 env["mcp"] = env.editor_build if mcp_mode == "auto" else mcp_mode == "yes"
 
 if env["target"] == "template_release" and env["mcp"]:
     print_error("The embedded MCP development tools cannot be enabled in release templates.")
     Exit(255)
+
+env.mcp_editor_enabled = env.editor_build and env["mcp"]
+env.mcp_runtime_enabled = env.debug_features and env["mcp"]
 
 if env["mcp"]:
     env.Append(CPPDEFINES=["MCP_ENABLED"])
@@ -713,7 +718,9 @@ if env["scu_build"]:
     if read_scu_limit != 0:
         max_includes_per_scu = read_scu_limit
 
-    methods.set_scu_folders(scu_builders.generate_scu_files(max_includes_per_scu))
+    methods.set_scu_folders(
+        scu_builders.generate_scu_files(max_includes_per_scu, env.mcp_runtime_enabled)
+    )
 
 # Must happen after the flags' definition, as configure is when most flags
 # are actually handled to change compile options, etc.

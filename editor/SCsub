@@ -86,7 +86,7 @@ if env.editor_build:
     SConscript("icons/SCsub")
     SConscript("inspector/SCsub")
     SConscript("import/SCsub")
-    if env["mcp"]:
+    if env.mcp_editor_enabled:
         SConscript("mcp/SCsub")
     SConscript("plugins/SCsub")
     SConscript("project_manager/SCsub")

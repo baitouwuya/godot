@@ -3,7 +3,7 @@ from misc.utility.scons_hints import *
 
 Import("env")
 
-if env["mcp"]:
+if env.mcp_runtime_enabled or env["scu_build"]:
     env.add_source_files(env.scene_sources, "*.cpp")
 else:
     debugger_sources = [source for source in env.Glob("*.cpp") if not source.name.startswith("mcp_runtime_")]

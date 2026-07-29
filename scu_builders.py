@@ -35,7 +35,9 @@ def folder_not_found(folder):
     return not os.path.isdir(abs_folder)
 
 
-def find_files_in_folder(folder, sub_folder, include_list, extension, sought_exceptions, found_exceptions):
+def find_files_in_folder(
+    folder, sub_folder, include_list, extension, sought_exceptions, found_exceptions, excluded_file_prefixes=()
+):
     abs_folder = base_folder_path + folder + "/" + sub_folder
 
     if not os.path.isdir(abs_folder):
@@ -49,6 +51,8 @@ def find_files_in_folder(folder, sub_folder, include_list, extension, sought_exc
         sub_folder_slashed = sub_folder + "/"
 
     for file in glob.glob("*." + extension):
+        if file.startswith(excluded_file_prefixes):
+            continue
         simple_name = Path(file).stem
 
         if file.endswith(".gen.cpp"):
@@ -171,7 +175,7 @@ def find_section_name(sub_folder):
 
 
 # "extension" will usually be cpp, but can also be set to c (for e.g. third party libraries that use c)
-def process_folder(folders, sought_exceptions=[], includes_per_scu=0, extension="cpp"):
+def process_folder(folders, sought_exceptions=[], includes_per_scu=0, extension="cpp", excluded_file_prefixes=()):
     if len(folders) == 0:
         return
 
@@ -192,13 +196,19 @@ def process_folder(folders, sought_exceptions=[], includes_per_scu=0, extension=
 
     # main folder (first)
     found_includes, found_exceptions = find_files_in_folder(
-        main_folder, "", found_includes, extension, sought_exceptions, found_exceptions
+        main_folder, "", found_includes, extension, sought_exceptions, found_exceptions, excluded_file_prefixes
     )
 
     # sub folders
     for d in range(1, len(folders)):
         found_includes, found_exceptions = find_files_in_folder(
-            main_folder, folders[d], found_includes, extension, sought_exceptions, found_exceptions
+            main_folder,
+            folders[d],
+            found_includes,
+            extension,
+            sought_exceptions,
+            found_exceptions,
+            excluded_file_prefixes,
         )
 
     found_includes = sorted(found_includes)
@@ -258,7 +268,7 @@ def process_folder(folders, sought_exceptions=[], includes_per_scu=0, extension=
     clear_out_stale_files(output_folder, extension, fresh_files)
 
 
-def generate_scu_files(max_includes_per_scu):
+def generate_scu_files(max_includes_per_scu, mcp_runtime_enabled=True):
     global _max_includes_per_scu
     _max_includes_per_scu = max_includes_per_scu
 
@@ -390,7 +400,9 @@ def generate_scu_files(max_includes_per_scu):
     process_folder(["scene/3d/physics/joints"])
     process_folder(["scene/3d/xr"])
     process_folder(["scene/animation"])
-    process_folder(["scene/debugger"])
+    process_folder(
+        ["scene/debugger"], excluded_file_prefixes=() if mcp_runtime_enabled else ("mcp_runtime_",)
+    )
     process_folder(["scene/gui"])
     process_folder(["scene/main"])
     process_folder(["scene/resources"])
@@ -424,6 +436,7 @@ def generate_scu_files(max_includes_per_scu):
             "/core",
             "/core/config",
             "/core/crypto",
+            "/core/debugger",
             "/core/input",
             "/core/io",
             "/core/math",

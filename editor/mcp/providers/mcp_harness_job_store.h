@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  mcp_harness_service.h                                                */
+/*  mcp_harness_job_store.h                                              */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,40 +30,31 @@
 
 #pragma once
 
-#include "mcp_harness_evidence_collector.h"
-#include "mcp_harness_job_store.h"
-#include "mcp_harness_step_executor.h"
+#include "mcp_harness_job.h"
 
-class MCPHarnessService {
+#include "core/templates/hash_map.h"
+#include "core/templates/vector.h"
+
+class MCPHarnessJobStore {
 public:
-	static constexpr int MAX_ACTIVE_JOBS = 8;
-	static constexpr int MAX_SESSION_JOBS = 2;
-	static constexpr int MAX_TOOL_CALLS_PER_POLL = 1;
+	MCPHarnessJob *insert(MCPHarnessJob p_job);
+	MCPHarnessJob *find(const String &p_job_id);
+	const MCPHarnessJob *find(const String &p_job_id) const;
+	int active_job_count(const String &p_session_id = String()) const;
 
-	MCPHarnessService();
-	MCPHarnessService(const MCPHarnessService &) = delete;
-	MCPHarnessService &operator=(const MCPHarnessService &) = delete;
-
-	void set_tool_registry(MCPToolRegistry *p_registry);
-	void set_trace_service(MCPTraceService *p_service, const Dictionary &p_project_metadata = Dictionary(), const String &p_root_directory_override = String());
-
-	Dictionary start(const Dictionary &p_arguments, const MCPToolCallContext &p_context);
-	Dictionary get_status(const Dictionary &p_arguments, const MCPToolCallContext &p_context) const;
-	Dictionary cancel(const Dictionary &p_arguments, const MCPToolCallContext &p_context);
-	Dictionary get_report(const Dictionary &p_arguments, const MCPToolCallContext &p_context) const;
-
-	int poll(int p_max_tool_calls = MAX_TOOL_CALLS_PER_POLL);
-	void release_session(const String &p_session_id);
-	void shutdown();
+	int poll_job_count() const { return job_order.size(); }
+	MCPHarnessJob *poll_job_at(int p_offset);
+	void advance_poll_cursor(int p_visited);
+	Vector<String> get_job_ids() const { return job_order; }
+	void clear();
 
 private:
-	MCPToolRegistry *tool_registry = nullptr;
-	MCPHarnessJobStore job_store;
-	MCPHarnessEvidenceCollector evidence_collector;
-	MCPHarnessStepExecutor step_executor;
+	static constexpr int MAX_RETAINED_JOBS = 32;
 
-	static String _session_id(const MCPToolCallContext &p_context);
-	MCPHarnessJob *_find_owned_job(const Dictionary &p_arguments, const MCPToolCallContext &p_context, Dictionary &r_error);
-	const MCPHarnessJob *_find_owned_job(const Dictionary &p_arguments, const MCPToolCallContext &p_context, Dictionary &r_error) const;
-	int _advance_job(MCPHarnessJob &r_job);
+	HashMap<String, MCPHarnessJob> jobs;
+	Vector<String> job_order;
+	uint64_t next_job_id = 1;
+	int poll_cursor = 0;
+
+	void _prune();
 };

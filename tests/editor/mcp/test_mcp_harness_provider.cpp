@@ -49,9 +49,11 @@ public:
 	int performance_stop_count = 0;
 	int latest_log_count = 0;
 	bool fail_status = false;
+	Vector<String> session_order;
 
-	Dictionary get_state(const Dictionary &, const Dictionary &) {
+	Dictionary get_state(const Dictionary &, const Dictionary &p_context) {
 		call_count++;
+		session_order.push_back(Dictionary(p_context.get("session", Dictionary())).get("sessionId", String()));
 		return fail_status ? MCPToolUtils::make_error_result("RUNTIME_GONE", "The running project disconnected.") : MCPToolUtils::make_success_result(Dictionary{ { "running", true } });
 	}
 
@@ -252,6 +254,43 @@ TEST_CASE("[MCP][Harness] Jobs enforce session limits, ownership, and generation
 	fixture.provider->release_session("session-a");
 	const Dictionary status = fixture.call("godot.runtime.harness.status", _job_arguments(job_id)).result.get("structuredContent", Dictionary());
 	CHECK(status.get("state", String()) == "cancelled");
+}
+
+TEST_CASE("[MCP][Harness] Polling is round-robin across active jobs") {
+	Fixture fixture;
+	const Dictionary arguments = _start_arguments(Array{ Dictionary{ { "cmd", "get_status" } } });
+	const MCPToolRegistry::CallResult first = fixture.call("godot.runtime.harness.start", arguments, "session-a");
+	const MCPToolRegistry::CallResult second = fixture.call("godot.runtime.harness.start", arguments, "session-b");
+	REQUIRE_FALSE(bool(first.result.get("isError", false)));
+	REQUIRE_FALSE(bool(second.result.get("isError", false)));
+
+	CHECK(fixture.provider->poll() == 1);
+	CHECK(fixture.provider->poll() == 1);
+	REQUIRE(fixture.tools->session_order.size() == 2);
+	CHECK(fixture.tools->session_order[0] == "session-a");
+	CHECK(fixture.tools->session_order[1] == "session-b");
+}
+
+TEST_CASE("[MCP][Harness] Session release is isolated and shutdown clears retained jobs") {
+	Fixture fixture;
+	const Dictionary arguments = _start_arguments(Array{ Dictionary{ { "cmd", "get_status" } } });
+	const MCPToolRegistry::CallResult first = fixture.call("godot.runtime.harness.start", arguments, "session-a");
+	const MCPToolRegistry::CallResult second = fixture.call("godot.runtime.harness.start", arguments, "session-b");
+	const String first_id = Dictionary(first.result.get("structuredContent", Dictionary())).get("jobId", String());
+	const String second_id = Dictionary(second.result.get("structuredContent", Dictionary())).get("jobId", String());
+	REQUIRE_FALSE(first_id.is_empty());
+	REQUIRE_FALSE(second_id.is_empty());
+
+	fixture.provider->release_session("session-a");
+	const Dictionary first_status = fixture.call("godot.runtime.harness.status", _job_arguments(first_id), "session-a").result.get("structuredContent", Dictionary());
+	const Dictionary second_status = fixture.call("godot.runtime.harness.status", _job_arguments(second_id), "session-b").result.get("structuredContent", Dictionary());
+	CHECK(first_status.get("state", String()) == "cancelled");
+	CHECK(Dictionary(first_status.get("failure", Dictionary())).get("code", String()) == "SESSION_CLOSED");
+	CHECK(second_status.get("state", String()) == "running");
+
+	fixture.provider->shutdown();
+	CHECK(_error_code(fixture.call("godot.runtime.harness.status", _job_arguments(first_id), "session-a")) == "HARNESS_JOB_NOT_FOUND");
+	CHECK(_error_code(fixture.call("godot.runtime.harness.status", _job_arguments(second_id), "session-b")) == "HARNESS_JOB_NOT_FOUND");
 }
 
 TEST_CASE("[MCP][Harness] Cancel asynchronously releases an active child") {

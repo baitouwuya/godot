@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  mcp_harness_service.h                                                */
+/*  mcp_harness_report_builder.h                                         */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,40 +30,18 @@
 
 #pragma once
 
-#include "mcp_harness_evidence_collector.h"
-#include "mcp_harness_job_store.h"
-#include "mcp_harness_step_executor.h"
+#include "mcp_harness_job.h"
 
-class MCPHarnessService {
+class MCPHarnessReportBuilder {
 public:
-	static constexpr int MAX_ACTIVE_JOBS = 8;
-	static constexpr int MAX_SESSION_JOBS = 2;
-	static constexpr int MAX_TOOL_CALLS_PER_POLL = 1;
-
-	MCPHarnessService();
-	MCPHarnessService(const MCPHarnessService &) = delete;
-	MCPHarnessService &operator=(const MCPHarnessService &) = delete;
-
-	void set_tool_registry(MCPToolRegistry *p_registry);
-	void set_trace_service(MCPTraceService *p_service, const Dictionary &p_project_metadata = Dictionary(), const String &p_root_directory_override = String());
-
-	Dictionary start(const Dictionary &p_arguments, const MCPToolCallContext &p_context);
-	Dictionary get_status(const Dictionary &p_arguments, const MCPToolCallContext &p_context) const;
-	Dictionary cancel(const Dictionary &p_arguments, const MCPToolCallContext &p_context);
-	Dictionary get_report(const Dictionary &p_arguments, const MCPToolCallContext &p_context) const;
-
-	int poll(int p_max_tool_calls = MAX_TOOL_CALLS_PER_POLL);
-	void release_session(const String &p_session_id);
-	void shutdown();
-
-private:
-	MCPToolRegistry *tool_registry = nullptr;
-	MCPHarnessJobStore job_store;
-	MCPHarnessEvidenceCollector evidence_collector;
-	MCPHarnessStepExecutor step_executor;
-
-	static String _session_id(const MCPToolCallContext &p_context);
-	MCPHarnessJob *_find_owned_job(const Dictionary &p_arguments, const MCPToolCallContext &p_context, Dictionary &r_error);
-	const MCPHarnessJob *_find_owned_job(const Dictionary &p_arguments, const MCPToolCallContext &p_context, Dictionary &r_error) const;
-	int _advance_job(MCPHarnessJob &r_job);
+	static bool is_terminal(const MCPHarnessJob &p_job);
+	static bool is_error_result(const MCPToolRegistry::CallResult &p_result);
+	static Dictionary result_content(const MCPToolRegistry::CallResult &p_result);
+	static Dictionary failure(const String &p_code, const String &p_message, const Dictionary &p_details = Dictionary());
+	static Dictionary call_error(const MCPToolRegistry::CallResult &p_result, const String &p_tool);
+	static Dictionary summary(const MCPHarnessJob &p_job);
+	static Dictionary report(const MCPHarnessJob &p_job);
+	static Dictionary evidence_reference(const String &p_tool, const MCPToolRegistry::CallResult &p_result);
+	static Dictionary record_step_start(MCPHarnessJob &r_job, const Dictionary &p_step, const Dictionary &p_arguments);
+	static Dictionary record_step_end(MCPHarnessJob &r_job, const MCPToolRegistry::CallResult &p_result, bool p_passed);
 };

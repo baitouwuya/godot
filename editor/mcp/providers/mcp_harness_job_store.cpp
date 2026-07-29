@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  mcp_harness_service.h                                                */
+/*  mcp_harness_job_store.cpp                                            */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,42 +28,69 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#pragma once
-
-#include "mcp_harness_evidence_collector.h"
 #include "mcp_harness_job_store.h"
-#include "mcp_harness_step_executor.h"
 
-class MCPHarnessService {
-public:
-	static constexpr int MAX_ACTIVE_JOBS = 8;
-	static constexpr int MAX_SESSION_JOBS = 2;
-	static constexpr int MAX_TOOL_CALLS_PER_POLL = 1;
+#include "mcp_harness_report_builder.h"
 
-	MCPHarnessService();
-	MCPHarnessService(const MCPHarnessService &) = delete;
-	MCPHarnessService &operator=(const MCPHarnessService &) = delete;
+void MCPHarnessJobStore::_prune() {
+	while (job_order.size() >= MAX_RETAINED_JOBS) {
+		int remove_index = -1;
+		for (int i = 0; i < job_order.size(); i++) {
+			const MCPHarnessJob *job = jobs.getptr(job_order[i]);
+			if (!job || MCPHarnessReportBuilder::is_terminal(*job)) {
+				remove_index = i;
+				break;
+			}
+		}
+		if (remove_index < 0) {
+			return;
+		}
+		jobs.erase(job_order[remove_index]);
+		job_order.remove_at(remove_index);
+	}
+	poll_cursor = job_order.is_empty() ? 0 : poll_cursor % job_order.size();
+}
 
-	void set_tool_registry(MCPToolRegistry *p_registry);
-	void set_trace_service(MCPTraceService *p_service, const Dictionary &p_project_metadata = Dictionary(), const String &p_root_directory_override = String());
+MCPHarnessJob *MCPHarnessJobStore::insert(MCPHarnessJob p_job) {
+	_prune();
+	p_job.id = "harness-" + String::num_uint64(next_job_id++);
+	const String job_id = p_job.id;
+	jobs.insert(job_id, p_job);
+	job_order.push_back(job_id);
+	return jobs.getptr(job_id);
+}
 
-	Dictionary start(const Dictionary &p_arguments, const MCPToolCallContext &p_context);
-	Dictionary get_status(const Dictionary &p_arguments, const MCPToolCallContext &p_context) const;
-	Dictionary cancel(const Dictionary &p_arguments, const MCPToolCallContext &p_context);
-	Dictionary get_report(const Dictionary &p_arguments, const MCPToolCallContext &p_context) const;
+MCPHarnessJob *MCPHarnessJobStore::find(const String &p_job_id) {
+	return jobs.getptr(p_job_id);
+}
 
-	int poll(int p_max_tool_calls = MAX_TOOL_CALLS_PER_POLL);
-	void release_session(const String &p_session_id);
-	void shutdown();
+const MCPHarnessJob *MCPHarnessJobStore::find(const String &p_job_id) const {
+	return jobs.getptr(p_job_id);
+}
 
-private:
-	MCPToolRegistry *tool_registry = nullptr;
-	MCPHarnessJobStore job_store;
-	MCPHarnessEvidenceCollector evidence_collector;
-	MCPHarnessStepExecutor step_executor;
+int MCPHarnessJobStore::active_job_count(const String &p_session_id) const {
+	int count = 0;
+	for (const KeyValue<String, MCPHarnessJob> &entry : jobs) {
+		if (!MCPHarnessReportBuilder::is_terminal(entry.value) && (p_session_id.is_empty() || entry.value.session_id == p_session_id)) {
+			count++;
+		}
+	}
+	return count;
+}
 
-	static String _session_id(const MCPToolCallContext &p_context);
-	MCPHarnessJob *_find_owned_job(const Dictionary &p_arguments, const MCPToolCallContext &p_context, Dictionary &r_error);
-	const MCPHarnessJob *_find_owned_job(const Dictionary &p_arguments, const MCPToolCallContext &p_context, Dictionary &r_error) const;
-	int _advance_job(MCPHarnessJob &r_job);
-};
+MCPHarnessJob *MCPHarnessJobStore::poll_job_at(int p_offset) {
+	if (p_offset < 0 || p_offset >= job_order.size()) {
+		return nullptr;
+	}
+	return jobs.getptr(job_order[(poll_cursor + p_offset) % job_order.size()]);
+}
+
+void MCPHarnessJobStore::advance_poll_cursor(int p_visited) {
+	poll_cursor = job_order.is_empty() ? 0 : (poll_cursor + MAX(1, p_visited)) % job_order.size();
+}
+
+void MCPHarnessJobStore::clear() {
+	jobs.clear();
+	job_order.clear();
+	poll_cursor = 0;
+}

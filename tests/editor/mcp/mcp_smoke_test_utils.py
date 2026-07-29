@@ -55,6 +55,7 @@ class HostProcess:
         project_path: Path,
         label: str,
         working_directory: Path,
+        enable_mcp: bool = True,
     ) -> None:
         self.project_path = project_path
         self.label = label
@@ -70,10 +71,9 @@ class HostProcess:
             "--headless",
             "--path",
             str(project_path),
-            "--mcp",
-            "--mcp-port",
-            "0",
         ]
+        if enable_mcp:
+            self.arguments.extend(["--mcp", "--mcp-port", "0"])
         try:
             self.process = subprocess.Popen(
                 self.arguments,
@@ -206,6 +206,15 @@ class ProcessRunner:
 
     def start_host(self, project_path: Path, label: str) -> HostProcess:
         return HostProcess(self.host_binary, project_path, label, self.working_directory)
+
+    def start_editor(self, project_path: Path, label: str) -> HostProcess:
+        return HostProcess(
+            self.host_binary,
+            project_path,
+            label,
+            self.working_directory,
+            enable_mcp=False,
+        )
 
 
 def non_empty_lines(text: str) -> List[str]:

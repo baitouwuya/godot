@@ -1,9 +1,8 @@
 /**************************************************************************/
-/*  mcp_cli.h                                                             */
+/*  mcp_cli_http_transport.h                                              */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
-/*                        https://godotengine.org                         */
 /**************************************************************************/
 /* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
 /* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
@@ -30,64 +29,55 @@
 
 #pragma once
 
-#include "core/mcp/mcp_discovery.h"
+#include "core/error/error_list.h"
+#include "core/templates/vector.h"
 #include "core/variant/dictionary.h"
 #include "core/variant/typed_array.h"
-#include "main/mcp_cli_command_registry.h"
-#include "main/mcp_cli_http_transport.h"
-#include "main/mcp_cli_stdio_io.h"
 
-class MCPCLI final {
+struct MCPCLIHTTPResponse {
+	int status_code = 0;
+	Dictionary headers;
+	PackedByteArray body;
+};
+
+class MCPCLITransport {
 public:
-	enum ExitCode {
-		EXIT_OK = 0,
-		EXIT_INVALID_ARGUMENTS = 2,
-		EXIT_DISCOVERY_FAILED = 3,
-		EXIT_TRANSPORT_FAILED = 4,
-		EXIT_PROTOCOL_FAILED = 5,
+	enum RequestMethod {
+		REQUEST_POST,
+		REQUEST_DELETE,
 	};
 
-	struct Options {
-		String discovery_directory;
-		uint64_t max_line_bytes = 1024 * 1024;
-		uint64_t max_response_bytes = 4 * 1024 * 1024;
-		uint64_t request_timeout_ms = 10000;
-	};
+	virtual Error request(
+			RequestMethod p_method,
+			const String &p_endpoint,
+			const Vector<String> &p_headers,
+			const String &p_body,
+			uint64_t p_timeout_ms,
+			uint64_t p_max_response_bytes,
+			MCPCLIHTTPResponse &r_response,
+			String &r_error) = 0;
+	virtual ~MCPCLITransport() = default;
+};
 
-	static constexpr const char *COMMAND_DISCOVER = MCP_CLI_COMMAND_DISCOVER;
-	static constexpr const char *COMMAND_STDIO = MCP_CLI_COMMAND_STDIO;
-
-private:
-	Options options;
-	MCPHTTPCLITransport default_transport;
-	MCPOSCLIIO default_io;
-	MCPCLITransport *transport = nullptr;
-	MCPCLIIO *io = nullptr;
-
-	Error _get_project_path_argument(const PackedStringArray &p_arguments, String &r_project_path, String &r_error) const;
-	Error _validate_discovery_record(
-			const MCPProjectIdentity &p_identity,
-			const MCPDiscoveryRecord &p_record,
-			String &r_error) const;
-	void _diagnose(const String &p_message);
-
+class MCPHTTPCLITransport final : public MCPCLITransport {
 public:
-	MCPCLI();
-	MCPCLI(const Options &p_options, MCPCLITransport *p_transport = nullptr, MCPCLIIO *p_io = nullptr);
-	MCPCLI(const MCPCLI &) = delete;
-	MCPCLI &operator=(const MCPCLI &) = delete;
-	MCPCLI(MCPCLI &&) = delete;
-	MCPCLI &operator=(MCPCLI &&) = delete;
+	static Error parse_endpoint(
+			const String &p_endpoint,
+			String &r_scheme,
+			String &r_host,
+			int &r_port,
+			String &r_path,
+			String &r_fragment,
+			String &r_error);
+	static bool is_visible_ascii_header_value(const String &p_value);
 
-	static String get_default_discovery_directory();
-	static Dictionary make_public_discovery_output(const MCPDiscoveryRecord &p_record);
-
-	Error resolve_discovery_record(
-			const String &p_project_path,
-			MCPProjectIdentity &r_identity,
-			MCPDiscoveryRecord &r_record,
-			String *r_error = nullptr) const;
-	int run_discover(const String &p_project_path);
-	int run_stdio_bridge(const String &p_project_path);
-	int execute_cli_command(const StringName &p_command, const PackedStringArray &p_arguments);
+	Error request(
+			RequestMethod p_method,
+			const String &p_endpoint,
+			const Vector<String> &p_headers,
+			const String &p_body,
+			uint64_t p_timeout_ms,
+			uint64_t p_max_response_bytes,
+			MCPCLIHTTPResponse &r_response,
+			String &r_error) override;
 };

@@ -37,6 +37,7 @@ TEST_FORCE_LINK(test_mcp_cli);
 #include "core/mcp/mcp_protocol.h"
 #include "main/mcp_cli.h"
 #include "main/mcp_cli_runtime.h"
+#include "main/mcp_cli_stdio_bridge.h"
 
 namespace TestMCPCLI {
 
@@ -147,6 +148,52 @@ void create_project_and_record(
 	r_discovery_directory = p_temporary_directory->get_current_dir().path_join("discovery");
 	REQUIRE(MCPProjectIdentity::create(r_project_path, r_identity) == OK);
 	r_record = MCPDiscoveryRecord::create(r_identity, "streamable-http", p_endpoint, "2025-06-18", "private-token", 1000);
+}
+
+TEST_CASE("[MCP][CLI] HTTP transport validates MCP endpoint and header primitives") {
+	String scheme;
+	String host;
+	String path;
+	String fragment;
+	String error;
+	int port = 0;
+
+	CHECK(MCPHTTPCLITransport::parse_endpoint("http://[::1]/mcp", scheme, host, port, path, fragment, error) == OK);
+	CHECK(scheme == "http://");
+	CHECK(host == "::1");
+	CHECK(port == 80);
+	CHECK(path == "/mcp");
+	CHECK(fragment.is_empty());
+
+	CHECK(MCPHTTPCLITransport::parse_endpoint("file:///tmp/mcp", scheme, host, port, path, fragment, error) == ERR_INVALID_DATA);
+	CHECK_FALSE(error.is_empty());
+	CHECK(MCPHTTPCLITransport::is_visible_ascii_header_value("session-123"));
+	CHECK_FALSE(MCPHTTPCLITransport::is_visible_ascii_header_value(String()));
+	CHECK_FALSE(MCPHTTPCLITransport::is_visible_ascii_header_value("unsafe\nheader"));
+}
+
+TEST_CASE("[MCP][CLI] Stdio bridge classifies transport failures without a discovery lookup") {
+	MemoryCLIIO io;
+	io.input_lines.push_back(R"({"jsonrpc":"2.0","id":1,"method":"ping","params":{}})");
+	QueueCLITransport transport;
+
+	MCPDiscoveryRecord record;
+	record.endpoint = "http://127.0.0.1:35001/mcp";
+	record.protocol_version = MCPProtocol::PROTOCOL_VERSION_LATEST;
+	record.auth_secret = "private-token";
+	MCPCLIStdioBridge::Limits limits;
+	limits.max_line_bytes = 1024;
+	limits.max_response_bytes = 2048;
+	limits.request_timeout_ms = 50;
+
+	MCPCLIStdioBridge bridge(&transport, &io, record, limits);
+	CHECK(bridge.run() == MCPCLIStdioBridge::RESULT_TRANSPORT_FAILED);
+	CHECK(io.stdout_lines.is_empty());
+	REQUIRE(io.stderr_lines.size() == 1);
+	CHECK(io.stderr_lines[0].contains("No queued response"));
+	REQUIRE(transport.requests.size() == 1);
+	CHECK(transport.requests[0].timeout_ms == 50);
+	CHECK(transport.requests[0].max_response_bytes == 2048);
 }
 
 TEST_CASE("[MCP][CLI] Discover routes through the command registry without exposing secrets") {

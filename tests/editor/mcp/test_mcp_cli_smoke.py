@@ -196,9 +196,10 @@ def run_smoke(binary: str, timeout: int, keep_temporary_projects: bool) -> None:
         require("cannot be combined" in mode_conflict.stderr.lower(), "CLI/editor conflict diagnostic is missing.")
 
         print("[2/9] Checking ordinary editor startup remains MCP-free")
-        ordinary = runner.invoke(
-            ["--editor", "--headless", "--path", str(project_a), "--quit-after", "30"]
-        )
+        ordinary_process = runner.start_editor(project_a, "ordinary-editor")
+        hosts.append(ordinary_process)
+        wait_for_file(ordinary_process, ".mcp-smoke-scene-ready", timeout)
+        ordinary = ordinary_process.stop(require_graceful=True)
         require(
             ordinary.returncode == 0,
             f"ordinary headless editor startup failed: {describe_command_result(ordinary)}",

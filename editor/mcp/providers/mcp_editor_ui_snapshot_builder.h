@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  mcp_editor_ui_service.h                                               */
+/*  mcp_editor_ui_snapshot_builder.h                                     */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,23 +30,21 @@
 
 #pragma once
 
-#include "mcp_editor_ui_action_executor.h"
-#include "mcp_editor_ui_snapshot_builder.h"
-#include "mcp_editor_ui_snapshot_store.h"
-#include "mcp_editor_ui_target_validator.h"
+#include "mcp_editor_ui_types.h"
 
-class MCPEditorUIService {
+#include "core/variant/array.h"
+
+class Node;
+class Window;
+
+class MCPEditorUISnapshotBuilder {
+	Window *_resolve_scope() const;
+	String _make_target_id(const MCPEditorUISnapshot &p_snapshot) const;
+	Dictionary _describe_target(const MCPEditorUITarget &p_target, const String &p_target_id, bool p_include_values) const;
+	void _append_children(Node *p_node, const MCPEditorUISnapshotOptions &p_options, MCPEditorUISnapshot &r_snapshot, Array &r_items, bool &r_truncated) const;
+	void _append_node(Node *p_node, int p_depth, const MCPEditorUISnapshotOptions &p_options, MCPEditorUISnapshot &r_snapshot, Array &r_items, bool &r_truncated) const;
+
 public:
-	using SnapshotOptions = MCPEditorUISnapshotOptions;
-
-	Dictionary capture(const String &p_session_id, const SnapshotOptions &p_options);
-	Error perform(const String &p_session_id, const String &p_snapshot_id, const String &p_target_id, const String &p_action, const Dictionary &p_arguments, Dictionary &r_result, String &r_error_code, String &r_error_message);
-	void release_session(const String &p_session_id);
-	void clear();
-
-private:
-	MCPEditorUISnapshotBuilder snapshot_builder;
-	MCPEditorUISnapshotStore snapshot_store;
-	MCPEditorUITargetValidator target_validator;
-	MCPEditorUIActionExecutor action_executor;
+	Dictionary build(const MCPEditorUISnapshotOptions &p_options, MCPEditorUISnapshot &r_snapshot) const;
+	ObjectID resolve_scope_id() const;
 };

@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  mcp_editor_ui_service.h                                               */
+/*  mcp_editor_ui_target_validator.h                                      */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,23 +30,28 @@
 
 #pragma once
 
-#include "mcp_editor_ui_action_executor.h"
-#include "mcp_editor_ui_snapshot_builder.h"
-#include "mcp_editor_ui_snapshot_store.h"
-#include "mcp_editor_ui_target_validator.h"
+#include "mcp_editor_ui_types.h"
 
-class MCPEditorUIService {
+class Control;
+class Node;
+
+class MCPEditorUITargetValidator {
 public:
-	using SnapshotOptions = MCPEditorUISnapshotOptions;
+	static String limit_text(const String &p_text);
+	static String display_name(Control *p_control);
+	static PackedStringArray actions_for_control(Control *p_control);
+	static bool is_editable_range(Control *p_control);
+	static bool is_disabled(Control *p_control);
+	static bool is_safe_text_edit(Control *p_control);
+	static bool belongs_to_editor(Node *p_node);
 
-	Dictionary capture(const String &p_session_id, const SnapshotOptions &p_options);
-	Error perform(const String &p_session_id, const String &p_snapshot_id, const String &p_target_id, const String &p_action, const Dictionary &p_arguments, Dictionary &r_result, String &r_error_code, String &r_error_message);
-	void release_session(const String &p_session_id);
-	void clear();
+	Error validate_scope(const MCPEditorUISnapshot &p_snapshot, const ObjectID &p_scope_id, String &r_error_code, String &r_error_message) const;
+	Error find_target(const MCPEditorUISnapshot &p_snapshot, const String &p_target_id, const MCPEditorUITarget *&r_target,
+			String &r_error_code, String &r_error_message) const;
+	Error validate_action(const MCPEditorUITarget &p_target, const String &p_action, String &r_error_code, String &r_error_message) const;
+	Error validate_current(const MCPEditorUITarget &p_target, String &r_error_code, String &r_error_message) const;
+	Error validate_available(const MCPEditorUITarget &p_target, const String &p_action, String &r_error_code, String &r_error_message) const;
 
 private:
-	MCPEditorUISnapshotBuilder snapshot_builder;
-	MCPEditorUISnapshotStore snapshot_store;
-	MCPEditorUITargetValidator target_validator;
-	MCPEditorUIActionExecutor action_executor;
+	bool _target_is_current(const MCPEditorUITarget &p_target) const;
 };

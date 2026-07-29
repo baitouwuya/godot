@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  mcp_editor_ui_service.h                                               */
+/*  mcp_editor_ui_types.h                                                 */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,23 +30,46 @@
 
 #pragma once
 
-#include "mcp_editor_ui_action_executor.h"
-#include "mcp_editor_ui_snapshot_builder.h"
-#include "mcp_editor_ui_snapshot_store.h"
-#include "mcp_editor_ui_target_validator.h"
+#include "core/object/object_id.h"
+#include "core/string/ustring.h"
+#include "core/templates/hash_map.h"
+#include "core/variant/dictionary.h"
+#include "core/variant/variant.h"
 
-class MCPEditorUIService {
-public:
-	using SnapshotOptions = MCPEditorUISnapshotOptions;
+struct MCPEditorUISnapshotOptions {
+	bool include_disabled = false;
+	bool include_values = true;
+	int max_depth = 32;
+	int limit = 512;
+};
 
-	Dictionary capture(const String &p_session_id, const SnapshotOptions &p_options);
-	Error perform(const String &p_session_id, const String &p_snapshot_id, const String &p_target_id, const String &p_action, const Dictionary &p_arguments, Dictionary &r_result, String &r_error_code, String &r_error_message);
-	void release_session(const String &p_session_id);
-	void clear();
+enum MCPEditorUITargetKind {
+	MCP_TARGET_CONTROL,
+	MCP_TARGET_POPUP_ITEM,
+	MCP_TARGET_OPTION_ITEM,
+	MCP_TARGET_ITEM_LIST_ITEM,
+	MCP_TARGET_TAB,
+	MCP_TARGET_TREE_CELL,
+	MCP_TARGET_TREE_BUTTON,
+};
 
-private:
-	MCPEditorUISnapshotBuilder snapshot_builder;
-	MCPEditorUISnapshotStore snapshot_store;
-	MCPEditorUITargetValidator target_validator;
-	MCPEditorUIActionExecutor action_executor;
+struct MCPEditorUITarget {
+	MCPEditorUITargetKind kind = MCP_TARGET_CONTROL;
+	ObjectID object_id;
+	ObjectID auxiliary_object_id;
+	int index = -1;
+	int column = -1;
+	int button = -1;
+	int item_id = -1;
+	String fingerprint;
+	String name_fingerprint;
+	Variant metadata;
+	PackedStringArray actions;
+};
+
+struct MCPEditorUISnapshot {
+	String id;
+	String session_id;
+	ObjectID scope_id;
+	HashMap<String, MCPEditorUITarget> targets;
 };

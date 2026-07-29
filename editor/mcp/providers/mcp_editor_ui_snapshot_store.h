@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  mcp_editor_ui_service.h                                               */
+/*  mcp_editor_ui_snapshot_store.h                                       */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,23 +30,18 @@
 
 #pragma once
 
-#include "mcp_editor_ui_action_executor.h"
-#include "mcp_editor_ui_snapshot_builder.h"
-#include "mcp_editor_ui_snapshot_store.h"
-#include "mcp_editor_ui_target_validator.h"
+#include "mcp_editor_ui_types.h"
 
-class MCPEditorUIService {
+class MCPEditorUISnapshotStore {
+	uint64_t next_snapshot_sequence = 1;
+	HashMap<String, MCPEditorUISnapshot> snapshots;
+	HashMap<String, String> current_snapshot_by_session;
+
 public:
-	using SnapshotOptions = MCPEditorUISnapshotOptions;
+	MCPEditorUISnapshot create_snapshot(const String &p_session_id);
+	void replace_snapshot(const MCPEditorUISnapshot &p_snapshot);
+	const MCPEditorUISnapshot *get_current_snapshot(const String &p_session_id, const String &p_snapshot_id) const;
 
-	Dictionary capture(const String &p_session_id, const SnapshotOptions &p_options);
-	Error perform(const String &p_session_id, const String &p_snapshot_id, const String &p_target_id, const String &p_action, const Dictionary &p_arguments, Dictionary &r_result, String &r_error_code, String &r_error_message);
 	void release_session(const String &p_session_id);
 	void clear();
-
-private:
-	MCPEditorUISnapshotBuilder snapshot_builder;
-	MCPEditorUISnapshotStore snapshot_store;
-	MCPEditorUITargetValidator target_validator;
-	MCPEditorUIActionExecutor action_executor;
 };

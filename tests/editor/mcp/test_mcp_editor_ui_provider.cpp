@@ -30,8 +30,12 @@
 
 #include "core/mcp/mcp_tool_registry.h"
 #include "editor/editor_node.h"
+#include "editor/mcp/providers/mcp_editor_ui_action_executor.h"
 #include "editor/mcp/providers/mcp_editor_ui_provider.h"
+#include "editor/mcp/providers/mcp_editor_ui_snapshot_store.h"
+#include "editor/mcp/providers/mcp_editor_ui_target_validator.h"
 #include "editor/mcp/providers/mcp_editor_ui_tool_utils.h"
+#include "scene/gui/button.h"
 #include "scene/gui/line_edit.h"
 #include "scene/gui/option_button.h"
 #include "scene/gui/slider.h"
@@ -238,6 +242,87 @@ TEST_CASE("[MCP][Provider] Editor UI arguments enforce bounded traversal and act
 	perform["snapshotId"] = "snapshot";
 	perform["targetId"] = "target";
 	CHECK(_error_code(_call(registry, "godot.editor.ui.perform", perform)) == "INVALID_ARGUMENTS");
+}
+
+TEST_CASE("[MCP][UI] Snapshot store keeps only the latest snapshot per session") {
+	MCPEditorUISnapshotStore store;
+	MCPEditorUISnapshot first = store.create_snapshot("session-a");
+	store.replace_snapshot(first);
+	CHECK(store.get_current_snapshot("session-a", first.id) != nullptr);
+
+	MCPEditorUISnapshot second = store.create_snapshot("session-a");
+	store.replace_snapshot(second);
+	CHECK(store.get_current_snapshot("session-a", first.id) == nullptr);
+	CHECK(store.get_current_snapshot("session-a", second.id) != nullptr);
+	CHECK(store.get_current_snapshot("session-b", second.id) == nullptr);
+
+	store.release_session("session-a");
+	CHECK(store.get_current_snapshot("session-a", second.id) == nullptr);
+	MCPEditorUISnapshot third = store.create_snapshot("session-b");
+	store.replace_snapshot(third);
+	store.clear();
+	CHECK(store.get_current_snapshot("session-b", third.id) == nullptr);
+	MCPEditorUISnapshot after_clear = store.create_snapshot("session-b");
+	CHECK(after_clear.id != third.id);
+}
+
+TEST_CASE("[MCP][UI] Target validator rejects changed fingerprints and unavailable actions") {
+	MCPEditorUITargetValidator validator;
+	Button button;
+	button.set_accessibility_name("Validator Button");
+	MCPEditorUITarget target;
+	target.kind = MCP_TARGET_CONTROL;
+	target.object_id = button.get_instance_id();
+	target.fingerprint = button.get_class();
+	target.name_fingerprint = validator.display_name(&button);
+	target.metadata = NodePath();
+	target.actions = validator.actions_for_control(&button);
+	String error_code;
+	String error_message;
+	ERR_PRINT_OFF;
+	const Error current_error = validator.validate_current(target, error_code, error_message);
+	ERR_PRINT_ON;
+	CHECK(current_error == OK);
+	CHECK(validator.validate_action(target, "click", error_code, error_message) == OK);
+	CHECK(validator.validate_action(target, "select", error_code, error_message) == ERR_UNAVAILABLE);
+	CHECK(error_code == "UI_ACTION_UNAVAILABLE");
+
+	target.fingerprint = "Label";
+	ERR_PRINT_OFF;
+	const Error fingerprint_error = validator.validate_current(target, error_code, error_message);
+	ERR_PRINT_ON;
+	CHECK(fingerprint_error == ERR_DOES_NOT_EXIST);
+	CHECK(error_code == "STALE_UI_SNAPSHOT");
+
+	target.object_id = ObjectID();
+	CHECK(validator.validate_current(target, error_code, error_message) == ERR_DOES_NOT_EXIST);
+}
+
+TEST_CASE("[MCP][UI] Action executor preserves UI value validation and range mutations") {
+	MCPEditorUIActionExecutor executor;
+	HSlider range;
+	range.set_editable(true);
+	range.set_min(0);
+	range.set_max(10);
+	range.set_step(2);
+	range.set_value(2);
+	MCPEditorUITarget target;
+	target.kind = MCP_TARGET_CONTROL;
+	target.object_id = range.get_instance_id();
+	target.actions = MCPEditorUITargetValidator::actions_for_control(&range);
+	String error_code;
+	String error_message;
+	Dictionary arguments;
+	arguments["value"] = "not-a-number";
+	CHECK(executor.execute(target, "set_value", arguments, error_code, error_message) == ERR_INVALID_PARAMETER);
+	CHECK(error_code == "INVALID_UI_VALUE");
+	CHECK(range.get_value() == doctest::Approx(2));
+
+	arguments["value"] = 8;
+	CHECK(executor.execute(target, "set_value", arguments, error_code, error_message) == OK);
+	CHECK(range.get_value() == doctest::Approx(8));
+	CHECK(executor.execute(target, "increment", Dictionary(), error_code, error_message) == OK);
+	CHECK(range.get_value() == doctest::Approx(10));
 }
 
 TEST_CASE("[MCP][Provider] Editor UI snapshots inspect and operate native editor controls") {

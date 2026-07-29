@@ -41,7 +41,7 @@
 
 namespace {
 
-bool _read_integer(const Variant &p_value, int64_t p_minimum, int64_t p_maximum, uint64_t &r_value) {
+bool _read_performance_integer(const Variant &p_value, int64_t p_minimum, int64_t p_maximum, uint64_t &r_value) {
 	if (p_value.get_type() != Variant::INT) {
 		return false;
 	}
@@ -53,7 +53,7 @@ bool _read_integer(const Variant &p_value, int64_t p_minimum, int64_t p_maximum,
 	return true;
 }
 
-bool _has_only(const Dictionary &p_dictionary, const PackedStringArray &p_allowed, String &r_error) {
+bool _performance_has_only(const Dictionary &p_dictionary, const PackedStringArray &p_allowed, String &r_error) {
 	for (const Variant &key_value : p_dictionary.keys()) {
 		if (!key_value.is_string() || !p_allowed.has(String(key_value))) {
 			r_error = "Unsupported performance job field: " + String(key_value);
@@ -187,7 +187,7 @@ void MCPRuntimePerformanceSampler::_prune_jobs() {
 Error MCPRuntimePerformanceSampler::_create_job(const Dictionary &p_payload, String &r_code, String &r_error) {
 	r_code = String();
 	r_error = String();
-	if (!_has_only(p_payload, PackedStringArray{ "jobId", "mcpSessionId", "name", "topFrames", "maxFrames" }, r_error)) {
+	if (!_performance_has_only(p_payload, PackedStringArray{ "jobId", "mcpSessionId", "name", "topFrames", "maxFrames" }, r_error)) {
 		r_code = "INVALID_ARGUMENTS";
 		return ERR_INVALID_PARAMETER;
 	}
@@ -203,8 +203,8 @@ Error MCPRuntimePerformanceSampler::_create_job(const Dictionary &p_payload, Str
 	}
 	uint64_t top_frames = 0;
 	uint64_t max_frames = 0;
-	if (!_read_integer(p_payload.get("topFrames", Variant()), 0, PerformanceAggregator::MAX_TOP_FRAMES, top_frames) ||
-			!_read_integer(p_payload.get("maxFrames", Variant()), 0, MAX_FRAMES, max_frames)) {
+	if (!_read_performance_integer(p_payload.get("topFrames", Variant()), 0, PerformanceAggregator::MAX_TOP_FRAMES, top_frames) ||
+			!_read_performance_integer(p_payload.get("maxFrames", Variant()), 0, MAX_FRAMES, max_frames)) {
 		r_code = "INVALID_ARGUMENTS";
 		r_error = "topFrames or maxFrames is outside its allowed range.";
 		return ERR_INVALID_PARAMETER;

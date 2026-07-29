@@ -84,7 +84,7 @@ static String _declaration_text(const ExtendGDScriptParser &p_parser, const LSP:
 	if (line >= 0 && line < source_lines.size()) {
 		const String source = source_lines[line];
 		const String trimmed = source.strip_edges();
-		const bool complete_method = p_symbol.kind != LSP::SymbolKind::Method && p_symbol.kind != LSP::SymbolKind::Function || trimmed.ends_with(":");
+		const bool complete_method = (p_symbol.kind != LSP::SymbolKind::Method && p_symbol.kind != LSP::SymbolKind::Function) || trimmed.ends_with(":");
 		if (!trimmed.is_empty() && complete_method) {
 			return source;
 		}
@@ -273,9 +273,7 @@ Error MCPScriptDocument::render(const ExtendGDScriptParser &p_parser, const Stri
 		}
 		r_document["lines"] = lines;
 	} else if (selected.symbol) {
-		_append_grouped(groups, selected.kind, _render_document_member(p_parser, *selected.symbol, selected.kind, p_include_comments,
-				selected.parameter_node, selected.rest_parameter, selected.callable_name.is_empty() ? selected.owner_path : selected.callable_name,
-				selected.parameter_node ? selected.owner_path : String()));
+		_append_grouped(groups, selected.kind, _render_document_member(p_parser, *selected.symbol, selected.kind, p_include_comments, selected.parameter_node, selected.rest_parameter, selected.callable_name.is_empty() ? selected.owner_path : selected.callable_name, selected.parameter_node ? selected.owner_path : String()));
 	} else {
 		if (p_include_comments && !root.documentation.is_empty()) {
 			r_document["documentation"] = root.documentation;

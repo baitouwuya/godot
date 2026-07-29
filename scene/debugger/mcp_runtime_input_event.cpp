@@ -35,7 +35,7 @@
 
 namespace {
 
-bool _has_only(const Dictionary &p_dictionary, const PackedStringArray &p_allowed, String &r_error) {
+bool _input_payload_has_only(const Dictionary &p_dictionary, const PackedStringArray &p_allowed, String &r_error) {
 	const Array keys = p_dictionary.keys();
 	for (const Variant &key_value : keys) {
 		if (key_value.get_type() != Variant::STRING && key_value.get_type() != Variant::STRING_NAME) {
@@ -68,7 +68,7 @@ void _dispatch_action(const StringName &p_action, bool p_pressed, float p_streng
 Error MCPRuntimeInputEvent::decode(const Dictionary &p_payload, MCPRuntimeInputEvent &r_event, String &r_error) {
 	r_event = MCPRuntimeInputEvent();
 	r_error = String();
-	if (!_has_only(p_payload, PackedStringArray{ "kind", "message", "arguments" }, r_error) ||
+	if (!_input_payload_has_only(p_payload, PackedStringArray{ "kind", "message", "arguments" }, r_error) ||
 			p_payload.get("kind", Variant()).get_type() != Variant::STRING || String(p_payload["kind"]) != "event" ||
 			p_payload.get("message", Variant()).get_type() != Variant::STRING || p_payload.get("arguments", Variant()).get_type() != Variant::ARRAY) {
 		if (r_error.is_empty()) {

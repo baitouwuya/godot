@@ -49,7 +49,7 @@ constexpr int MAX_RESULTS = 256;
 constexpr int MAX_VISITED_NODES = 100000;
 constexpr int MAX_ACTION_VISITED_NODES = 20000;
 
-void _set_error(String &r_code, String &r_message, const String &p_code, const String &p_message) {
+void _set_observation_error(String &r_code, String &r_message, const String &p_code, const String &p_message) {
 	r_code = p_code;
 	r_message = p_message;
 }
@@ -153,7 +153,7 @@ Error _collect_snapshots(const MCPRuntimeObservation::Selector &p_selector, int 
 Error _query_nodes(const Dictionary &p_arguments, bool p_interactables_only, Dictionary &r_result, String &r_code, String &r_message) {
 	const Variant filter_value = p_arguments.get("filter", Dictionary());
 	if (filter_value.get_type() != Variant::DICTIONARY) {
-		_set_error(r_code, r_message, "INVALID_QUERY", "filter must be an object.");
+		_set_observation_error(r_code, r_message, "INVALID_QUERY", "filter must be an object.");
 		return ERR_INVALID_PARAMETER;
 	}
 	MCPRuntimeObservation::Selector selector;
@@ -183,12 +183,12 @@ Error _query_nodes(const Dictionary &p_arguments, bool p_interactables_only, Dic
 Error _get_node_snapshot(const Dictionary &p_arguments, Dictionary &r_result, String &r_code, String &r_message) {
 	const Variant selector_value = p_arguments.get("selector", Variant());
 	if (selector_value.get_type() != Variant::DICTIONARY) {
-		_set_error(r_code, r_message, "INVALID_QUERY", "selector must be a non-empty object.");
+		_set_observation_error(r_code, r_message, "INVALID_QUERY", "selector must be a non-empty object.");
 		return ERR_INVALID_PARAMETER;
 	}
 	MCPRuntimeObservation::Selector selector;
 	if (MCPRuntimeObservation::parse_selector(selector_value, selector, r_message) != OK || selector.is_empty()) {
-		_set_error(r_code, r_message, "INVALID_QUERY", r_message.is_empty() ? "selector must not be empty." : r_message);
+		_set_observation_error(r_code, r_message, "INVALID_QUERY", r_message.is_empty() ? "selector must not be empty." : r_message);
 		return ERR_INVALID_PARAMETER;
 	}
 	Array nodes;
@@ -199,12 +199,12 @@ Error _get_node_snapshot(const Dictionary &p_arguments, Dictionary &r_result, St
 		return error;
 	}
 	if (nodes.is_empty()) {
-		_set_error(r_code, r_message, "RUNTIME_NODE_NOT_FOUND", "No runtime node matched selector.");
+		_set_observation_error(r_code, r_message, "RUNTIME_NODE_NOT_FOUND", "No runtime node matched selector.");
 		return ERR_DOES_NOT_EXIST;
 	}
 	if (nodes.size() > 1 && !selector.has_nearest_to_screen_point) {
 		r_result["candidates"] = nodes;
-		_set_error(r_code, r_message, "AMBIGUOUS_RUNTIME_NODE", "selector matched multiple runtime nodes.");
+		_set_observation_error(r_code, r_message, "AMBIGUOUS_RUNTIME_NODE", "selector matched multiple runtime nodes.");
 		return ERR_ALREADY_IN_USE;
 	}
 	r_result["node"] = nodes[0];
@@ -214,13 +214,13 @@ Error _get_node_snapshot(const Dictionary &p_arguments, Dictionary &r_result, St
 Error _get_viewport_summary(const Dictionary &p_arguments, Dictionary &r_result, String &r_code, String &r_message) {
 	const Variant include_value = p_arguments.get("includeCounts", true);
 	if (include_value.get_type() != Variant::BOOL) {
-		_set_error(r_code, r_message, "INVALID_ARGUMENTS", "includeCounts must be boolean.");
+		_set_observation_error(r_code, r_message, "INVALID_ARGUMENTS", "includeCounts must be boolean.");
 		return ERR_INVALID_PARAMETER;
 	}
 	SceneTree *scene_tree = SceneTree::get_singleton();
 	Viewport *root = scene_tree ? scene_tree->get_root() : nullptr;
 	if (!root) {
-		_set_error(r_code, r_message, "RUNTIME_SCENE_UNAVAILABLE", "SceneTree root viewport is unavailable.");
+		_set_observation_error(r_code, r_message, "RUNTIME_SCENE_UNAVAILABLE", "SceneTree root viewport is unavailable.");
 		return ERR_UNAVAILABLE;
 	}
 	Node *current_scene = scene_tree->get_current_scene();
@@ -244,7 +244,7 @@ Error _get_viewport_summary(const Dictionary &p_arguments, Dictionary &r_result,
 		Node *node = stack[stack.size() - 1];
 		stack.resize(stack.size() - 1);
 		if (++visited > MAX_VISITED_NODES) {
-			_set_error(r_code, r_message, "RUNTIME_QUERY_LIMIT", vformat("Runtime summary exceeded the %d-node traversal limit.", MAX_VISITED_NODES));
+			_set_observation_error(r_code, r_message, "RUNTIME_QUERY_LIMIT", vformat("Runtime summary exceeded the %d-node traversal limit.", MAX_VISITED_NODES));
 			return ERR_OUT_OF_MEMORY;
 		}
 		const Dictionary snapshot = MCPRuntimeObservation::build_node_snapshot(node, root);
@@ -274,39 +274,39 @@ Error _resolve_action_targets(const Dictionary &p_arguments, Dictionary &r_resul
 	const Variant kind_value = p_arguments.get("kind", Variant());
 	const Variant selectors_value = p_arguments.get("selectors", Variant());
 	if (kind_value.get_type() != Variant::STRING || selectors_value.get_type() != Variant::ARRAY) {
-		_set_error(r_code, r_message, "INVALID_ARGUMENTS", "kind and selectors are required for target resolution.");
+		_set_observation_error(r_code, r_message, "INVALID_ARGUMENTS", "kind and selectors are required for target resolution.");
 		return ERR_INVALID_PARAMETER;
 	}
 	const String kind = kind_value;
 	const Array selectors = selectors_value;
 	if ((kind != "pointer" && kind != "focus" && kind != "focus_text") || selectors.is_empty() || selectors.size() > 2 ||
 			(kind != "pointer" && selectors.size() != 1)) {
-		_set_error(r_code, r_message, "INVALID_ARGUMENTS", "Target resolution kind or selector count is invalid.");
+		_set_observation_error(r_code, r_message, "INVALID_ARGUMENTS", "Target resolution kind or selector count is invalid.");
 		return ERR_INVALID_PARAMETER;
 	}
 	SceneTree *scene_tree = SceneTree::get_singleton();
 	Viewport *root = scene_tree ? scene_tree->get_root() : nullptr;
 	if (!root) {
-		_set_error(r_code, r_message, "RUNTIME_SCENE_UNAVAILABLE", "SceneTree root viewport is unavailable.");
+		_set_observation_error(r_code, r_message, "RUNTIME_SCENE_UNAVAILABLE", "SceneTree root viewport is unavailable.");
 		return ERR_UNAVAILABLE;
 	}
 	Array targets;
 	int total_visited = 0;
 	for (int i = 0; i < selectors.size(); i++) {
 		if (selectors[i].get_type() != Variant::DICTIONARY) {
-			_set_error(r_code, r_message, "INVALID_QUERY", vformat("selectors[%d] must be an object.", i));
+			_set_observation_error(r_code, r_message, "INVALID_QUERY", vformat("selectors[%d] must be an object.", i));
 			return ERR_INVALID_PARAMETER;
 		}
 		MCPRuntimeObservation::Selector selector;
 		if (MCPRuntimeObservation::parse_selector(selectors[i], selector, r_message) != OK || selector.is_empty()) {
-			_set_error(r_code, r_message, "INVALID_QUERY", r_message.is_empty() ? vformat("selectors[%d] must not be empty.", i) : r_message);
+			_set_observation_error(r_code, r_message, "INVALID_QUERY", r_message.is_empty() ? vformat("selectors[%d] must not be empty.", i) : r_message);
 			return ERR_INVALID_PARAMETER;
 		}
 		Array nodes;
 		int visited = 0;
 		const int remaining_budget = MAX_ACTION_VISITED_NODES - total_visited;
 		if (remaining_budget <= 0) {
-			_set_error(r_code, r_message, "RUNTIME_QUERY_LIMIT", "Target selectors exceeded the shared traversal budget.");
+			_set_observation_error(r_code, r_message, "RUNTIME_QUERY_LIMIT", "Target selectors exceeded the shared traversal budget.");
 			return ERR_OUT_OF_MEMORY;
 		}
 		const Error query_error = _collect_snapshots(selector, 2, false, nodes, visited, r_message, remaining_budget);
@@ -316,12 +316,12 @@ Error _resolve_action_targets(const Dictionary &p_arguments, Dictionary &r_resul
 			return query_error;
 		}
 		if (nodes.is_empty()) {
-			_set_error(r_code, r_message, "RUNTIME_TARGET_NOT_FOUND", vformat("No runtime target matched selectors[%d].", i));
+			_set_observation_error(r_code, r_message, "RUNTIME_TARGET_NOT_FOUND", vformat("No runtime target matched selectors[%d].", i));
 			return ERR_DOES_NOT_EXIST;
 		}
 		if (nodes.size() > 1 && !selector.has_nearest_to_screen_point) {
 			r_result["candidates"] = nodes;
-			_set_error(r_code, r_message, "AMBIGUOUS_RUNTIME_TARGET", vformat("selectors[%d] matched multiple runtime targets.", i));
+			_set_observation_error(r_code, r_message, "AMBIGUOUS_RUNTIME_TARGET", vformat("selectors[%d] matched multiple runtime targets.", i));
 			return ERR_ALREADY_IN_USE;
 		}
 		const Dictionary snapshot = nodes[0];
@@ -333,22 +333,22 @@ Error _resolve_action_targets(const Dictionary &p_arguments, Dictionary &r_resul
 			if (control) {
 				control->grab_focus();
 				if (root->gui_get_focus_owner() != control) {
-					_set_error(r_code, r_message, "RUNTIME_TARGET_NOT_FOCUSABLE", "Resolved Control did not accept focus.");
+					_set_observation_error(r_code, r_message, "RUNTIME_TARGET_NOT_FOCUSABLE", "Resolved Control did not accept focus.");
 					return ERR_UNAVAILABLE;
 				}
 				target["focused"] = true;
 			} else if (kind == "focus_text") {
-				_set_error(r_code, r_message, "RUNTIME_TARGET_NOT_FOCUSABLE", "Text input requires a focusable Control target.");
+				_set_observation_error(r_code, r_message, "RUNTIME_TARGET_NOT_FOCUSABLE", "Text input requires a focusable Control target.");
 				return ERR_INVALID_PARAMETER;
 			}
 		}
 		if (!bool(target.get("focused", false))) {
 			if (!MCPRuntimeObservation::has_screen_position(snapshot)) {
-				_set_error(r_code, r_message, "RUNTIME_TARGET_NOT_CLICKABLE", "Resolved target does not expose a usable screen position.");
+				_set_observation_error(r_code, r_message, "RUNTIME_TARGET_NOT_CLICKABLE", "Resolved target does not expose a usable screen position.");
 				return ERR_UNAVAILABLE;
 			}
 			if (bool(snapshot.get("is3D", false)) && !MCPRuntimeObservation::is_interactable(node, snapshot)) {
-				_set_error(r_code, r_message, "RUNTIME_TARGET_NOT_INTERACTABLE", "Resolved 3D target is not ray-pickable.");
+				_set_observation_error(r_code, r_message, "RUNTIME_TARGET_NOT_INTERACTABLE", "Resolved 3D target is not ray-pickable.");
 				return ERR_UNAVAILABLE;
 			}
 			target["position"] = Array{ MCPRuntimeObservation::get_screen_position(snapshot).x,
@@ -398,7 +398,7 @@ Error MCPRuntimeObservation::execute(const String &p_operation, const Dictionary
 	} else if (p_operation == "resolve_action_targets") {
 		error = _resolve_action_targets(p_arguments, r_result, r_error_code, r_error_message);
 	} else {
-		_set_error(r_error_code, r_error_message, "RUNTIME_OBSERVATION_UNSUPPORTED", "Unsupported runtime observation operation: " + p_operation);
+		_set_observation_error(r_error_code, r_error_message, "RUNTIME_OBSERVATION_UNSUPPORTED", "Unsupported runtime observation operation: " + p_operation);
 	}
 	if (error == OK) {
 		r_result["frame"] = int64_t(Engine::get_singleton()->get_process_frames());

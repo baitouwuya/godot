@@ -39,7 +39,7 @@
 
 namespace {
 
-void _set_error(String &r_code, String &r_message, const String &p_code, const String &p_message) {
+void _set_screenshot_error(String &r_code, String &r_message, const String &p_code, const String &p_message) {
 	r_code = p_code;
 	r_message = p_message;
 }
@@ -106,19 +106,19 @@ Error MCPRuntimeScreenshotCapture::capture(const Dictionary &p_arguments, Dictio
 	if (crop_value.get_type() != Variant::NIL) {
 		Rect2i requested;
 		if (crop_value.get_type() != Variant::DICTIONARY || !_parse_crop(crop_value, requested)) {
-			_set_error(r_error_code, r_error_message, "INVALID_ARGUMENTS", "crop must define a non-empty finite x, y, width, and height rectangle.");
+			_set_screenshot_error(r_error_code, r_error_message, "INVALID_ARGUMENTS", "crop must define a non-empty finite x, y, width, and height rectangle.");
 			return ERR_INVALID_PARAMETER;
 		}
 		const Rect2i clipped = requested.intersection(Rect2i(Vector2i(), image->get_size()));
 		if (!clipped.has_area()) {
-			_set_error(r_error_code, r_error_message, "INVALID_ARGUMENTS", "crop does not intersect the runtime viewport.");
+			_set_screenshot_error(r_error_code, r_error_message, "INVALID_ARGUMENTS", "crop does not intersect the runtime viewport.");
 			return ERR_INVALID_PARAMETER;
 		}
 		image = image->get_region(clipped);
 	}
 	const Variant name_value = p_arguments.get("name", String());
 	if (name_value.get_type() != Variant::STRING) {
-		_set_error(r_error_code, r_error_message, "INVALID_ARGUMENTS", "name must be a string.");
+		_set_screenshot_error(r_error_code, r_error_message, "INVALID_ARGUMENTS", "name must be a string.");
 		return ERR_INVALID_PARAMETER;
 	}
 	String name = String(name_value).validate_filename();
@@ -130,7 +130,7 @@ Error MCPRuntimeScreenshotCapture::capture(const Dictionary &p_arguments, Dictio
 			OS::get_singleton()->get_process_id(), OS::get_singleton()->get_ticks_usec(), suffix));
 	const Error save_error = image->save_png(path);
 	if (save_error != OK) {
-		_set_error(r_error_code, r_error_message, "RUNTIME_SCREENSHOT_FAILED", vformat("Unable to save runtime screenshot (error %d).", int(save_error)));
+		_set_screenshot_error(r_error_code, r_error_message, "RUNTIME_SCREENSHOT_FAILED", vformat("Unable to save runtime screenshot (error %d).", int(save_error)));
 		return save_error;
 	}
 	r_result["name"] = String(name_value);

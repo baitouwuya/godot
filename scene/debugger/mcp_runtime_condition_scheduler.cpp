@@ -41,7 +41,7 @@
 
 namespace {
 
-bool _read_integer(const Variant &p_value, int64_t p_minimum, int64_t p_maximum, uint64_t &r_value) {
+bool _read_condition_integer(const Variant &p_value, int64_t p_minimum, int64_t p_maximum, uint64_t &r_value) {
 	if (p_value.get_type() != Variant::INT) {
 		return false;
 	}
@@ -431,8 +431,8 @@ bool MCPRuntimeConditionScheduler::_handle_start(const Array &p_arguments) {
 	}
 	uint64_t timeout_frames = 0;
 	uint64_t poll_frames = 0;
-	if (!_read_integer(payload.get("timeoutFrames", Variant()), 1, MAX_TIMEOUT_FRAMES, timeout_frames) ||
-			!_read_integer(payload.get("pollEveryFrames", Variant()), 1, MAX_POLL_EVERY_FRAMES, poll_frames)) {
+	if (!_read_condition_integer(payload.get("timeoutFrames", Variant()), 1, MAX_TIMEOUT_FRAMES, timeout_frames) ||
+			!_read_condition_integer(payload.get("pollEveryFrames", Variant()), 1, MAX_POLL_EVERY_FRAMES, poll_frames)) {
 		_send_response(request_id, "start", false, "INVALID_ARGUMENTS", "Runtime wait frame limits are invalid.");
 		return false;
 	}

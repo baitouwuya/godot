@@ -29,6 +29,11 @@ class MCPBuildSurfaceTest(unittest.TestCase):
             destination = self.root / relative_path
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, destination)
+        provider_root = REPOSITORY_ROOT / "editor/mcp/providers"
+        temporary_provider_root = self.root / "editor/mcp/providers"
+        for pattern in ("*.cpp", "*.h"):
+            for source in provider_root.glob(pattern):
+                shutil.copy2(source, temporary_provider_root / source.name)
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
@@ -70,6 +75,17 @@ class MCPBuildSurfaceTest(unittest.TestCase):
         violations = VALIDATOR.validate_mcp_build_surfaces(self.root)
 
         self.assertIn("core-editor-only", [violation.gate for violation in violations])
+
+    def test_gdscript_lsp_provider_sources_are_conditionally_gated(self) -> None:
+        self.replace(
+            "editor/mcp/providers/SCsub",
+            '    "mcp_gdscript_semantic_service.cpp",\n',
+            "",
+        )
+
+        violations = VALIDATOR.validate_mcp_build_surfaces(self.root)
+
+        self.assertIn("gdscript-lsp-source-gate", [violation.gate for violation in violations])
 
     def test_cli_and_runtime_prefix_filters_are_contracts(self) -> None:
         self.replace('main/SCsub', 'startswith("mcp_")', 'startswith("optional_")')

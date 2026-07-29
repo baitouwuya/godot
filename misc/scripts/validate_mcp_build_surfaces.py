@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,7 @@ BUILD_FILES = (
     "SConstruct",
     "core/SCsub",
     "editor/SCsub",
+    "editor/mcp/providers/SCsub",
     "main/SCsub",
     "scene/debugger/SCsub",
     "scu_builders.py",
@@ -32,6 +34,7 @@ class BuildSurfaceViolation:
 
 
 NodePredicate = Callable[[ast.AST], bool]
+INCLUDE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*[<"](?P<path>[^>"]+)[>"]', re.MULTILINE)
 
 
 def _is_name(node: ast.AST, name: str) -> bool:
@@ -77,6 +80,49 @@ def _contains_call(nodes: Iterable[ast.AST], name: str, first_argument: object |
             if candidate.args and isinstance(candidate.args[0], ast.Constant) and candidate.args[0].value == first_argument:
                 return True
     return False
+
+
+def _assigned_strings(module: ast.Module, name: str) -> set[str] | None:
+    for candidate in ast.walk(module):
+        if not isinstance(candidate, ast.Assign) or len(candidate.targets) != 1 or not _is_name(candidate.targets[0], name):
+            continue
+        if not isinstance(candidate.value, (ast.List, ast.Set, ast.Tuple)):
+            return None
+        return {item.value for item in candidate.value.elts if isinstance(item, ast.Constant) and isinstance(item.value, str)}
+    return None
+
+
+def _gdscript_lsp_provider_sources(repository_root: Path) -> set[str]:
+    provider_root = (repository_root / "editor/mcp/providers").resolve()
+    source_files = {
+        path.resolve()
+        for suffix in ("*.cpp", "*.h")
+        for path in provider_root.glob(suffix)
+        if path.is_file()
+    }
+    includes: dict[Path, set[Path]] = {}
+    directly_depends_on_lsp: set[Path] = set()
+    for source in source_files:
+        content = source.read_text(encoding="utf-8")
+        includes[source] = set()
+        for match in INCLUDE.finditer(content):
+            include = match.group("path").replace("\\", "/")
+            if include.startswith("modules/gdscript/language_server/"):
+                directly_depends_on_lsp.add(source)
+                continue
+            candidate = (repository_root / include).resolve() if include.startswith("editor/mcp/providers/") else (source.parent / include).resolve()
+            if candidate in source_files:
+                includes[source].add(candidate)
+
+    depends_on_lsp = set(directly_depends_on_lsp)
+    changed = True
+    while changed:
+        changed = False
+        for source, dependencies in includes.items():
+            if source not in depends_on_lsp and dependencies & depends_on_lsp:
+                depends_on_lsp.add(source)
+                changed = True
+    return {source.name for source in depends_on_lsp if source.suffix == ".cpp"}
 
 
 def _guarded_calls(statements: Iterable[ast.stmt], guards: tuple[ast.AST, ...] = ()):
@@ -411,6 +457,33 @@ def validate_mcp_build_surfaces(repository_root: Path) -> list[BuildSurfaceViola
         violations.append(
             BuildSurfaceViolation("editor/SCsub", "editor-host-gate", "editor/mcp must compile only in MCP-enabled editor builds")
         )
+
+    providers = modules.get("editor/mcp/providers/SCsub")
+    if providers:
+        declared_lsp_sources = _assigned_strings(providers, "gdscript_lsp_sources")
+        try:
+            required_lsp_sources = _gdscript_lsp_provider_sources(repository_root)
+        except (OSError, UnicodeError) as error:
+            violations.append(
+                BuildSurfaceViolation(
+                    "editor/mcp/providers/SCsub",
+                    "gdscript-lsp-source-scan",
+                    f"cannot inspect Provider source dependencies: {error}",
+                )
+            )
+        else:
+            missing_lsp_sources = sorted(required_lsp_sources - (declared_lsp_sources or set()))
+            if declared_lsp_sources is None or missing_lsp_sources:
+                reason = "gdscript_lsp_sources must be a string collection"
+                if missing_lsp_sources:
+                    reason = "GDScript LSP-dependent sources are not conditionally gated: " + ", ".join(missing_lsp_sources)
+                violations.append(
+                    BuildSurfaceViolation(
+                        "editor/mcp/providers/SCsub",
+                        "gdscript-lsp-source-gate",
+                        reason,
+                    )
+                )
 
     main = modules.get("main/SCsub")
     if main and not _has_source_filter(

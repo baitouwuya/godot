@@ -145,7 +145,8 @@ Error MCPEditorPlugin::_start_mcp(String &r_error) {
 		_stop_mcp();
 		return error;
 	}
-	print_line(vformat("Godot MCP Host started for project %s at %s", project_identity.project_id, host.get_endpoint()));
+	print_line(vformat("Godot MCP Host started for project %s at %s with %d tools",
+			project_identity.project_id, host.get_endpoint(), tool_registry.get_tool_names().size()));
 	return OK;
 }
 

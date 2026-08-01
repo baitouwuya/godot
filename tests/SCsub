@@ -12,6 +12,7 @@ MCP_RUNTIME_TEST_SOURCES = (
     "editor/mcp/test_mcp_runtime_condition_scheduler.cpp",
     "editor/mcp/test_mcp_runtime_input_controller.cpp",
     "editor/mcp/test_mcp_runtime_performance_sampler.cpp",
+    "editor/mcp/test_mcp_runtime_property_controller.cpp",
 )
 
 

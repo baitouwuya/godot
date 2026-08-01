@@ -142,6 +142,9 @@ TEST_CASE("[MCP][Provider] Runtime tools register in a stable order") {
 	const Dictionary properties_output = _definition_for(definitions, "godot.runtime.node.get_properties").get("outputSchema", Dictionary());
 	CHECK(bool(properties_output.get("additionalProperties", false)));
 	CHECK(Dictionary(properties_output.get("properties", Dictionary())).has("propertyLayout"));
+	const Dictionary performance_status = _definition_for(definitions, "godot.runtime.performance.status").get("inputSchema", Dictionary());
+	CHECK(Array(performance_status.get("oneOf", Array())).size() == 2);
+	CHECK_FALSE(Dictionary(Dictionary(performance_status.get("properties", Dictionary())).get("name", Dictionary())).is_empty());
 
 	const MCPToolRegistry::CallResult state_result = _call(registry, "godot.runtime.get_state", Dictionary());
 	REQUIRE(state_result.status == MCPToolRegistry::CALL_OK);
@@ -315,6 +318,15 @@ TEST_CASE("[MCP][Provider] Runtime performance jobs require MCP ownership and ex
 	status["runtimeGeneration"] = 1;
 	CHECK(_error_code(_call(registry, "godot.runtime.performance.status", status, session)) == "PERFORMANCE_JOB_NOT_FOUND");
 	CHECK(_error_code(_call(registry, "godot.runtime.performance.stop", status, session)) == "PERFORMANCE_JOB_NOT_FOUND");
+
+	Dictionary status_by_name;
+	status_by_name["name"] = "performance-missing";
+	status_by_name["runtimeGeneration"] = 1;
+	CHECK(_error_code(_call(registry, "godot.runtime.performance.status", status_by_name, session)) == "PERFORMANCE_JOB_NOT_FOUND");
+
+	Dictionary ambiguous = status;
+	ambiguous["name"] = "performance-missing";
+	CHECK(_error_code(_call(registry, "godot.runtime.performance.status", ambiguous, session)) == "INVALID_ARGUMENTS");
 }
 
 TEST_CASE("[MCP][Provider] Runtime input uses Godot's debugger codec for key and mouse events") {
@@ -348,6 +360,18 @@ TEST_CASE("[MCP][Provider] Runtime input uses Godot's debugger codec for key and
 	CHECK(decoded_mouse->get_button_index() == MouseButton::LEFT);
 	CHECK_FALSE(decoded_mouse->is_pressed());
 	CHECK(decoded_mouse->get_position().is_equal_approx(Vector2(12.5, 30.0)));
+}
+
+TEST_CASE("[MCP][Provider] Runtime action input is delegated to the running project's InputMap") {
+	Dictionary action;
+	action["type"] = "action";
+	action["action"] = "mcp_runtime_action_not_loaded_in_editor";
+	action["pressed"] = true;
+	MCPRuntimeInput::EncodedEvent encoded;
+	String error;
+	CHECK(MCPRuntimeInput::encode(action, encoded, &error) == OK);
+	CHECK(error.is_empty());
+	CHECK(encoded.message == "scene:inject_input_action");
 }
 
 TEST_CASE("[MCP][Provider] Runtime input rejects unknown and malformed events before dispatch") {

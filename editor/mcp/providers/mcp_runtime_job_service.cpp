@@ -73,10 +73,25 @@ Dictionary MCPRuntimeJobService::_resolve_record(const Dictionary &p_arguments, 
 		String &r_job_id, JobRecord *&r_record) {
 	r_record = nullptr;
 	const Variant job_value = p_arguments.get("jobId", Variant());
-	if (job_value.get_type() != Variant::STRING || String(job_value).is_empty()) {
-		return _error("INVALID_ARGUMENTS", "jobId must be a non-empty string.");
+	const Variant alias_value = config.alias_argument.is_empty() ? Variant() : p_arguments.get(config.alias_argument, Variant());
+	const bool has_job_id = job_value.get_type() == Variant::STRING && !String(job_value).is_empty();
+	const bool has_alias = alias_value.get_type() == Variant::STRING && !String(alias_value).is_empty();
+	if (has_job_id == has_alias) {
+		return _error("INVALID_ARGUMENTS", config.alias_argument.is_empty() ? "jobId must be a non-empty string." :
+				"Provide exactly one of jobId or " + config.alias_argument + ".");
 	}
-	r_job_id = job_value;
+	if (has_job_id) {
+		r_job_id = job_value;
+	} else {
+		const String alias = alias_value;
+		for (int i = job_order.size() - 1; i >= 0; i--) {
+			const JobRecord *candidate = jobs.getptr(job_order[i]);
+			if (candidate && candidate->mcp_session_id == p_mcp_session_id && candidate->client_alias == alias) {
+				r_job_id = job_order[i];
+				break;
+			}
+		}
+	}
 	r_record = jobs.getptr(r_job_id);
 	if (!r_record || r_record->mcp_session_id != p_mcp_session_id) {
 		return _error(config.not_found_code, config.not_found_message);
@@ -104,6 +119,18 @@ Dictionary MCPRuntimeJobService::start(const Dictionary &p_arguments, const Stri
 	if (jobs.size() >= config.max_records) {
 		return _error(config.limit_code, config.limit_message);
 	}
+	String client_alias;
+	if (!config.alias_argument.is_empty() && p_payload.has(config.alias_argument)) {
+		client_alias = p_payload[config.alias_argument];
+		if (!client_alias.is_empty()) {
+			for (const KeyValue<String, JobRecord> &entry : jobs) {
+				if (entry.value.mcp_session_id == p_mcp_session_id && entry.value.client_alias == client_alias &&
+						String(entry.value.state.get("state", String())) == "running") {
+					return _error(config.alias_in_use_code, config.alias_in_use_message);
+				}
+			}
+		}
+	}
 	const String job_id = config.id_prefix + "-" + String::num_uint64(next_job_id++);
 	p_payload["jobId"] = job_id;
 	p_payload["mcpSessionId"] = p_mcp_session_id;
@@ -117,9 +144,13 @@ Dictionary MCPRuntimeJobService::start(const Dictionary &p_arguments, const Stri
 	}
 	JobRecord record;
 	record.mcp_session_id = p_mcp_session_id;
+	record.client_alias = client_alias;
 	record.debugger_session = session.debugger_session;
 	record.runtime_generation = session.runtime_generation;
 	record.state = response.get("structuredContent", Dictionary());
+	if (!client_alias.is_empty()) {
+		record.state[config.alias_argument] = client_alias;
+	}
 	jobs.insert(job_id, record);
 	job_order.push_back(job_id);
 	return response;

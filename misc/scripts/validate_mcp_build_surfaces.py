@@ -337,6 +337,7 @@ def _has_test_gate(module: ast.Module) -> bool:
             "editor/mcp/test_mcp_runtime_condition_scheduler.cpp",
             "editor/mcp/test_mcp_runtime_input_controller.cpp",
             "editor/mcp/test_mcp_runtime_performance_sampler.cpp",
+            "editor/mcp/test_mcp_runtime_property_controller.cpp",
         )
         and has_editor_enabled_assignment
         and has_runtime_enabled_assignment

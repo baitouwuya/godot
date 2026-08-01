@@ -282,6 +282,74 @@ static Error _validate_encoded_tags(const Variant &p_value, String *r_error, int
 	return OK;
 }
 
+static bool _native_encoding_matches(const Variant &p_input, const Variant &p_canonical, int p_depth) {
+	if (p_depth > Variant::MAX_RECURSION_DEPTH) {
+		return false;
+	}
+	if (p_canonical.get_type() == Variant::FLOAT &&
+			(p_input.get_type() == Variant::INT || p_input.get_type() == Variant::FLOAT)) {
+		const double input_number = p_input;
+		const double canonical_number = p_canonical;
+		return Math::is_finite(input_number) && Math::is_finite(canonical_number) &&
+				real_t(input_number) == real_t(canonical_number);
+	}
+	if (p_canonical.get_type() == Variant::STRING) {
+		const String canonical = p_canonical;
+		if (canonical.begins_with("f:") &&
+				(p_input.get_type() == Variant::INT || p_input.get_type() == Variant::FLOAT)) {
+			const double input_number = p_input;
+			const String canonical_number = canonical.substr(2);
+			return Math::is_finite(input_number) && canonical_number.is_valid_float() &&
+					real_t(input_number) == real_t(canonical_number.to_float());
+		}
+		if (canonical.begins_with("i:") && p_input.get_type() == Variant::INT) {
+			const String canonical_number = canonical.substr(2);
+			return canonical_number.is_valid_int() && int64_t(p_input) == canonical_number.to_int();
+		}
+		if (p_input.get_type() == Variant::STRING) {
+			const String input = p_input;
+			if (input.begins_with("f:") && canonical.begins_with("f:")) {
+				const String input_number = input.substr(2);
+				const String canonical_number = canonical.substr(2);
+				if (input_number.is_valid_float() && canonical_number.is_valid_float()) {
+					return real_t(input_number.to_float()) == real_t(canonical_number.to_float());
+				}
+			}
+		}
+		return p_input == p_canonical;
+	}
+	if (p_input.get_type() != p_canonical.get_type()) {
+		return false;
+	}
+	if (p_canonical.get_type() == Variant::ARRAY) {
+		const Array input = p_input;
+		const Array canonical = p_canonical;
+		if (input.size() != canonical.size()) {
+			return false;
+		}
+		for (int i = 0; i < input.size(); i++) {
+			if (!_native_encoding_matches(input[i], canonical[i], p_depth + 1)) {
+				return false;
+			}
+		}
+		return true;
+	}
+	if (p_canonical.get_type() == Variant::DICTIONARY) {
+		const Dictionary input = p_input;
+		const Dictionary canonical = p_canonical;
+		if (input.size() != canonical.size()) {
+			return false;
+		}
+		for (const KeyValue<Variant, Variant> &entry : canonical) {
+			if (!input.has(entry.key) || !_native_encoding_matches(input[entry.key], entry.value, p_depth + 1)) {
+				return false;
+			}
+		}
+		return true;
+	}
+	return p_input == p_canonical;
+}
+
 static Error _restore_resource_references(const Variant &p_value, Variant &r_value, String *r_error, int p_depth) {
 	if (p_depth > Variant::MAX_RECURSION_DEPTH) {
 		return _fail("Decoded Variant nesting exceeds the supported depth.", r_error);
@@ -357,7 +425,7 @@ static Error _decode_native_encoding(const Variant &p_encoded_value, Variant &r_
 	}
 
 	const Variant native_value = JSON::to_native(p_encoded_value, false);
-	if (JSON::from_native(native_value, false) != p_encoded_value) {
+	if (!_native_encoding_matches(p_encoded_value, JSON::from_native(native_value, false), 0)) {
 		return _fail("Encoded Variant is malformed or not in canonical form.", r_error);
 	}
 	return _restore_resource_references(native_value, r_value, r_error, 0);

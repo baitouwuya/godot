@@ -36,7 +36,8 @@ void MCPRuntimeObservationDebuggerPlugin::_bind_methods() {
 }
 
 bool MCPRuntimeObservationDebuggerPlugin::capture(const String &p_message, const Array &p_data, int p_session) {
-	if (p_message == "mcp_observation:response" || p_message == "mcp_condition:response" || p_message == "mcp_performance:response") {
+	if (p_message == "mcp_observation:response" || p_message == "mcp_condition:response" ||
+			p_message == "mcp_performance:response" || p_message == "mcp_property:response") {
 		if (runtime_gateway) {
 			runtime_gateway->handle_response(p_session, p_data);
 		}
@@ -45,5 +46,6 @@ bool MCPRuntimeObservationDebuggerPlugin::capture(const String &p_message, const
 }
 
 bool MCPRuntimeObservationDebuggerPlugin::has_capture(const String &p_capture) const {
-	return p_capture == "mcp_observation" || p_capture == "mcp_condition" || p_capture == "mcp_performance";
+	return p_capture == "mcp_observation" || p_capture == "mcp_condition" || p_capture == "mcp_performance" ||
+			p_capture == "mcp_property";
 }

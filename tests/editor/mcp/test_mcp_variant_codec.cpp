@@ -91,6 +91,31 @@ TEST_CASE("[MCP][Provider] Reserved legacy prefixes round-trip as literal string
 	String error;
 	REQUIRE(MCPVariantCodec::decode("s:legacy", legacy_decoded, &error) == OK);
 	CHECK(legacy_decoded == Variant("legacy"));
+
+	Variant legacy_float;
+	REQUIRE(MCPVariantCodec::decode("f:1.05", legacy_float, &error) == OK);
+	CHECK(legacy_float == Variant(1.05));
+}
+
+TEST_CASE("[MCP][Provider] Native Variant envelopes accept JSON numeric constructor arguments") {
+	Dictionary native_vector;
+	native_vector["type"] = "Vector2";
+	native_vector["args"] = Array{ 1.05, -2.25 };
+	Dictionary envelope;
+	envelope["__godot_mcp_encoded_variant__"] = native_vector;
+
+	Variant decoded;
+	String error;
+	INFO(error);
+	REQUIRE(MCPVariantCodec::decode(envelope, decoded, &error) == OK);
+	CHECK(error.is_empty());
+	REQUIRE(decoded.get_type() == Variant::VECTOR2);
+	CHECK(Vector2(decoded).is_equal_approx(Vector2(1.05, -2.25)));
+
+	native_vector["unexpected"] = true;
+	envelope["__godot_mcp_encoded_variant__"] = native_vector;
+	CHECK(MCPVariantCodec::decode(envelope, decoded, &error) == ERR_INVALID_DATA);
+	CHECK(error.contains("canonical"));
 }
 
 TEST_CASE("[MCP][Provider] Unsafe object-like Variant types are rejected") {

@@ -60,6 +60,27 @@ Dictionary _wait_error(MCPRuntimeDebuggerWait::WaitStatus p_status, const String
 	return _error("RUNTIME_DEBUGGER_REQUEST_FAILED", "The runtime debugger returned an unknown wait status.");
 }
 
+Dictionary _round_trip_error(const MCPRuntimeDebuggerGateway::RoundTripResult &p_result) {
+	switch (p_result.status) {
+		case MCPRuntimeDebuggerGateway::ROUND_TRIP_BUSY:
+			return _error("RUNTIME_DEBUGGER_BUSY", p_result.message);
+		case MCPRuntimeDebuggerGateway::ROUND_TRIP_TIMEOUT:
+			return _error("RUNTIME_TIMEOUT", p_result.message);
+		case MCPRuntimeDebuggerGateway::ROUND_TRIP_DISCONNECTED:
+			return _error("RUNTIME_NOT_RUNNING", p_result.message);
+		case MCPRuntimeDebuggerGateway::ROUND_TRIP_STALE:
+			return _error("STALE_RUNTIME", p_result.message);
+		case MCPRuntimeDebuggerGateway::ROUND_TRIP_REMOTE_ERROR:
+			return MCPToolUtils::make_error_result(
+					p_result.response.code.is_empty() ? "RUNTIME_PROPERTY_SET_FAILED" : p_result.response.code,
+					p_result.response.message.is_empty() ? "The running project rejected the property update." : p_result.response.message,
+					p_result.response.data);
+		case MCPRuntimeDebuggerGateway::ROUND_TRIP_COMPLETED:
+			return Dictionary();
+	}
+	return _error("RUNTIME_PROPERTY_SET_FAILED", "The runtime property request returned an unknown status.");
+}
+
 int _timeout_from_arguments(const Dictionary &p_arguments) {
 	int64_t timeout = DEFAULT_TIMEOUT_MSEC;
 	MCPToolUtils::try_get_json_integer(p_arguments.get("timeoutMs", DEFAULT_TIMEOUT_MSEC), 50, 5000, timeout);
@@ -334,16 +355,46 @@ Dictionary MCPRuntimeRemoteSceneService::set_property(const Dictionary &p_argume
 	}
 	EditorDebuggerRemoteObjects *remote_object = session.debugger->get_cached_remote_object(object_id);
 	const PropertyInfo *property = remote_object ? _find_property(remote_object, StringName(property_value)) : nullptr;
-	if (!property) {
-		return _error("RUNTIME_PROPERTY_NOT_FOUND", "Runtime property was not found: " + String(property_value));
-	}
-	if (property->usage & (PROPERTY_USAGE_READ_ONLY | PROPERTY_USAGE_CATEGORY | PROPERTY_USAGE_GROUP | PROPERTY_USAGE_SUBGROUP)) {
-		return _error("RUNTIME_PROPERTY_READ_ONLY", "Runtime property is not editable: " + String(property_value));
-	}
 	Variant decoded_value;
 	String codec_error;
 	if (MCPVariantCodec::decode(p_arguments["value"], decoded_value, &codec_error) != OK) {
-		return _error("INVALID_VALUE", codec_error);
+		return _error("INVALID_VALUE", codec_error + " Use a JSON-native scalar or a __godot_mcp_encoded_variant__ envelope returned by get_properties.");
+	}
+	if (!property) {
+		Dictionary payload;
+		payload["path"] = node["path"];
+		payload["property"] = property_value;
+		payload["value"] = decoded_value;
+		const MCPRuntimeDebuggerGateway::RoundTripResult round_trip = runtime_gateway->round_trip(
+				session, String(), "property", "mcp_property:set_property", "set_property", Array{ payload }, _timeout_from_arguments(p_arguments));
+		error = _round_trip_error(round_trip);
+		if (!error.is_empty()) {
+			return error;
+		}
+		error = _refresh_object(session, object_id, deadline);
+		if (!error.is_empty()) {
+			return error;
+		}
+		error = _validate_current(session);
+		if (!error.is_empty()) {
+			return error;
+		}
+		Dictionary result = runtime_gateway->make_session_identity(session.debugger_session, session.runtime_generation);
+		result["path"] = node["path"];
+		result["objectId"] = String::num_uint64(uint64_t(object_id));
+		result["property"] = property_value;
+		result["objectRevision"] = int64_t(session.debugger->get_remote_object_revision(object_id));
+		result["coerced"] = bool(round_trip.response.data.get("coerced", false));
+		Variant encoded_value;
+		if (MCPVariantCodec::encode(round_trip.response.data.get("value", Variant()), encoded_value, &codec_error) == OK) {
+			result["value"] = encoded_value;
+		} else {
+			result["valueAvailable"] = false;
+		}
+		return MCPToolUtils::make_success_result(result);
+	}
+	if (property->usage & (PROPERTY_USAGE_READ_ONLY | PROPERTY_USAGE_CATEGORY | PROPERTY_USAGE_GROUP | PROPERTY_USAGE_SUBGROUP)) {
+		return _error("RUNTIME_PROPERTY_READ_ONLY", "Runtime property is not editable: " + String(property_value));
 	}
 	const Variant previous_value = remote_object->get_variant(property_value);
 	if (MCPRuntimeDebuggerWait::is_expired(deadline)) {

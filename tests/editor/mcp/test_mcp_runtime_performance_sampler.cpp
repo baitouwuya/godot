@@ -87,6 +87,7 @@ TEST_CASE("[MCP][Runtime Performance] Shared frame samples feed bounded aggregat
 	const Dictionary first = MCPRuntimePerformanceSamplerTestAccess::state(sampler, "one");
 	const Dictionary second = MCPRuntimePerformanceSamplerTestAccess::state(sampler, "two");
 	CHECK(first.get("state", String()) == "completed");
+	CHECK(first.get("name", String()) == "one");
 	CHECK(second.get("state", String()) == "running");
 	CHECK(int64_t(first.get("capturedFrames", 0)) == 1);
 	CHECK(int64_t(second.get("capturedFrames", 0)) == 1);

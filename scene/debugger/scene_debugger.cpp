@@ -35,6 +35,7 @@
 #include "mcp_runtime_input_controller.h"
 #include "mcp_runtime_observation_controller.h"
 #include "mcp_runtime_performance_sampler.h"
+#include "mcp_runtime_property_controller.h"
 #endif
 
 #include "core/config/engine.h"
@@ -83,6 +84,7 @@ SceneDebugger::SceneDebugger() {
 	MCPRuntimeConditionScheduler::initialize();
 	MCPRuntimeInputController::initialize();
 	MCPRuntimeObservationController::initialize();
+	MCPRuntimePropertyController::initialize();
 	MCPRuntimePerformanceSampler::initialize();
 #endif
 
@@ -94,6 +96,7 @@ SceneDebugger::~SceneDebugger() {
 #ifdef DEBUG_ENABLED
 #ifdef MCP_ENABLED
 	MCPRuntimePerformanceSampler::deinitialize();
+	MCPRuntimePropertyController::deinitialize();
 	MCPRuntimeObservationController::deinitialize();
 	MCPRuntimeInputController::deinitialize();
 	MCPRuntimeConditionScheduler::deinitialize();

@@ -58,12 +58,17 @@ enabled=PackedStringArray("res://addons/mcp_smoke_cleanup/plugin.cfg")
     )
     write_text(
         path / "main.tscn",
-        """[gd_scene load_steps=2 format=3]
+        """[gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://runtime_smoke.gd" id="1_runtime"]
 
 [node name="Root" type="Node"]
 script = ExtResource("1_runtime")
+
+[node name="RuntimeParent" type="Node2D" parent="."]
+position = Vector2(20, 10)
+
+[node name="RuntimeChild" type="Node2D" parent="RuntimeParent"]
 """,
     )
     write_text(
@@ -71,6 +76,7 @@ script = ExtResource("1_runtime")
         """extends Node
 
 func _ready() -> void:
+\tInputMap.add_action("mcp-python-runtime-action")
 \tprint("mcp-python-smoke-runtime-ready")
 \tpush_warning("mcp-python-smoke-runtime-warning")
 \tpush_error("mcp-python-smoke-runtime-error")
@@ -466,7 +472,7 @@ def run_smoke(binary: str, timeout: int, keep_temporary_projects: bool) -> None:
         require(bool(structured_result(node_flow, 26, "scene/save").get("saved")), "scene/save did not report success.")
         require("McpChild" in (project_a / "main.tscn").read_text(encoding="utf-8"), "scene/save did not persist the created node.")
 
-        print("[8/9] Checking runtime play/state/debug errors/stop")
+        print("[8/9] Checking runtime play, native properties, input, performance, debug errors, and stop")
         play_flow = invoke_stdio(runner, project_a, discovery_a["protocolVersion"], [tool_call(30, "godot.runtime.play", {"mode": "main"})], "runtime/play")
         require(bool(structured_result(play_flow, 30, "runtime/play").get("accepted")), "runtime/play was not accepted.")
 
@@ -479,6 +485,45 @@ def run_smoke(binary: str, timeout: int, keep_temporary_projects: bool) -> None:
 
         runtime_state = wait_until(timeout, running_state, "running runtime state")
         require(type(runtime_state.get("processId")) is int and runtime_state["processId"] > 0, "runtime processId must be a positive JSON integer.")
+        runtime_generation = runtime_state["sessions"][0].get("runtimeGeneration")
+        require(type(runtime_generation) is int and runtime_generation > 0, "runtime session did not expose runtimeGeneration.")
+
+        runtime_mutation_flow = invoke_stdio(
+            runner,
+            project_a,
+            discovery_a["protocolVersion"],
+            [
+                tool_call(34, "godot.runtime.node.set_property", {
+                    "path": "/root/Root/RuntimeParent/RuntimeChild",
+                    "property": "global_position",
+                    "value": {"__godot_mcp_encoded_variant__": {"type": "Vector2", "args": [1.05, -2.25]}},
+                    "runtimeGeneration": runtime_generation,
+                }),
+                tool_call(35, "godot.runtime.input.send", {
+                    "events": [{"type": "action", "action": "mcp-python-runtime-action", "pressed": True}],
+                    "runtimeGeneration": runtime_generation,
+                }),
+                tool_call(36, "godot.runtime.performance.start", {"name": "stdio-performance", "maxFrames": 1, "runtimeGeneration": runtime_generation}),
+                tool_call(37, "godot.runtime.performance.status", {"name": "stdio-performance", "runtimeGeneration": runtime_generation}),
+                tool_call(38, "godot.runtime.performance.stop", {"name": "stdio-performance", "runtimeGeneration": runtime_generation}),
+            ],
+            "stdio runtime mutation",
+        )
+        runtime_property = structured_result(runtime_mutation_flow, 34, "runtime/node/set_property")
+        require(runtime_property.get("property") == "global_position", "runtime native property fallback did not return the requested property.")
+        encoded_position = runtime_property.get("value", {}).get("__godot_mcp_encoded_variant__", {})
+        require(encoded_position.get("type") == "Vector2", "runtime native property fallback did not return a Vector2.")
+        position_args = encoded_position.get("args")
+        require(isinstance(position_args, list) and len(position_args) == 2, "runtime global_position did not return two components.")
+        require(all(isinstance(value, (int, float)) for value in position_args), "runtime global_position components are not JSON numbers.")
+        require(abs(float(position_args[0]) - 1.05) < 0.001 and abs(float(position_args[1]) + 2.25) < 0.001, "runtime global_position was not updated.")
+        require(int(structured_result(runtime_mutation_flow, 35, "runtime/input/send").get("eventCount", 0)) == 1, "runtime action injection was rejected.")
+        performance_start = structured_result(runtime_mutation_flow, 36, "runtime/performance/start")
+        performance_status = structured_result(runtime_mutation_flow, 37, "runtime/performance/status")
+        performance_stop = structured_result(runtime_mutation_flow, 38, "runtime/performance/stop")
+        require(performance_start.get("name") == "stdio-performance", "performance start did not return its client alias.")
+        require(performance_status.get("jobId") == performance_start.get("jobId"), "performance status did not resolve the client alias.")
+        require(performance_stop.get("jobId") == performance_start.get("jobId"), "performance stop did not resolve the client alias.")
 
         def runtime_errors() -> Optional[Dict[str, Any]]:
             errors_flow = invoke_stdio(
@@ -493,12 +538,12 @@ def run_smoke(binary: str, timeout: int, keep_temporary_projects: bool) -> None:
             return errors if {"mcp-python-smoke-runtime-warning", "mcp-python-smoke-runtime-error"} <= messages else None
 
         wait_until(timeout, runtime_errors, "runtime warning and error capture")
-        stop_flow = invoke_stdio(runner, project_a, discovery_a["protocolVersion"], [tool_call(33, "godot.runtime.stop", {})], "runtime/stop")
-        require(bool(structured_result(stop_flow, 33, "runtime/stop").get("stopped")), "runtime/stop did not stop the running project.")
+        stop_flow = invoke_stdio(runner, project_a, discovery_a["protocolVersion"], [tool_call(40, "godot.runtime.stop", {})], "runtime/stop")
+        require(bool(structured_result(stop_flow, 40, "runtime/stop").get("stopped")), "runtime/stop did not stop the running project.")
 
         def stopped_state() -> Optional[Dict[str, Any]]:
-            state_flow = invoke_stdio(runner, project_a, discovery_a["protocolVersion"], [tool_call(34, "godot.runtime.get_state", {})], "runtime/get_state after stop")
-            state = structured_result(state_flow, 34, "runtime/get_state after stop")
+            state_flow = invoke_stdio(runner, project_a, discovery_a["protocolVersion"], [tool_call(41, "godot.runtime.get_state", {})], "runtime/get_state after stop")
+            state = structured_result(state_flow, 41, "runtime/get_state after stop")
             return state if not bool(state.get("playing")) else None
 
         wait_until(timeout, stopped_state, "runtime stop state")

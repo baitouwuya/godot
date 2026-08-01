@@ -1,9 +1,8 @@
 /**************************************************************************/
-/*  mcp_runtime_job_service.h                                            */
+/*  mcp_runtime_property_controller.h                                     */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
-/*                        https://godotengine.org                         */
 /**************************************************************************/
 /* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
 /* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
@@ -30,58 +29,25 @@
 
 #pragma once
 
-#include "mcp_runtime_debugger_gateway.h"
+#include "core/object/object.h"
 
-#include "core/string/string_name.h"
-#include "core/string/ustring.h"
-#include "core/templates/hash_map.h"
-#include "core/templates/vector.h"
+class MCPRuntimePropertyController : public Object {
+	GDCLASS(MCPRuntimePropertyController, Object);
 
-class MCPRuntimeJobService {
-public:
-	struct Config {
-		String id_prefix;
-		String capture;
-		String rollback_operation;
-		String not_found_code;
-		String not_found_message;
-		String stale_code;
-		String stale_message;
-		String limit_code;
-		String limit_message;
-		String alias_argument;
-		String alias_in_use_code;
-		String alias_in_use_message;
-		int max_records = 0;
-	};
+	static inline MCPRuntimePropertyController *singleton = nullptr;
 
-private:
-	struct JobRecord {
-		String mcp_session_id;
-		String client_alias;
-		int debugger_session = -1;
-		uint64_t runtime_generation = 0;
-		Dictionary state;
-	};
+	static Error _parse_message(void *p_user, const String &p_message, const Array &p_arguments, bool &r_captured);
+	void _send_response(const String &p_request_id, const String &p_operation, bool p_ok, const String &p_code,
+			const String &p_message, const Dictionary &p_data) const;
 
-	MCPRuntimeDebuggerGateway *runtime_gateway = nullptr;
-	Config config;
-	uint64_t next_job_id = 1;
-	HashMap<String, JobRecord> jobs;
-	Vector<String> job_order;
-
-	void _prune_records();
-	Dictionary _resolve_record(const Dictionary &p_arguments, const String &p_mcp_session_id,
-			String &r_job_id, JobRecord *&r_record);
+protected:
+	static void _bind_methods();
 
 public:
-	MCPRuntimeJobService(MCPRuntimeDebuggerGateway *p_runtime_gateway, const Config &p_config);
+	static Error execute(const Dictionary &p_arguments, Dictionary &r_result, String &r_error_code, String &r_error_message);
+	static void initialize();
+	static void deinitialize();
 
-	Dictionary start(const Dictionary &p_arguments, const String &p_mcp_session_id, Dictionary p_payload);
-	Dictionary get_status(const Dictionary &p_arguments, const String &p_mcp_session_id);
-	Dictionary finish(const Dictionary &p_arguments, const String &p_mcp_session_id, const String &p_operation,
-			const StringName &p_terminal_result_field = StringName());
-	void process();
-	void release_session(const String &p_mcp_session_id);
-	void release_all(const String &p_reason);
+	MCPRuntimePropertyController();
+	~MCPRuntimePropertyController();
 };

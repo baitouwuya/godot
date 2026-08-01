@@ -243,6 +243,7 @@ Dictionary performance_job() {
 	max_frames["description"] = "Configured automatic completion frame count, or null when unbounded.";
 	Dictionary properties;
 	properties["jobId"] = MCPToolUtils::make_property_schema("string", "Runtime performance job ID.");
+	properties["name"] = MCPToolUtils::make_property_schema("string", "Session-local performance job name.");
 	properties["state"] = state;
 	properties["startedFrame"] = _integer("Frame when performance capture started.");
 	properties["maxFrames"] = max_frames;

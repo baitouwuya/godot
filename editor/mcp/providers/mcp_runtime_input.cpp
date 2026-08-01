@@ -34,7 +34,6 @@
 
 #include "core/input/input_event.h"
 #include "core/input/input_event_codec.h"
-#include "core/input/input_map.h"
 
 namespace {
 
@@ -192,10 +191,6 @@ Error MCPRuntimeInput::encode(const Dictionary &p_input, EncodedEvent &r_event, 
 				_set_error(r_error, "action must be a non-empty string.");
 			}
 			return ERR_INVALID_DATA;
-		}
-		if (!InputMap::get_singleton() || !InputMap::get_singleton()->has_action(StringName(action_value))) {
-			_set_error(r_error, "Unknown project input action: " + String(action_value));
-			return ERR_DOES_NOT_EXIST;
 		}
 		r_event.message = "scene:inject_input_action";
 		r_event.arguments = Array{ StringName(action_value), pressed, strength };

@@ -293,7 +293,8 @@ Dictionary wait_job() {
 Dictionary performance_start() {
 	Dictionary properties;
 	_add_target_action_session_properties(properties);
-	Dictionary name = MCPToolUtils::make_property_schema("string", "Optional label included in the structured performance summary.");
+	Dictionary name = MCPToolUtils::make_property_schema("string", "Optional session-local alias and label included in the structured performance summary.");
+	name["minLength"] = 1;
 	name["maxLength"] = 256;
 	properties["name"] = name;
 	Dictionary top_frames = MCPToolUtils::make_property_schema("integer", "Number of bounded slow-frame snapshots retained in the summary.");
@@ -312,7 +313,17 @@ Dictionary performance_job() {
 	Dictionary properties;
 	_add_target_action_session_properties(properties);
 	properties["jobId"] = MCPToolUtils::make_property_schema("string", "Opaque performance job ID returned by godot.runtime.performance.start.");
-	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "jobId", "runtimeGeneration" });
+	Dictionary name = MCPToolUtils::make_property_schema("string", "Session-local performance job name returned by godot.runtime.performance.start.");
+	name["minLength"] = 1;
+	name["maxLength"] = 256;
+	properties["name"] = name;
+	Dictionary schema = MCPToolUtils::make_object_schema(properties, PackedStringArray{ "runtimeGeneration" });
+	Dictionary by_job_id;
+	by_job_id["required"] = PackedStringArray{ "jobId" };
+	Dictionary by_name;
+	by_name["required"] = PackedStringArray{ "name" };
+	schema["oneOf"] = Array{ by_job_id, by_name };
+	return schema;
 }
 
 Dictionary properties() {

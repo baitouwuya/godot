@@ -128,6 +128,9 @@ bool MCPRuntimePerformanceSampler::_is_terminal(const Job &p_job) const {
 Dictionary MCPRuntimePerformanceSampler::_job_state(const Job &p_job, bool p_include_summary) const {
 	Dictionary result;
 	result["jobId"] = p_job.id;
+	if (!p_job.name.is_empty()) {
+		result["name"] = p_job.name;
+	}
 	result["state"] = p_job.state;
 	result["startedFrame"] = int64_t(p_job.started_frame);
 	result["maxFrames"] = p_job.max_frames > 0 ? Variant(int64_t(p_job.max_frames)) : Variant();
@@ -220,6 +223,7 @@ Error MCPRuntimePerformanceSampler::_create_job(const Dictionary &p_payload, Str
 	}
 	Job job;
 	job.id = job_id;
+	job.name = name_value;
 	job.mcp_session_id = session_id;
 	job.started_frame = Engine::get_singleton()->get_process_frames();
 	job.max_frames = max_frames;

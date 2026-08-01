@@ -1,9 +1,8 @@
 /**************************************************************************/
-/*  mcp_runtime_job_service.h                                            */
+/*  test_mcp_runtime_property_controller.cpp                              */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
-/*                        https://godotengine.org                         */
 /**************************************************************************/
 /* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
 /* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
@@ -28,60 +27,46 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#pragma once
+#include "scene/2d/node_2d.h"
+#include "scene/debugger/mcp_runtime_property_controller.h"
+#include "scene/main/scene_tree.h"
+#include "scene/main/window.h"
+#include "tests/test_macros.h"
 
-#include "mcp_runtime_debugger_gateway.h"
+TEST_FORCE_LINK(test_mcp_runtime_property_controller);
 
-#include "core/string/string_name.h"
-#include "core/string/ustring.h"
-#include "core/templates/hash_map.h"
-#include "core/templates/vector.h"
+namespace TestMCPRuntimePropertyController {
 
-class MCPRuntimeJobService {
-public:
-	struct Config {
-		String id_prefix;
-		String capture;
-		String rollback_operation;
-		String not_found_code;
-		String not_found_message;
-		String stale_code;
-		String stale_message;
-		String limit_code;
-		String limit_message;
-		String alias_argument;
-		String alias_in_use_code;
-		String alias_in_use_message;
-		int max_records = 0;
-	};
+TEST_CASE("[MCP][Runtime Property][SceneTree] Hidden native properties are set and read back in the running project") {
+	Window *root = SceneTree::get_singleton()->get_root();
+	Node2D *parent = memnew(Node2D);
+	parent->set_name("MCPRuntimePropertyParent");
+	root->add_child(parent);
+	parent->set_position(Vector2(20.0, 10.0));
+	Node2D *child = memnew(Node2D);
+	child->set_name("Child");
+	parent->add_child(child);
 
-private:
-	struct JobRecord {
-		String mcp_session_id;
-		String client_alias;
-		int debugger_session = -1;
-		uint64_t runtime_generation = 0;
-		Dictionary state;
-	};
+	Dictionary arguments;
+	arguments["path"] = String(child->get_path());
+	arguments["property"] = "global_position";
+	arguments["value"] = Vector2(1.05, -2.25);
+	Dictionary result;
+	String error_code;
+	String error_message;
+	CHECK(MCPRuntimePropertyController::execute(arguments, result, error_code, error_message) == OK);
+	CHECK(error_code.is_empty());
+	CHECK(error_message.is_empty());
+	CHECK(child->get_global_position().is_equal_approx(Vector2(1.05, -2.25)));
+	CHECK_FALSE(child->get_position().is_equal_approx(child->get_global_position()));
+	CHECK(Vector2(result.get("value", Vector2())).is_equal_approx(child->get_global_position()));
 
-	MCPRuntimeDebuggerGateway *runtime_gateway = nullptr;
-	Config config;
-	uint64_t next_job_id = 1;
-	HashMap<String, JobRecord> jobs;
-	Vector<String> job_order;
+	arguments["property"] = "missing_property";
+	CHECK(MCPRuntimePropertyController::execute(arguments, result, error_code, error_message) == ERR_DOES_NOT_EXIST);
+	CHECK(error_code == "RUNTIME_PROPERTY_NOT_FOUND");
+	CHECK(error_message.contains("missing_property"));
 
-	void _prune_records();
-	Dictionary _resolve_record(const Dictionary &p_arguments, const String &p_mcp_session_id,
-			String &r_job_id, JobRecord *&r_record);
+	memdelete(parent);
+}
 
-public:
-	MCPRuntimeJobService(MCPRuntimeDebuggerGateway *p_runtime_gateway, const Config &p_config);
-
-	Dictionary start(const Dictionary &p_arguments, const String &p_mcp_session_id, Dictionary p_payload);
-	Dictionary get_status(const Dictionary &p_arguments, const String &p_mcp_session_id);
-	Dictionary finish(const Dictionary &p_arguments, const String &p_mcp_session_id, const String &p_operation,
-			const StringName &p_terminal_result_field = StringName());
-	void process();
-	void release_session(const String &p_mcp_session_id);
-	void release_all(const String &p_reason);
-};
+} // namespace TestMCPRuntimePropertyController

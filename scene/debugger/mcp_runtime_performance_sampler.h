@@ -40,6 +40,7 @@ class MCPRuntimePerformanceSampler : public Object {
 
 	struct Job {
 		String id;
+		String name;
 		String mcp_session_id;
 		String state = "running";
 		String failure;

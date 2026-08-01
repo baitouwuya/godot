@@ -72,6 +72,9 @@ MCPRuntimeJobService::Config _performance_job_config() {
 	config.stale_message = "Runtime performance job belongs to a different runtime generation or debugger session.";
 	config.limit_code = "PERFORMANCE_JOB_LIMIT";
 	config.limit_message = "The editor performance job record limit is full.";
+	config.alias_argument = "name";
+	config.alias_in_use_code = "PERFORMANCE_JOB_NAME_IN_USE";
+	config.alias_in_use_message = "A running performance job already uses this name in the current MCP session.";
 	config.max_records = 32;
 	return config;
 }

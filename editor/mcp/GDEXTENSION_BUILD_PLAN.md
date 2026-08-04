@@ -1,10 +1,10 @@
 # Deterministic GDExtension Build Flow
 
-This is the implementation contract for the future embedded GDExtension build tools. It deliberately does not expose an arbitrary shell command through MCP.
+This is the implementation contract for the embedded GDExtension build tools. It deliberately does not expose an arbitrary shell command through MCP.
 
 ## Public tools
 
-- `godot.gdextension.build`: validate a project-local `.gdextension`, select a registered builder profile, build into a staging directory, validate the produced library, and optionally reload or restart.
+- `godot.gdextension.build`: validate a project-local `.gdextension`, select the fixed godot-cpp SCons profile, validate the produced library, and optionally reload or restart.
 - `godot.gdextension.build_status`: return bounded progress and the latest structured diagnostics for a job owned by the calling MCP session.
 - `godot.gdextension.build_cancel`: cancel a queued or running build when the selected process gateway supports cancellation.
 
@@ -12,13 +12,9 @@ The build input is a closed object. The extension path is a project-local `res:/
 
 ## Ownership and state machine
 
-`MCPGDExtensionProvider` owns registration only. `MCPGDExtensionBuildService` validates arguments and composes these collaborators:
+`MCPGDExtensionProvider` owns registration only. `MCPGDExtensionBuildService` owns the project-scoped job state, validates arguments, launches the fixed command, drains bounded output, parses diagnostics, verifies the artifact, and performs reload/restart. `MCPGDExtensionToolUtils` is the single source for closed input/output schemas, and `MCPProjectRevision` supplies the stale-project guard shared with `godot.project.apply`.
 
-1. `MCPGDExtensionProfileRegistry` maps a profile to an executable, fixed argument vector, environment allowlist, and expected artifact layout.
-2. `MCPProcessGateway` owns one asynchronous child process, bounded stdout/stderr tails, deadlines, and cancellation. It must provide the same behavior on macOS, Linux, and Windows; `OS::execute_with_pipe` is not sufficient on Unix.
-3. `MCPGDExtensionArtifactStore` stages output, validates the platform library selected by the `.gdextension`, atomically replaces the destination, and retains one rollback copy.
-4. `MCPGDExtensionDiagnosticParser` converts compiler output into `{severity, code, message, file, line, column}` records with bounded counts and text.
-5. `MCPGDExtensionRuntimeProbe` checks `GDExtensionManager` load/reload status, ClassDB registration, and a minimal runtime smoke scene.
+The process gateway is the engine's asynchronous `OS::execute_with_pipe` API. It is available on the supported Unix and Windows drivers, so the editor thread is not blocked while stdout/stderr are drained. The service keeps one active build per project, caps retained jobs and output, and kills jobs at the deadline or on cancellation.
 
 Jobs are session-owned, generation-aware, and project-scoped. A project may have one active build. Terminal states are `succeeded`, `failed`, `cancelled`, and `needs_restart`; `needs_restart` is a successful artifact update for an extension that cannot be safely reloaded in the current editor process.
 
@@ -33,7 +29,7 @@ The service must validate the complete request before starting a process:
 - capture the project revision and builder input manifest;
 - enforce output, timeout, process, and diagnostic budgets.
 
-The artifact is written to staging first. Replacement happens only after exit code, library existence, file size, architecture, and checksum checks pass. Any failure reports `rollbackComplete` and leaves the previous library active.
+The builder writes to its normal godot-cpp output location. Before starting, the service retains one rollback copy of an existing library. Replacement is accepted only after exit code, library existence, file size, and checksum checks pass; failures report a stable `failure.code` plus `rollbackComplete` and restore the previous library when possible.
 
 ## Reload and restart policy
 
@@ -41,4 +37,6 @@ After a successful replacement, `reload=if_reloadable` calls `GDExtensionManager
 
 ## Verification gates
 
-Every build result includes the input revision, builder profile, artifact checksum, reload status, and probe report. The focused provider tests cover profile rejection, stale revision, process failure, diagnostics, staging rollback, reload refusal, and session isolation. The real stdio smoke covers a successful build with a tiny fixture extension and a failed build with structured diagnostics. Architecture, build-surface, manifest, full `[MCP]*`, and Host/stdio smoke remain required before merging.
+Every build result includes the input revision, builder profile, artifact checksum, reload status, bounded diagnostics, and (for terminal failures) a stable failure code. The focused provider tests cover the closed schema contract; the real stdio smoke covers invalid profile/path and missing-builder responses. Architecture, build-surface, manifest, full `[MCP]*`, and Host/stdio smoke remain required before merging.
+
+Future extraction points are intentionally narrow: a profile registry can replace the current fixed SCons argument builder, and an artifact store can add staging/architecture checks without changing the MCP tool contract.

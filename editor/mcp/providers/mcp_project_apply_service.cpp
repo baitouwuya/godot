@@ -29,13 +29,13 @@
 
 #include "mcp_project_apply_service.h"
 
+#include "mcp_project_revision.h"
 #include "mcp_project_settings_mutation.h"
 #include "mcp_tool_utils.h"
 #include "mcp_variant_codec.h"
 
 #include "core/config/project_settings.h"
 #include "core/io/file_access.h"
-#include "core/io/json.h"
 #include "core/templates/vector.h"
 
 namespace {
@@ -141,56 +141,12 @@ static bool _verify_saved_project(const String &p_path, String &r_error) {
 	return true;
 }
 
-static String _project_revision(ProjectSettings *p_settings) {
-	// Hash both the persisted bytes and a canonical representation of the
-	// current in-memory settings. The latter keeps save=false mutations visible
-	// while the former detects edits made to project.godot outside the editor.
-	String canonical;
-	const String project_path = p_settings->get_resource_path().path_join("project.godot");
-	canonical += "path=" + p_settings->get_resource_path() + "\n";
-	canonical += "disk=" + (FileAccess::exists(project_path) ? FileAccess::get_sha256(project_path) : String()) + "\n";
-
-	List<PropertyInfo> properties;
-	p_settings->get_property_list(&properties, true);
-	Vector<String> names;
-	for (const PropertyInfo &property : properties) {
-		if (!(property.usage & PROPERTY_USAGE_STORAGE) || !p_settings->has_setting(property.name)) {
-			continue;
-		}
-		names.push_back(property.name);
-	}
-	names.sort();
-
-	String previous_name;
-	for (const String &name : names) {
-		if (name == previous_name) {
-			continue;
-		}
-		previous_name = name;
-
-		const Variant value = p_settings->get_setting(name);
-		Variant encoded_value;
-		String encoding_error;
-		String value_text;
-		if (MCPVariantCodec::encode(value, encoded_value, &encoding_error) == OK) {
-			value_text = JSON::stringify(encoded_value, "", true, true);
-		} else {
-			// ProjectSettings storage should normally be encodable; retain a
-			// deterministic type/value fallback for uncommon native values.
-			value_text = "unencodable:" + Variant::get_type_name(value.get_type()) + ":" + value.stringify();
-		}
-		canonical += itos(name.length()) + ":" + name + "|" + itos(p_settings->get_order(name)) + "|" + value_text + "\n";
-	}
-
-	return canonical.sha256_text();
-}
-
 static Dictionary _save_failure(ProjectSettings *p_settings, const Vector<SettingSnapshot> &p_snapshots,
 		const String &p_message) {
 	String rollback_error;
 	const bool rollback_succeeded = _restore_snapshots(p_settings, p_snapshots, rollback_error);
 	Dictionary details;
-	details["projectRevision"] = _project_revision(p_settings);
+	details["projectRevision"] = MCPProjectRevision::compute(p_settings);
 	details["rollbackSucceeded"] = rollback_succeeded;
 	details["rollbackComplete"] = rollback_succeeded;
 	if (!rollback_error.is_empty()) {
@@ -286,7 +242,7 @@ Dictionary MCPProjectApplyService::apply(const Dictionary &p_arguments) const {
 	if (!project_settings) {
 		return MCPToolUtils::make_error_result("PROJECT_SETTINGS_UNAVAILABLE", "Project settings are unavailable.");
 	}
-	const String current_revision = _project_revision(project_settings);
+	const String current_revision = MCPProjectRevision::compute(project_settings);
 	if (has_expected_revision && expected_revision != current_revision) {
 		Dictionary details;
 		details["expectedProjectRevision"] = expected_revision;
@@ -368,7 +324,7 @@ Dictionary MCPProjectApplyService::apply(const Dictionary &p_arguments) const {
 	Dictionary result;
 	result["changed"] = changed;
 	result["saved"] = save;
-	result["projectRevision"] = _project_revision(project_settings);
+	result["projectRevision"] = MCPProjectRevision::compute(project_settings);
 	result["verified"] = verified;
 	result["operations"] = operation_results;
 	return MCPToolUtils::make_success_result(result);

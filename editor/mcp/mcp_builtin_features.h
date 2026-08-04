@@ -42,6 +42,7 @@ class MCPDebugProvider;
 class MCPEditorProvider;
 class MCPEditorUIProvider;
 class MCPFileProvider;
+class MCPGDExtensionProvider;
 class MCPGDScriptProvider;
 class MCPGDScriptSessionManager;
 class MCPHarnessProvider;
@@ -73,6 +74,7 @@ class MCPBuiltinFeatures {
 	MCPEditorProvider *editor_provider = nullptr;
 	MCPEditorUIProvider *editor_ui_provider = nullptr;
 	MCPFileProvider *file_provider = nullptr;
+	MCPGDExtensionProvider *gdextension_provider = nullptr;
 	MCPSceneProvider *scene_provider = nullptr;
 	MCPNodeProvider *node_provider = nullptr;
 	MCPNodeStructureProvider *node_structure_provider = nullptr;

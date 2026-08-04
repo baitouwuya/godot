@@ -262,7 +262,20 @@ def run_smoke(binary: str, timeout: int, keep_temporary_projects: bool) -> None:
             tool_call(5, "godot.project.get_setting", {"name": "application/config/name"}),
             tool_call(6, "godot.class.search", {"query": "SmokeUndocumentedClass", "source": "script", "limit": 5}),
             tool_call(7, "godot.class.get_documentation", {"name": "SmokeUndocumentedClass"}),
+            tool_call(8, "godot.gdextension.build", {"extensionPath": "res://missing.gdextension", "profile": "invalid"}),
+            tool_call(9, "godot.gdextension.build", {"extensionPath": "res://missing.gdextension"}),
+            tool_call(10, "godot.gdextension.build", {"extensionPath": "res://smoke.gdextension"}),
         ]
+        write_text(
+            project_a / "smoke.gdextension",
+            """[configuration]
+entry_symbol = "smoke_init"
+compatibility_minimum = 4.1
+
+[libraries]
+macos.debug = "res://libsmoke.dylib"
+""",
+        )
         surface = invoke_stdio(runner, project_a, discovery_a["protocolVersion"], surface_requests, "stdio surface")
         tools_list = surface[2]["result"]["tools"]
         require(isinstance(tools_list, list), "tools/list did not return a tools array.")
@@ -305,6 +318,9 @@ def run_smoke(binary: str, timeout: int, keep_temporary_projects: bool) -> None:
         require(bool(docs_error.get("isError")), "class/get_documentation unexpectedly succeeded for an undocumented script class.")
         error = docs_error.get("structuredContent", {}).get("error", {})
         require(error.get("code") == "USE_SCRIPT_DOCUMENTATION_TOOL", "class documentation returned the wrong guidance code.")
+        require(tool_error_code(surface, 8, "gdextension/build invalid profile") == "INVALID_ARGUMENTS", "gdextension/build accepted an invalid profile.")
+        require(tool_error_code(surface, 9, "gdextension/build missing extension") == "INVALID_EXTENSION_PATH", "gdextension/build returned the wrong missing-path code.")
+        require(tool_error_code(surface, 10, "gdextension/build missing SConstruct") == "BUILDER_NOT_FOUND", "gdextension/build returned the wrong missing-builder code.")
 
         apply_probe = invoke_stdio(
             runner,

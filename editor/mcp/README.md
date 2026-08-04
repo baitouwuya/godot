@@ -102,6 +102,17 @@ Snapshots are isolated per MCP session. Targets are revalidated against the visi
 
 The current Variant wire format is version 2: JSON-native values remain native, while Godot-only values use `{"__godot_mcp_encoded_variant__": ...}`. Readers should treat that envelope key as the version discriminator and preserve its nested structure. Version 1 scalar prefixes (`i:`, `f:`, `s:`, `sn:`, and `np:`) remain accepted on input for migration, but new clients must not infer value types from arbitrary strings or emit prefixed output.
 
+## Build godot-cpp GDExtensions
+
+The embedded GDExtension tools provide a deterministic build boundary for AI agents:
+
+- `godot.gdextension.build` accepts only a project-local `.gdextension`, `debug`/`release`, bounded timeout, clean flag, reload policy, and optional project revision.
+- The service resolves the current platform library, finds the nearest project-local `SConstruct`, and runs the fixed `scons -C <root> platform=<platform> target=template_<profile>` command. Clients cannot provide executables or shell fragments.
+- `godot.gdextension.build_status` returns bounded stdout/stderr tails, structured diagnostics, artifact SHA-256, reload state, rollback state, and a stable terminal `failure.code` when a build fails.
+- `godot.gdextension.build_cancel` terminates a running job and restores the previous library when possible. Jobs are isolated to the MCP session and only one build runs per project.
+
+Use `godot.project.apply` to update extension-related project settings, call `godot.project.save` when persistence is intended, then pass the returned `projectRevision` to `godot.gdextension.build` as `expectedProjectRevision`. A successful build verifies the selected library before optional extension reload or runtime restart; `needs_restart` is explicit when the editor cannot reload the extension in place.
+
 ## Tool Result Compatibility
 
 Successful tools return both `structuredContent` and a JSON `TextContent` block. This duplication follows the MCP structured-content backward-compatibility recommendation for clients that only consume `content`. Results up to 16 KiB mirror the complete JSON; larger results keep the authoritative payload only in `structuredContent` and emit a bounded text summary instead. Transport adapters must forward these fields unchanged.

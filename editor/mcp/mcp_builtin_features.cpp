@@ -38,6 +38,7 @@
 #include "providers/mcp_editor_provider.h"
 #include "providers/mcp_editor_ui_provider.h"
 #include "providers/mcp_file_provider.h"
+#include "providers/mcp_gdextension_provider.h"
 #include "providers/mcp_harness_provider.h"
 #include "providers/mcp_input_map_provider.h"
 #include "providers/mcp_node_provider.h"
@@ -91,6 +92,7 @@ Error MCPBuiltinFeatures::initialize() {
 	editor_provider = memnew(MCPEditorProvider);
 	editor_ui_provider = memnew(MCPEditorUIProvider);
 	file_provider = memnew(MCPFileProvider);
+	gdextension_provider = memnew(MCPGDExtensionProvider);
 	scene_provider = memnew(MCPSceneProvider);
 	node_provider = memnew(MCPNodeProvider);
 	node_structure_provider = memnew(MCPNodeStructureProvider);
@@ -116,6 +118,7 @@ Error MCPBuiltinFeatures::initialize() {
 		editor_provider,
 		editor_ui_provider,
 		project_provider,
+		gdextension_provider,
 		autoload_provider,
 		input_map_provider,
 		file_provider,
@@ -223,6 +226,7 @@ void MCPBuiltinFeatures::_reset() {
 #endif
 	delete_owned(input_map_provider);
 	delete_owned(autoload_provider);
+	delete_owned(gdextension_provider);
 	delete_owned(project_provider);
 	delete_owned(node_structure_provider);
 	delete_owned(node_provider);

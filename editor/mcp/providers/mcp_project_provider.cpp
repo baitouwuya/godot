@@ -71,6 +71,8 @@ Error MCPProjectProvider::register_tools(MCPToolRegistry *p_registry, String *r_
 				MCPProjectToolUtils::set_setting_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPProjectProvider::set_setting), MCPProjectToolUtils::named_mutation_output_schema("changed", "Whether the project setting changed.", true) },
 		{ "godot.project.erase_setting", "Erase a project setting through editor undo/redo without saving project.godot.",
 				MCPProjectToolUtils::setting_name_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPProjectProvider::erase_setting), MCPProjectToolUtils::named_mutation_output_schema("erased", "Whether the project setting was erased.") },
+		{ "godot.project.apply", "Apply an ordered batch of ordinary project-setting mutations with optional save and revision checking.",
+				MCPProjectToolUtils::apply_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPProjectProvider::apply), MCPProjectToolUtils::apply_output_schema() },
 		{ "godot.project.save", "Explicitly save current project settings to project.godot.",
 				MCPToolUtils::make_object_schema(), MCPToolUtils::TOOL_DESTRUCTIVE, callable_mp(this, &MCPProjectProvider::save), MCPProjectToolUtils::save_output_schema() },
 	};
@@ -105,6 +107,10 @@ Dictionary MCPProjectProvider::set_setting(const Dictionary &p_arguments, const 
 
 Dictionary MCPProjectProvider::erase_setting(const Dictionary &p_arguments, const Dictionary &) {
 	return settings_service.erase_setting(p_arguments);
+}
+
+Dictionary MCPProjectProvider::apply(const Dictionary &p_arguments, const Dictionary &) {
+	return apply_service.apply(p_arguments);
 }
 
 Dictionary MCPProjectProvider::save(const Dictionary &, const Dictionary &) {

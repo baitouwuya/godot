@@ -28,6 +28,8 @@
 /**************************************************************************/
 
 #include "core/config/project_settings.h"
+#include "core/io/dir_access.h"
+#include "core/io/file_access.h"
 #include "core/mcp/mcp_tool_registry.h"
 #include "core/os/os.h"
 #include "editor/mcp/mcp_editor_feature.h"
@@ -35,6 +37,7 @@
 #include "editor/mcp/providers/mcp_project_provider.h"
 #include "editor/mcp/providers/mcp_variant_codec.h"
 #include "tests/test_macros.h"
+#include "tests/test_utils.h"
 
 TEST_FORCE_LINK(test_mcp_project_provider);
 
@@ -75,6 +78,35 @@ public:
 	}
 };
 
+class ScopedProjectResourcePath {
+	String previous_path;
+	String resource_path;
+
+public:
+	ScopedProjectResourcePath() {
+		previous_path = TestProjectSettingsInternalsAccessor::resource_path();
+		resource_path = TestUtils::get_temp_path("mcp_project_apply_" + String::num_int64(OS::get_singleton()->get_process_id()) + "_" + String::num_uint64(OS::get_singleton()->get_ticks_usec()));
+		DirAccess::make_dir_recursive_absolute(resource_path);
+		TestProjectSettingsInternalsAccessor::resource_path() = resource_path;
+	}
+
+	~ScopedProjectResourcePath() {
+		const String project_file = resource_path.path_join("project.godot");
+		if (FileAccess::exists(project_file)) {
+			DirAccess::remove_absolute(project_file);
+		}
+		TestProjectSettingsInternalsAccessor::resource_path() = previous_path;
+	}
+
+	bool is_valid() const {
+		return !resource_path.is_empty();
+	}
+
+	String project_file() const {
+		return resource_path.path_join("project.godot");
+	}
+};
+
 TEST_CASE("[MCP][Provider] Project and Autoload features preserve tool order") {
 	MCPToolRegistry registry;
 	MCPEditorFeatureSet feature_set;
@@ -85,11 +117,12 @@ TEST_CASE("[MCP][Provider] Project and Autoload features preserve tool order") {
 	REQUIRE(feature_set.register_tools(&registry) == OK);
 
 	const PackedStringArray names = registry.get_tool_names();
-	REQUIRE(names.size() == 8);
+	REQUIRE(names.size() == 9);
 	CHECK(names[0] == "godot.project.get_settings");
-	CHECK(names[4] == "godot.project.save");
-	CHECK(names[5] == "godot.autoload.get_all");
-	CHECK(names[7] == "godot.autoload.remove");
+	CHECK(names[4] == "godot.project.apply");
+	CHECK(names[5] == "godot.project.save");
+	CHECK(names[6] == "godot.autoload.get_all");
+	CHECK(names[8] == "godot.autoload.remove");
 
 	feature_set.unregister_tools();
 	CHECK(registry.get_tool_names().is_empty());
@@ -103,11 +136,12 @@ TEST_CASE("[MCP][Provider] Project settings are bounded, typed, undo-aware, and 
 	REQUIRE(provider->register_tools(&registry) == OK);
 	CHECK(provider->register_tools(&registry) == ERR_ALREADY_IN_USE);
 	const PackedStringArray names = registry.get_tool_names();
-	REQUIRE(names.size() == 5);
+	REQUIRE(names.size() == 6);
 	CHECK(names[0] == "godot.project.get_settings");
-	CHECK(names[4] == "godot.project.save");
+	CHECK(names[4] == "godot.project.apply");
+	CHECK(names[5] == "godot.project.save");
 	const Array definitions = registry.get_tool_definitions();
-	REQUIRE(definitions.size() == 5);
+	REQUIRE(definitions.size() == 6);
 	const Dictionary settings_output = Dictionary(definitions[0]).get("outputSchema", Dictionary());
 	CHECK(Dictionary(settings_output.get("properties", Dictionary())).has("settings"));
 	CHECK(PackedStringArray(settings_output.get("required", PackedStringArray())).has("matchedCount"));
@@ -119,7 +153,19 @@ TEST_CASE("[MCP][Provider] Project settings are bounded, typed, undo-aware, and 
 	CHECK(PackedStringArray(setting_output.get("required", PackedStringArray())).has("encodable"));
 	const Dictionary set_output = Dictionary(definitions[2]).get("outputSchema", Dictionary());
 	CHECK(PackedStringArray(set_output.get("required", PackedStringArray())).has("changed"));
-	const Dictionary save_output = Dictionary(definitions[4]).get("outputSchema", Dictionary());
+	const Dictionary apply_input = Dictionary(definitions[4]).get("inputSchema", Dictionary());
+	CHECK_FALSE(bool(apply_input.get("additionalProperties", true)));
+	CHECK(Dictionary(apply_input.get("properties", Dictionary())).has("settings"));
+	const Dictionary apply_output = Dictionary(definitions[4]).get("outputSchema", Dictionary());
+	CHECK_FALSE(bool(apply_output.get("additionalProperties", true)));
+	CHECK(PackedStringArray(apply_output.get("required", PackedStringArray())).has("projectRevision"));
+	const Dictionary apply_output_revision = Dictionary(apply_output.get("properties", Dictionary())).get("projectRevision", Dictionary());
+	CHECK(apply_output_revision.get("type", String()) == "string");
+	CHECK(apply_output_revision.get("pattern", String()) == "^[0-9a-f]{64}$");
+	const Dictionary apply_input_revision = Dictionary(apply_input.get("properties", Dictionary())).get("expectedProjectRevision", Dictionary());
+	CHECK(apply_input_revision.get("type", String()) == "string");
+	CHECK(apply_input_revision.get("pattern", String()) == "^[0-9a-fA-F]{64}$");
+	const Dictionary save_output = Dictionary(definitions[5]).get("outputSchema", Dictionary());
 	CHECK(PackedStringArray(save_output.get("required", PackedStringArray())).has("path"));
 
 	const String suffix = String::num_int64(OS::get_singleton()->get_process_id()) + "_" + String::num_uint64(OS::get_singleton()->get_ticks_usec());
@@ -170,6 +216,131 @@ TEST_CASE("[MCP][Provider] Project settings are bounded, typed, undo-aware, and 
 
 	provider->unregister_tools();
 	CHECK(registry.get_tool_names().is_empty());
+	memdelete(provider);
+}
+
+TEST_CASE("[MCP][Provider] Project apply batches ordinary settings and rejects partial managed mutations") {
+	MCPToolRegistry registry;
+	MCPProjectProvider *provider = memnew(MCPProjectProvider);
+	REQUIRE(provider->register_tools(&registry) == OK);
+
+	const String suffix = String::num_int64(OS::get_singleton()->get_process_id()) + "_" + String::num_uint64(OS::get_singleton()->get_ticks_usec());
+	const String first_name = "mcp_test/apply_first_" + suffix;
+	const String second_name = "mcp_test/apply_second_" + suffix;
+	ScopedSettingRestore restore_first(first_name);
+	ScopedSettingRestore restore_second(second_name);
+	MCPToolCallContext context;
+
+	Variant encoded_first;
+	Variant encoded_second;
+	REQUIRE(MCPVariantCodec::encode(Variant(17), encoded_first) == OK);
+	REQUIRE(MCPVariantCodec::encode(Variant("batch"), encoded_second) == OK);
+	Dictionary set_first;
+	set_first["operation"] = "set";
+	set_first["name"] = first_name;
+	set_first["value"] = encoded_first;
+	Dictionary set_second;
+	set_second["operation"] = "set";
+	set_second["name"] = second_name;
+	set_second["value"] = encoded_second;
+	Array operations;
+	operations.push_back(set_first);
+	operations.push_back(set_second);
+	Dictionary arguments;
+	arguments["settings"] = operations;
+	arguments["save"] = false;
+
+	MCPToolRegistry::CallResult call_result = registry.call_tool("godot.project.apply", arguments, context);
+	REQUIRE_FALSE(bool(call_result.result.get("isError", false)));
+	const Dictionary result = call_result.result.get("structuredContent", Dictionary());
+	CHECK(bool(result.get("changed", false)));
+	CHECK_FALSE(bool(result.get("saved", true)));
+	CHECK_FALSE(bool(result.get("verified", true)));
+	CHECK(ProjectSettings::get_singleton()->get_setting(first_name) == Variant(17));
+	CHECK(ProjectSettings::get_singleton()->get_setting(second_name) == Variant("batch"));
+	CHECK(Array(result.get("operations", Array())).size() == 2);
+
+	Dictionary erase_first;
+	erase_first["operation"] = "erase";
+	erase_first["name"] = first_name;
+	Array erase_operations;
+	erase_operations.push_back(erase_first);
+	Dictionary erase_arguments;
+	erase_arguments["settings"] = erase_operations;
+	erase_arguments["save"] = false;
+	erase_arguments["expectedProjectRevision"] = result.get("projectRevision", Variant());
+	call_result = registry.call_tool("godot.project.apply", erase_arguments, context);
+	REQUIRE_FALSE(bool(call_result.result.get("isError", false)));
+	const Dictionary erase_result = call_result.result.get("structuredContent", Dictionary());
+	CHECK(erase_result.get("projectRevision", Variant()) != result.get("projectRevision", Variant()));
+	CHECK_FALSE(ProjectSettings::get_singleton()->has_setting(first_name));
+	Dictionary stale_arguments = erase_arguments.duplicate(true);
+	stale_arguments["expectedProjectRevision"] = result.get("projectRevision", Variant());
+	call_result = registry.call_tool("godot.project.apply", stale_arguments, context);
+	CHECK(_error_code(call_result) == "PROJECT_REVISION_CONFLICT");
+
+	Dictionary invalid_set;
+	invalid_set["operation"] = "set";
+	invalid_set["name"] = "mcp_test/should_not_apply_" + suffix;
+	invalid_set["value"] = encoded_first;
+	Dictionary managed_set;
+	managed_set["operation"] = "set";
+	managed_set["name"] = "input/mcp_apply_managed_" + suffix;
+	managed_set["value"] = encoded_first;
+	Array invalid_operations;
+	invalid_operations.push_back(invalid_set);
+	invalid_operations.push_back(managed_set);
+	Dictionary invalid_arguments;
+	invalid_arguments["settings"] = invalid_operations;
+	invalid_arguments["save"] = false;
+	call_result = registry.call_tool("godot.project.apply", invalid_arguments, context);
+	CHECK(_error_code(call_result) == "MANAGED_SETTING");
+	CHECK_FALSE(ProjectSettings::get_singleton()->has_setting(invalid_set["name"]));
+
+	provider->unregister_tools();
+	memdelete(provider);
+}
+
+TEST_CASE("[MCP][Provider] Project apply detects revision conflicts and verifies saves") {
+	MCPToolRegistry registry;
+	MCPProjectProvider *provider = memnew(MCPProjectProvider);
+	REQUIRE(provider->register_tools(&registry) == OK);
+
+	const String suffix = String::num_int64(OS::get_singleton()->get_process_id()) + "_" + String::num_uint64(OS::get_singleton()->get_ticks_usec());
+	const String setting_name = "mcp_test/apply_save_" + suffix;
+	ScopedSettingRestore restore(setting_name);
+	MCPToolCallContext context;
+	Variant encoded_value;
+	REQUIRE(MCPVariantCodec::encode(Variant("saved"), encoded_value) == OK);
+	Dictionary operation;
+	operation["operation"] = "set";
+	operation["name"] = setting_name;
+	operation["value"] = encoded_value;
+	Array operations;
+	operations.push_back(operation);
+
+	Dictionary conflict_arguments;
+	conflict_arguments["settings"] = operations;
+	conflict_arguments["save"] = false;
+	conflict_arguments["expectedProjectRevision"] = String("0").repeat(64);
+	MCPToolRegistry::CallResult call_result = registry.call_tool("godot.project.apply", conflict_arguments, context);
+	CHECK(_error_code(call_result) == "PROJECT_REVISION_CONFLICT");
+	CHECK_FALSE(ProjectSettings::get_singleton()->has_setting(setting_name));
+
+	ScopedProjectResourcePath temporary_project;
+	REQUIRE(temporary_project.is_valid());
+	Dictionary save_arguments;
+	save_arguments["settings"] = operations;
+	call_result = registry.call_tool("godot.project.apply", save_arguments, context);
+	REQUIRE_FALSE(bool(call_result.result.get("isError", false)));
+	const Dictionary save_result = call_result.result.get("structuredContent", Dictionary());
+	CHECK(bool(save_result.get("changed", false)));
+	CHECK(bool(save_result.get("saved", false)));
+	CHECK(bool(save_result.get("verified", false)));
+	CHECK(FileAccess::exists(temporary_project.project_file()));
+	CHECK(FileAccess::open(temporary_project.project_file(), FileAccess::READ).is_valid());
+
+	provider->unregister_tools();
 	memdelete(provider);
 }
 

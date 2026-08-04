@@ -1,9 +1,10 @@
 /**************************************************************************/
-/*  mcp_project_provider.h                                                */
+/*  mcp_project_apply_service.h                                           */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
 /*                        https://godotengine.org                         */
+/**************************************************************************/
 /* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
 /* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
 /*                                                                        */
@@ -29,31 +30,9 @@
 
 #pragma once
 
-#include "../mcp_editor_feature.h"
-#include "mcp_project_apply_service.h"
-#include "mcp_project_settings_service.h"
-
-#include "core/object/object.h"
 #include "core/variant/dictionary.h"
 
-class MCPToolRegistry;
-
-class MCPProjectProvider : public Object, public MCPEditorFeature {
+class MCPProjectApplyService {
 public:
-	~MCPProjectProvider();
-
-	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr) override;
-	void unregister_tools() override;
-
-	Dictionary get_settings(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary get_setting(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary set_setting(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary erase_setting(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary apply(const Dictionary &p_arguments, const Dictionary &p_context);
-	Dictionary save(const Dictionary &p_arguments, const Dictionary &p_context);
-
-private:
-	MCPToolRegistry *tool_registry = nullptr;
-	MCPProjectSettingsService settings_service;
-	MCPProjectApplyService apply_service;
+	Dictionary apply(const Dictionary &p_arguments) const;
 };

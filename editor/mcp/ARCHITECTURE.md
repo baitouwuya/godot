@@ -61,7 +61,7 @@ The Tool Registry is the runtime source of truth for definitions and handlers. E
 - output validation for successful `structuredContent`;
 - session and generation checks when it owns live editor or runtime state.
 
-`tests/editor/mcp/data/mcp_tool_manifest.json` is an ordered compatibility snapshot, not generated registration code. The static manifest validator checks its shape. The cross-platform smoke test compares it with `tools/list` from a real running Host; that comparison detects missing, added, or reordered tools.
+`tests/editor/mcp/data/mcp_tool_manifest.json` is an ordered compatibility snapshot, not generated registration code. The static manifest validator checks its shape. The cross-platform smoke test compares it with `tools/list` from a real running Host; that comparison detects missing, added, or reordered tools. Any tool-surface change must update the manifest, its expected count, and the real stdio smoke in the same change.
 
 JSON integers remain integers. Values that can exceed interoperable JSON integer precision, such as runtime object IDs, use decimal strings. Godot-only Variant values use the explicit MCP Variant codec rather than private string prefixes.
 

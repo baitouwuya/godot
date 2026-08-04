@@ -189,7 +189,7 @@ def wait_for_file(host: HostProcess, relative_path: str, timeout: int) -> None:
 def run_smoke(binary: str, timeout: int, keep_temporary_projects: bool) -> None:
     manifest_path = Path(__file__).parent / "data/mcp_tool_manifest.json"
     expected_tools = load_tool_manifest(manifest_path)
-    require(len(expected_tools) == 106, f"Tool manifest must contain 106 tools, found {len(expected_tools)}.")
+    require(len(expected_tools) == 107, f"Tool manifest must contain 107 tools, found {len(expected_tools)}.")
 
     temporary_root = Path(tempfile.mkdtemp(prefix="godot-mcp-python-smoke-"))
     project_a = temporary_root / "project-a"
@@ -254,7 +254,7 @@ def run_smoke(binary: str, timeout: int, keep_temporary_projects: bool) -> None:
         discovery_after_conflict = wait_for_discovery(runner, host_a, timeout)
         require(discovery_after_conflict["instanceId"] == discovery_a["instanceId"], "same-project conflict replaced the owner record.")
 
-        print("[6/9] Checking stdio JSON, 106-tool manifest, settings, classes, and scripts")
+        print("[6/9] Checking stdio JSON, 107-tool manifest, settings, classes, and scripts")
         surface_requests = [
             request(2, "tools/list", {}),
             tool_call(3, "godot.script.create", {"path": "res://mcp_smoke_created.gd", "text": INITIAL_SCRIPT_TEXT}),
@@ -273,7 +273,7 @@ def run_smoke(binary: str, timeout: int, keep_temporary_projects: bool) -> None:
         )
         require(
             actual_tools == expected_tools,
-            "tools/list did not match the ordered 106-tool manifest: "
+            "tools/list did not match the ordered 107-tool manifest: "
             f"actualCount={len(actual_tools)}, expectedCount={len(expected_tools)}, "
             f"firstMismatch={first_mismatch}, "
             f"actual={actual_tools[first_mismatch:first_mismatch + 3]!r}, "
@@ -305,6 +305,34 @@ def run_smoke(binary: str, timeout: int, keep_temporary_projects: bool) -> None:
         require(bool(docs_error.get("isError")), "class/get_documentation unexpectedly succeeded for an undocumented script class.")
         error = docs_error.get("structuredContent", {}).get("error", {})
         require(error.get("code") == "USE_SCRIPT_DOCUMENTATION_TOOL", "class documentation returned the wrong guidance code.")
+
+        apply_probe = invoke_stdio(
+            runner,
+            project_a,
+            discovery_a["protocolVersion"],
+            [
+                tool_call(
+                    70,
+                    "godot.project.apply",
+                    {
+                        "settings": [
+                            {
+                                "operation": "set",
+                                "name": "mcp/smoke_apply_probe",
+                                "value": 17,
+                            }
+                        ],
+                        "save": False,
+                    },
+                )
+            ],
+            "project apply",
+        )
+        apply_result = structured_result(apply_probe, 70, "project/apply")
+        require(apply_result.get("changed") is True, "project/apply did not report the setting change.")
+        require(apply_result.get("saved") is False, "project/apply unexpectedly saved the smoke project.")
+        revision = apply_result.get("projectRevision")
+        require(isinstance(revision, str) and len(revision) == 64 and all(character in "0123456789abcdef" for character in revision), "project/apply revision was not a lowercase SHA-256 string.")
 
         rename_prep = invoke_stdio(
             runner,

@@ -58,6 +58,7 @@
 		"godot.project.get_setting",
 		"godot.project.set_setting",
 		"godot.project.erase_setting",
+		"godot.project.apply",
 		"godot.project.save",
 		"godot.autoload.get_all",
 		"godot.autoload.add",

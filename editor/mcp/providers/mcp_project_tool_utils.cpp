@@ -46,6 +46,29 @@ static Dictionary _non_negative_integer_schema(const String &p_description) {
 	return schema;
 }
 
+static Dictionary _operation_schema(const String &p_operation) {
+	Dictionary schema = MCPToolUtils::make_property_schema("string", "Project-setting mutation operation.");
+	schema["enum"] = PackedStringArray{ p_operation };
+	return schema;
+}
+
+static Dictionary _json_variant_schema() {
+	Dictionary schema;
+	schema["description"] = "JSON-native Variant value.";
+	return schema;
+}
+
+static Dictionary _apply_operation_output_schema() {
+	Dictionary properties;
+	Dictionary operation = MCPToolUtils::make_property_schema("string", "Applied project-setting mutation operation.");
+	operation["enum"] = PackedStringArray{ "set", "erase" };
+	properties["operation"] = operation;
+	properties["name"] = MCPToolUtils::make_property_schema("string", "Affected project-setting name.");
+	properties["changed"] = MCPToolUtils::make_property_schema("boolean", "Whether this operation changed the in-memory setting.");
+	properties["value"] = _json_variant_schema();
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "operation", "name", "changed" });
+}
+
 static Dictionary _autoload_output_schema() {
 	Dictionary properties;
 	properties["name"] = MCPToolUtils::make_property_schema("string", "Autoload name.");
@@ -83,10 +106,43 @@ Dictionary setting_name_schema() {
 Dictionary set_setting_schema() {
 	Dictionary properties;
 	properties["name"] = _required_string_schema("Exact project-setting name outside special managed namespaces.");
-	Dictionary value;
-	value["description"] = "JSON-native Variant value.";
-	properties["value"] = value;
+	properties["value"] = _json_variant_schema();
 	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "name", "value" });
+}
+
+Dictionary apply_schema() {
+	Dictionary set_properties;
+	set_properties["operation"] = _operation_schema("set");
+	set_properties["name"] = _required_string_schema("Exact project-setting name outside special managed namespaces.");
+	set_properties["value"] = _json_variant_schema();
+	const Dictionary set_operation = MCPToolUtils::make_object_schema(set_properties, PackedStringArray{ "operation", "name", "value" });
+
+	Dictionary erase_properties;
+	erase_properties["operation"] = _operation_schema("erase");
+	erase_properties["name"] = _required_string_schema("Exact project-setting name outside special managed namespaces.");
+	const Dictionary erase_operation = MCPToolUtils::make_object_schema(erase_properties, PackedStringArray{ "operation", "name" });
+
+	Dictionary operation_item_properties;
+	operation_item_properties["operation"] = MCPToolUtils::make_property_schema("string", "Project-setting mutation operation.");
+	operation_item_properties["name"] = _required_string_schema("Exact project-setting name outside special managed namespaces.");
+	operation_item_properties["value"] = _json_variant_schema();
+	Dictionary operation_item = MCPToolUtils::make_object_schema(operation_item_properties, PackedStringArray(), false);
+	operation_item["oneOf"] = Array{ set_operation, erase_operation };
+	Dictionary settings = MCPToolUtils::make_property_schema("array", "Ordered non-managed project-setting mutations.");
+	settings["items"] = operation_item;
+	settings["minItems"] = 1;
+	settings["maxItems"] = 256;
+
+	Dictionary save = MCPToolUtils::make_property_schema("boolean", "Save project.godot after applying all mutations. Defaults to true.");
+	save["default"] = true;
+	Dictionary expected_revision = MCPToolUtils::make_property_schema("string", "Expected SHA-256 revision for optimistic concurrency.");
+	expected_revision["pattern"] = "^[0-9a-fA-F]{64}$";
+
+	Dictionary properties;
+	properties["settings"] = settings;
+	properties["save"] = save;
+	properties["expectedProjectRevision"] = expected_revision;
+	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "settings" });
 }
 
 Dictionary autoload_add_schema() {
@@ -152,6 +208,24 @@ Dictionary save_output_schema() {
 	properties["path"] = MCPToolUtils::make_property_schema("string", "Saved project settings path.");
 	properties["saved"] = MCPToolUtils::make_property_schema("boolean", "Whether project settings were saved.");
 	return MCPToolUtils::make_object_schema(properties, PackedStringArray{ "path", "saved" });
+}
+
+Dictionary apply_output_schema() {
+	Dictionary operations = MCPToolUtils::make_property_schema("array", "Applied project-setting mutations in input order.");
+	operations["items"] = _apply_operation_output_schema();
+	operations["minItems"] = 1;
+	operations["maxItems"] = 256;
+	Dictionary project_revision = MCPToolUtils::make_property_schema("string", "SHA-256 revision after the operation.");
+	project_revision["pattern"] = "^[0-9a-f]{64}$";
+
+	Dictionary properties;
+	properties["changed"] = MCPToolUtils::make_property_schema("boolean", "Whether any project setting changed.");
+	properties["saved"] = MCPToolUtils::make_property_schema("boolean", "Whether project.godot was saved.");
+	properties["projectRevision"] = project_revision;
+	properties["verified"] = MCPToolUtils::make_property_schema("boolean", "Whether the saved project.godot was verified readable.");
+	properties["operations"] = operations;
+	return MCPToolUtils::make_object_schema(properties,
+			PackedStringArray{ "changed", "saved", "projectRevision", "verified", "operations" });
 }
 
 Dictionary autoloads_output_schema() {

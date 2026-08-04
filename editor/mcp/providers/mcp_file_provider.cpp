@@ -106,6 +106,9 @@ Dictionary MCPFileProvider::create_file(const Dictionary &p_arguments, const Dic
 	if (path_result != OK) {
 		return MCPToolUtils::make_error_result("INVALID_PATH", path_error);
 	}
+	if (resource_path == "res://project.godot") {
+		return MCPToolUtils::make_error_result("PROJECT_FILE_MANAGED", "Use godot.project.apply or dedicated project configuration tools to update project.godot.");
+	}
 
 	const bool existed = FileAccess::exists(absolute_path);
 	if (existed && !options.overwrite) {

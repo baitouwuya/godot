@@ -180,4 +180,53 @@ TEST_CASE("[MCP][Provider] File create rejects traversal and malformed arguments
 	memdelete(provider);
 }
 
+TEST_CASE("[MCP][Provider] File create keeps project.godot under project tool control") {
+	REQUIRE(OS::get_singleton() != nullptr);
+	Error temp_error = OK;
+	Ref<DirAccess> temporary_directory = DirAccess::create_temp("mcp_file_provider_project_file", false, &temp_error);
+	REQUIRE(temp_error == OK);
+	REQUIRE(temporary_directory->make_dir("project") == OK);
+	const String project_root = temporary_directory->get_current_dir().path_join("project");
+	const String project_file = project_root.path_join("project.godot");
+
+	MCPToolRegistry registry;
+	MCPFileProvider *provider = memnew(MCPFileProvider(project_root));
+	REQUIRE(provider->register_tools(&registry) == OK);
+
+	MCPToolCallContext context;
+	Dictionary arguments;
+	arguments["path"] = "res://project.godot";
+	arguments["content"] = "[application]\nconfig/name=\"blocked\"\n";
+
+	MCPToolRegistry::CallResult call_result = registry.call_tool("godot.file.create", arguments, context);
+	REQUIRE(call_result.status == MCPToolRegistry::CALL_OK);
+	CHECK(bool(call_result.result.get("isError", false)));
+	Dictionary error = Dictionary(call_result.result.get("structuredContent", Dictionary())).get("error", Dictionary());
+	CHECK(error.get("code", String()) == "PROJECT_FILE_MANAGED");
+	CHECK(String(error.get("message", String())).contains("godot.project.apply"));
+	CHECK(String(error.get("message", String())).contains("dedicated project configuration tools"));
+	CHECK_FALSE(FileAccess::exists(project_file));
+
+	const String original_content = "[application]\nconfig/name=\"original\"\n";
+	Error open_error = OK;
+	Ref<FileAccess> file = FileAccess::open(project_file, FileAccess::WRITE, &open_error);
+	REQUIRE(open_error == OK);
+	REQUIRE(file.is_valid());
+	REQUIRE(file->store_string(original_content));
+	file->flush();
+	file.unref();
+
+	arguments["content"] = "[application]\nconfig/name=\"replacement\"\n";
+	arguments["overwrite"] = true;
+	call_result = registry.call_tool("godot.file.create", arguments, context);
+	REQUIRE(call_result.status == MCPToolRegistry::CALL_OK);
+	CHECK(bool(call_result.result.get("isError", false)));
+	error = Dictionary(call_result.result.get("structuredContent", Dictionary())).get("error", Dictionary());
+	CHECK(error.get("code", String()) == "PROJECT_FILE_MANAGED");
+	CHECK(FileAccess::get_file_as_string(project_file) == original_content);
+
+	provider->unregister_tools();
+	memdelete(provider);
+}
+
 } // namespace TestMCPFileProvider

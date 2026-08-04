@@ -224,9 +224,9 @@ void MCPGDExtensionBuildService::_finish_process(BuildRecord &r_job) {
 	r_job.artifact_sha256 = FileAccess::get_sha256(r_job.artifact_absolute_path);
 	r_job.state = "succeeded";
 	r_job.reload_status = "not_requested";
-	_cleanup_backup(r_job);
 
 	if (r_job.reload_policy == "none") {
+		_cleanup_backup(r_job);
 		return;
 	}
 	GDExtensionManager *manager = GDExtensionManager::get_singleton();
@@ -235,8 +235,25 @@ void MCPGDExtensionBuildService::_finish_process(BuildRecord &r_job) {
 	} else {
 		const GDExtensionManager::LoadStatus status = manager->reload_extension(r_job.extension_path);
 		r_job.reload_status = _load_status_name(status);
-		if (status == GDExtensionManager::LOAD_STATUS_NEEDS_RESTART || status == GDExtensionManager::LOAD_STATUS_FAILED) {
+		if (status == GDExtensionManager::LOAD_STATUS_NEEDS_RESTART) {
 			r_job.state = "needs_restart";
+		} else if (status == GDExtensionManager::LOAD_STATUS_FAILED) {
+			_rollback(r_job);
+			r_job.state = "failed";
+			if (r_job.rollback_complete) {
+				r_job.failure_code = "RELOAD_FAILED_ROLLED_BACK";
+				r_job.failure_message = "The GDExtension could not be hot-reloaded; the previous artifact state was restored.";
+				r_job.artifact_sha256 = FileAccess::exists(r_job.artifact_absolute_path) &&
+					FileAccess::get_size(r_job.artifact_absolute_path) > 0 ?
+							FileAccess::get_sha256(r_job.artifact_absolute_path) :
+							String();
+			} else {
+				r_job.failure_code = "RELOAD_FAILED_ROLLBACK_INCOMPLETE";
+				r_job.failure_message =
+					"The GDExtension could not be hot-reloaded, and restoring the previous artifact state failed.";
+				r_job.artifact_sha256 = String();
+			}
+			return;
 		}
 	}
 
@@ -250,6 +267,8 @@ void MCPGDExtensionBuildService::_finish_process(BuildRecord &r_job) {
 			}
 		}
 	}
+
+	_cleanup_backup(r_job);
 }
 
 MCPGDExtensionBuildService::BuildRecord *MCPGDExtensionBuildService::_resolve_job(const Dictionary &p_arguments,

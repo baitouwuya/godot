@@ -63,6 +63,8 @@ Error MCPProjectProvider::register_tools(MCPToolRegistry *p_registry, String *r_
 	}
 
 	const LocalVector<MCPToolUtils::ToolDescriptor> tools{
+		{ "godot.project.inspect", "Inspect the configuration revision and choose the dedicated project configuration tools before mutation.",
+				MCPProjectToolUtils::inspect_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPProjectProvider::inspect), MCPProjectToolUtils::inspect_output_schema() },
 		{ "godot.project.get_settings", "List visible project settings with bounded optional values.",
 				MCPProjectToolUtils::settings_schema(), MCPToolUtils::TOOL_READ_ONLY, callable_mp(this, &MCPProjectProvider::get_settings), MCPProjectToolUtils::settings_output_schema() },
 		{ "godot.project.get_setting", "Get one project setting and its editor metadata.",
@@ -91,6 +93,10 @@ void MCPProjectProvider::unregister_tools() {
 	}
 	tool_registry->unregister_tools_for_owner(this);
 	tool_registry = nullptr;
+}
+
+Dictionary MCPProjectProvider::inspect(const Dictionary &, const Dictionary &) {
+	return settings_service.inspect();
 }
 
 Dictionary MCPProjectProvider::get_settings(const Dictionary &p_arguments, const Dictionary &) {

@@ -54,6 +54,7 @@
 		"godot.editor.redo",
 		"godot.editor.ui.get_actions",
 		"godot.editor.ui.perform",
+		"godot.project.inspect",
 		"godot.project.get_settings",
 		"godot.project.get_setting",
 		"godot.project.set_setting",

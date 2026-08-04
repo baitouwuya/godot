@@ -34,6 +34,7 @@
 
 namespace MCPProjectToolUtils {
 
+Dictionary inspect_schema();
 Dictionary settings_schema();
 Dictionary setting_name_schema();
 Dictionary set_setting_schema();
@@ -42,6 +43,7 @@ Dictionary autoload_add_schema();
 Dictionary autoload_name_schema();
 
 Dictionary setting_output_schema(bool p_require_encoding_state);
+Dictionary inspect_output_schema();
 Dictionary settings_output_schema();
 Dictionary named_mutation_output_schema(const String &p_state_name, const String &p_state_description, bool p_include_value = false);
 Dictionary save_output_schema();

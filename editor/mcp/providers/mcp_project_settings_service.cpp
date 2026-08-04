@@ -31,10 +31,12 @@
 #include "mcp_project_settings_service.h"
 
 #include "mcp_project_settings_mutation.h"
+#include "mcp_project_revision.h"
 #include "mcp_tool_utils.h"
 #include "mcp_variant_codec.h"
 
 #include "core/config/project_settings.h"
+#include "core/io/file_access.h"
 
 namespace {
 
@@ -104,6 +106,44 @@ static PropertyInfo _find_setting_info(const String &p_name, bool &r_found) {
 }
 
 } // namespace
+
+Dictionary MCPProjectSettingsService::inspect() const {
+	ProjectSettings *settings = ProjectSettings::get_singleton();
+	if (!settings) {
+		return MCPToolUtils::make_error_result("PROJECT_SETTINGS_UNAVAILABLE", "Project settings are unavailable.");
+	}
+
+	int ordinary_setting_count = 0;
+	int managed_setting_count = 0;
+	List<PropertyInfo> properties;
+	settings->get_property_list(&properties, true);
+	for (const PropertyInfo &property : properties) {
+		if (!(property.usage & PROPERTY_USAGE_STORAGE) || !settings->has_setting(property.name)) {
+			continue;
+		}
+		if (_is_managed_setting(property.name)) {
+			managed_setting_count++;
+		} else {
+			ordinary_setting_count++;
+		}
+	}
+
+	const String project_path = settings->get_resource_path().path_join("project.godot");
+	Dictionary result;
+	result["projectPath"] = "res://project.godot";
+	result["projectRevision"] = MCPProjectRevision::compute(settings);
+	result["projectFileExists"] = FileAccess::exists(project_path);
+	result["ordinarySettingCount"] = ordinary_setting_count;
+	result["managedSettingCount"] = managed_setting_count;
+	result["dedicatedTools"] = PackedStringArray{
+		"godot.project.apply",
+		"godot.autoload.add",
+		"godot.autoload.remove",
+		"godot.input.set_action",
+		"godot.input.remove_action",
+	};
+	return MCPToolUtils::make_success_result(result);
+}
 
 Dictionary MCPProjectSettingsService::get_settings(const Dictionary &p_arguments) const {
 	const Variant prefix_value = p_arguments.get("prefix", String());

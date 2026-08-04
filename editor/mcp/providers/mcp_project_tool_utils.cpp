@@ -83,6 +83,10 @@ static Dictionary _autoload_output_schema() {
 
 namespace MCPProjectToolUtils {
 
+Dictionary inspect_schema() {
+	return MCPToolUtils::make_object_schema();
+}
+
 Dictionary settings_schema() {
 	Dictionary properties;
 	properties["prefix"] = MCPToolUtils::make_property_schema("string", "Optional project-setting name prefix.");
@@ -176,6 +180,26 @@ Dictionary setting_output_schema(bool p_require_encoding_state) {
 		required.push_back("encodable");
 	}
 	return MCPToolUtils::make_object_schema(properties, required, true);
+}
+
+Dictionary inspect_output_schema() {
+	Dictionary project_revision = MCPToolUtils::make_property_schema("string", "Current SHA-256 project configuration revision for optimistic concurrency.");
+	project_revision["pattern"] = "^[0-9a-f]{64}$";
+	Dictionary ordinary_setting_count = _non_negative_integer_schema("Stored settings managed by godot.project.apply.");
+	Dictionary managed_setting_count = _non_negative_integer_schema("Stored settings owned by dedicated Autoload or Input Map tools.");
+	Dictionary dedicated_tools = MCPToolUtils::make_property_schema("array", "Tools that must be used for managed configuration namespaces.");
+	dedicated_tools["items"] = MCPToolUtils::make_property_schema("string", "Canonical MCP tool name.");
+	dedicated_tools["minItems"] = 1;
+
+	Dictionary properties;
+	properties["projectPath"] = MCPToolUtils::make_property_schema("string", "Canonical project settings file path.");
+	properties["projectRevision"] = project_revision;
+	properties["projectFileExists"] = MCPToolUtils::make_property_schema("boolean", "Whether project.godot currently exists on disk.");
+	properties["ordinarySettingCount"] = ordinary_setting_count;
+	properties["managedSettingCount"] = managed_setting_count;
+	properties["dedicatedTools"] = dedicated_tools;
+	return MCPToolUtils::make_object_schema(properties,
+			PackedStringArray{ "projectPath", "projectRevision", "projectFileExists", "ordinarySettingCount", "managedSettingCount", "dedicatedTools" });
 }
 
 Dictionary settings_output_schema() {

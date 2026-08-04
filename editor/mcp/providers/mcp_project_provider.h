@@ -45,6 +45,7 @@ public:
 	Error register_tools(MCPToolRegistry *p_registry, String *r_error = nullptr) override;
 	void unregister_tools() override;
 
+	Dictionary inspect(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary get_settings(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary get_setting(const Dictionary &p_arguments, const Dictionary &p_context);
 	Dictionary set_setting(const Dictionary &p_arguments, const Dictionary &p_context);

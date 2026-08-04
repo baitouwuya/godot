@@ -34,6 +34,7 @@
 
 class MCPProjectSettingsService {
 public:
+	Dictionary inspect() const;
 	Dictionary get_settings(const Dictionary &p_arguments) const;
 	Dictionary get_setting(const Dictionary &p_arguments) const;
 	Dictionary set_setting(const Dictionary &p_arguments) const;

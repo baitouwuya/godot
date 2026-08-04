@@ -8,6 +8,7 @@
 #include "mcp_gdextension_build_service.h"
 
 #include "mcp_path_utils.h"
+#include "mcp_gdextension_profile_registry.h"
 #include "mcp_project_revision.h"
 #include "mcp_tool_utils.h"
 
@@ -69,22 +70,6 @@ static String _find_sconstruct_root(const String &p_start_directory, const Strin
 		directory = parent;
 	}
 	return String();
-}
-
-static String _platform_argument() {
-#if defined(MACOS_ENABLED)
-	return "macos";
-#elif defined(WINDOWS_ENABLED)
-	return "windows";
-#elif defined(LINUXBSD_ENABLED)
-	return "linux";
-#elif defined(ANDROID_ENABLED)
-	return "android";
-#elif defined(IOS_ENABLED)
-	return "ios";
-#else
-	return String();
-#endif
 }
 
 static void _append_diagnostic(Array &r_diagnostics, const String &p_line, const String &p_severity) {
@@ -323,10 +308,12 @@ Dictionary MCPGDExtensionBuildService::build(const Dictionary &p_arguments, cons
 	if (profile_value.get_type() != Variant::STRING || clean_value.get_type() != Variant::BOOL || reload_value.get_type() != Variant::STRING) {
 		return _error("INVALID_ARGUMENTS", "profile and reload must be strings, and clean must be boolean.");
 	}
-	const String profile = profile_value;
+	const String profile_name = profile_value;
 	const String reload_policy = reload_value;
-	if (profile != "debug" && profile != "release") {
-		return _error("INVALID_ARGUMENTS", "profile must be debug or release.");
+	MCPGDExtensionProfileRegistry::Profile profile;
+	String profile_error;
+	if (!MCPGDExtensionProfileRegistry::resolve(profile_name, profile, &profile_error)) {
+		return _error("INVALID_ARGUMENTS", profile_error);
 	}
 	if (reload_policy != "none" && reload_policy != "if_reloadable" && reload_policy != "restart_runtime") {
 		return _error("INVALID_ARGUMENTS", "reload must be none, if_reloadable, or restart_runtime.");
@@ -369,12 +356,12 @@ Dictionary MCPGDExtensionBuildService::build(const Dictionary &p_arguments, cons
 		return _error("INVALID_EXTENSION_CONFIG", "Could not parse the .gdextension file: " + String(error_names[config_error]));
 	}
 	const String library_path = GDExtensionLibraryLoader::find_extension_library(extension_path, config,
-			[profile](const String &p_feature) {
+			[&profile](const String &p_feature) {
 				if (p_feature == "debug") {
-					return profile != "release";
+					return !profile.release;
 				}
 				if (p_feature == "release") {
-					return profile == "release";
+					return profile.release;
 				}
 				return OS::get_singleton()->has_feature(p_feature);
 			});
@@ -397,7 +384,7 @@ Dictionary MCPGDExtensionBuildService::build(const Dictionary &p_arguments, cons
 	job.extension_path = extension_path;
 	job.artifact_path = artifact_path;
 	job.artifact_absolute_path = artifact_absolute_path;
-	job.profile = profile;
+	job.profile = profile.name;
 	job.reload_policy = reload_policy;
 	job.project_revision = project_revision;
 	job.started_usec = OS::get_singleton()->get_ticks_usec();
@@ -417,7 +404,7 @@ Dictionary MCPGDExtensionBuildService::build(const Dictionary &p_arguments, cons
 		_cleanup_backup(job);
 		return _error("BUILDER_NOT_FOUND", "No SConstruct was found between the .gdextension directory and the project root.");
 	}
-	const String platform = _platform_argument();
+	const String platform = MCPGDExtensionProfileRegistry::current_platform();
 	if (platform.is_empty()) {
 		_cleanup_backup(job);
 		return _error("UNSUPPORTED_PLATFORM", "The current editor platform has no registered godot-cpp SCons profile.");
@@ -429,7 +416,7 @@ Dictionary MCPGDExtensionBuildService::build(const Dictionary &p_arguments, cons
 		arguments.push_back("-c");
 	}
 	arguments.push_back("platform=" + platform);
-	arguments.push_back("target=" + String(profile == "release" ? "template_release" : "template_debug"));
+	arguments.push_back("target=" + profile.scons_target);
 	const Dictionary process = OS::get_singleton()->execute_with_pipe("scons", arguments, false);
 	if (!process.has("pid") || !process.has("stdio") || !process.has("stderr")) {
 		_cleanup_backup(job);

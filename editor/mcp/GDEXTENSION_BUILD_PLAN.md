@@ -12,7 +12,7 @@ The build input is a closed object. The extension path is a project-local `res:/
 
 ## Ownership and state machine
 
-`MCPGDExtensionProvider` owns registration only. `MCPGDExtensionBuildService` owns the project-scoped job state, validates arguments, launches the fixed command, drains bounded output, parses diagnostics, verifies the artifact, and performs reload/restart. `MCPGDExtensionToolUtils` is the single source for closed input/output schemas, and `MCPProjectRevision` supplies the stale-project guard shared with `godot.project.apply`.
+`MCPGDExtensionProvider` owns registration only. `MCPGDExtensionBuildService` owns the project-scoped job state, validates arguments, launches the selected command, drains bounded output, parses diagnostics, verifies the artifact, and performs reload/restart. `MCPGDExtensionProfileRegistry` is the narrow allowlist for profile names, SCons targets, and platform selection; `MCPGDExtensionToolUtils` derives its profile enum from that registry. `MCPProjectRevision` supplies the stale-project guard shared with `godot.project.apply`.
 
 The process gateway is the engine's asynchronous `OS::execute_with_pipe` API. It is available on the supported Unix and Windows drivers, so the editor thread is not blocked while stdout/stderr are drained. The service keeps one active build per project, caps retained jobs and output, and kills jobs at the deadline or on cancellation.
 

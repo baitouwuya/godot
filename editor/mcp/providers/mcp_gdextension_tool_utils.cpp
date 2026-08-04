@@ -30,6 +30,7 @@
 
 #include "mcp_gdextension_tool_utils.h"
 
+#include "mcp_gdextension_profile_registry.h"
 #include "mcp_tool_utils.h"
 
 namespace {
@@ -47,7 +48,7 @@ Dictionary _extension_path_schema(const String &p_description) {
 
 Dictionary _profile_schema(const String &p_description, bool p_include_default = false) {
 	Dictionary schema = MCPToolUtils::make_property_schema("string", p_description);
-	schema["enum"] = PackedStringArray{ "debug", "release" };
+	schema["enum"] = MCPGDExtensionProfileRegistry::names();
 	if (p_include_default) {
 		schema["default"] = "debug";
 	}
